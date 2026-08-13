@@ -1,0 +1,39 @@
+name: Prepress Analyzer CI
+
+on:
+  pull_request:
+    paths:
+      - 'yesod-prepress-analyzer/**'
+      - '.github/workflows/prepress-analyzer-ci.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'yesod-prepress-analyzer/**'
+      - '.github/workflows/prepress-analyzer-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: yesod-prepress-analyzer
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: yesod-prepress-analyzer/pyproject.toml
+      - name: Install qpdf and LittleCMS
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y qpdf liblcms2-2
+      - name: Install package and test dependencies
+        run: python -m pip install -e '.[dev]'
+      - name: Lint
+        run: ruff check app tests scripts
+      - name: Test
+        run: pytest --cov=app --cov-report=term-missing
+      - name: Build container
+        run: docker build -t yesod-prepress-analyzer:test .

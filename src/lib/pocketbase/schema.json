@@ -1,0 +1,508 @@
+{
+  "generatedAt": "2026-08-13T16:00:00.816Z",
+  "collections": [
+    {
+      "name": "users",
+      "type": "auth",
+      "apiRules": {
+        "list": "id = @request.auth.id",
+        "view": "id = @request.auth.id",
+        "create": "",
+        "update": "id = @request.auth.id",
+        "delete": "id = @request.auth.id"
+      },
+      "fields": [
+        {
+          "name": "name",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "avatar",
+          "type": "file",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": [
+            "onCreate"
+          ]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": [
+            "onCreate",
+            "onUpdate"
+          ]
+        }
+      ],
+      "indexes": [
+        "CREATE UNIQUE INDEX `idx_tokenKey__pb_users_auth_` ON `users` (`tokenKey`)",
+        "CREATE UNIQUE INDEX `idx_email__pb_users_auth_` ON `users` (`email`) WHERE `email` != ''"
+      ]
+    },
+    {
+      "name": "project_files",
+      "type": "base",
+      "apiRules": {
+        "list": "user = @request.auth.id",
+        "view": "user = @request.auth.id",
+        "create": "user = @request.auth.id",
+        "update": "user = @request.auth.id",
+        "delete": "user = @request.auth.id"
+      },
+      "fields": [
+        {
+          "name": "project",
+          "type": "text",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "version",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "original_name",
+          "type": "text",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "safe_name",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "extension",
+          "type": "text",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "mime_type",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "size_bytes",
+          "type": "number",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "sha256",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "user",
+          "type": "relation",
+          "required": true,
+          "system": false,
+          "collectionRef": "users"
+        },
+        {
+          "name": "storage_path",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "status",
+          "type": "select",
+          "required": true,
+          "system": false,
+          "selectValues": [
+            "pending",
+            "uploading",
+            "uploaded",
+            "validating",
+            "ready_for_analysis",
+            "failed",
+            "removed"
+          ]
+        },
+        {
+          "name": "error",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "is_primary",
+          "type": "bool",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "file",
+          "type": "file",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": [
+            "onCreate"
+          ]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": [
+            "onCreate",
+            "onUpdate"
+          ]
+        }
+      ],
+      "indexes": [
+        "CREATE INDEX idx_project_files_project ON project_files (project)",
+        "CREATE INDEX idx_project_files_status ON project_files (status)",
+        "CREATE INDEX idx_project_files_user ON project_files (user)"
+      ]
+    },
+    {
+      "name": "analysis_jobs",
+      "type": "base",
+      "apiRules": {
+        "list": "user = @request.auth.id",
+        "view": "user = @request.auth.id",
+        "create": "user = @request.auth.id",
+        "update": "user = @request.auth.id",
+        "delete": "user = @request.auth.id"
+      },
+      "fields": [
+        {
+          "name": "project",
+          "type": "text",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "file",
+          "type": "relation",
+          "required": true,
+          "system": false,
+          "collectionRef": "project_files"
+        },
+        {
+          "name": "version",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "production_profile",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "user",
+          "type": "relation",
+          "required": true,
+          "system": false,
+          "collectionRef": "users"
+        },
+        {
+          "name": "status",
+          "type": "select",
+          "required": true,
+          "system": false,
+          "selectValues": [
+            "queued",
+            "preparing",
+            "downloading",
+            "validating",
+            "extracting",
+            "analyzing",
+            "generating_preview",
+            "completed",
+            "completed_with_warnings",
+            "failed",
+            "cancelled"
+          ]
+        },
+        {
+          "name": "progress",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "current_step",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "external_job_id",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "started_at",
+          "type": "date",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "completed_at",
+          "type": "date",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "error_code",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "error_message",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "retry_count",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": [
+            "onCreate"
+          ]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": [
+            "onCreate",
+            "onUpdate"
+          ]
+        }
+      ],
+      "indexes": [
+        "CREATE INDEX idx_analysis_jobs_status ON analysis_jobs (status)",
+        "CREATE INDEX idx_analysis_jobs_file ON analysis_jobs (file)",
+        "CREATE INDEX idx_analysis_jobs_project ON analysis_jobs (project)",
+        "CREATE INDEX idx_analysis_jobs_user ON analysis_jobs (user)"
+      ]
+    },
+    {
+      "name": "analysis_issues",
+      "type": "base",
+      "apiRules": {
+        "list": "user = @request.auth.id",
+        "view": "user = @request.auth.id",
+        "create": "user = @request.auth.id",
+        "update": "user = @request.auth.id",
+        "delete": "user = @request.auth.id"
+      },
+      "fields": [
+        {
+          "name": "analysis",
+          "type": "relation",
+          "required": true,
+          "system": false,
+          "collectionRef": "analysis_jobs"
+        },
+        {
+          "name": "project",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "file",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "project_files"
+        },
+        {
+          "name": "user",
+          "type": "relation",
+          "required": true,
+          "system": false,
+          "collectionRef": "users"
+        },
+        {
+          "name": "rule_code",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "title",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "category",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "severity",
+          "type": "select",
+          "required": false,
+          "system": false,
+          "selectValues": [
+            "critical",
+            "warning",
+            "informational"
+          ]
+        },
+        {
+          "name": "status",
+          "type": "select",
+          "required": false,
+          "system": false,
+          "selectValues": [
+            "pending",
+            "approved",
+            "rejected",
+            "ignored",
+            "corrected"
+          ]
+        },
+        {
+          "name": "page",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "object_id",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "coordinates",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "found_value",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "expected_value",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "description",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "recommendation",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "confidence",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "source",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "can_auto_correct",
+          "type": "bool",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "decision_reason",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "decision_user",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "users"
+        },
+        {
+          "name": "decision_at",
+          "type": "date",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": [
+            "onCreate"
+          ]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": [
+            "onCreate",
+            "onUpdate"
+          ]
+        }
+      ],
+      "indexes": [
+        "CREATE INDEX idx_analysis_issues_analysis ON analysis_issues (analysis)",
+        "CREATE INDEX idx_analysis_issues_file ON analysis_issues (file)",
+        "CREATE INDEX idx_analysis_issues_project ON analysis_issues (project)",
+        "CREATE INDEX idx_analysis_issues_severity ON analysis_issues (severity)",
+        "CREATE INDEX idx_analysis_issues_status ON analysis_issues (status)"
+      ]
+    }
+  ]
+}
