@@ -1,5 +1,5 @@
-import pb from '@/lib/pocketbase/client'
-import { getErrorMessage } from '@/lib/pocketbase/errors'
+import supabase from '@/lib/supabase/client'
+import { getErrorMessage, normalizeRow, unwrap } from '@/lib/supabase/errors'
 
 export interface RegisterFileParams {
   project: string
@@ -29,61 +29,87 @@ export interface ProjectFileRecord {
   updated: string
 }
 
+const BUCKET = 'project-files'
+
+function toRecord(row: Record<string, unknown>): ProjectFileRecord {
+  const rec = normalizeRow<ProjectFileRecord & { storage_path: string }>(row)
+  // `file` mantém o contrato antigo: preenchido somente quando há PDF enviado
+  return { ...rec, file: rec.storage_path }
+}
+
 export const projectFilesService = {
   async registerFile(params: RegisterFileParams): Promise<{ id: string; status: string }> {
-    return pb.send('/backend/v1/project-files/register', {
-      method: 'POST',
-      body: JSON.stringify(params),
-      headers: { 'Content-Type': 'application/json' },
-    })
+    const row = unwrap(
+      await supabase.rpc('register_project_file', {
+        p_project: params.project,
+        p_original_name: params.original_name,
+        p_extension: params.extension,
+        p_mime_type: params.mime_type,
+        p_size_bytes: params.size_bytes,
+        p_version: params.version ?? '',
+      }),
+    ) as { id: string; status: string }
+    return { id: row.id, status: row.status }
   },
 
   async uploadFile(recordId: string, file: File): Promise<void> {
-    const formData = new FormData()
-    formData.append('file', file)
-    await pb.collection('project_files').update(recordId, formData)
+    const { data: auth } = await supabase.auth.getUser()
+    const userId = auth.user?.id
+    if (!userId) throw new Error('Autenticação necessária')
+
+    const path = `${userId}/${recordId}.pdf`
+    const { error: upErr } = await supabase.storage
+      .from(BUCKET)
+      .upload(path, file, { contentType: 'application/pdf', upsert: true })
+    if (upErr) throw upErr
+
+    const { error } = await supabase
+      .from('project_files')
+      .update({ storage_path: path, status: 'uploaded' })
+      .eq('id', recordId)
+    if (error) throw error
   },
 
   async confirmFile(recordId: string): Promise<ProjectFileRecord> {
-    return pb.send(`/backend/v1/project-files/${recordId}/confirm`, {
-      method: 'POST',
-    })
+    return toRecord(unwrap(await supabase.rpc('confirm_project_file', { p_id: recordId })))
   },
 
   async listFiles(projectId: string): Promise<ProjectFileRecord[]> {
-    return pb.send(`/backend/v1/project-files/by-project/${projectId}`, {
-      method: 'GET',
-    })
+    const rows = unwrap(
+      await supabase
+        .from('project_files')
+        .select('*')
+        .eq('project', projectId)
+        .neq('status', 'removed')
+        .order('created', { ascending: false }),
+    )
+    return rows.map(toRecord)
   },
 
   async getFile(recordId: string): Promise<ProjectFileRecord> {
-    return pb.send(`/backend/v1/project-files/${recordId}`, {
-      method: 'GET',
-    })
+    return toRecord(
+      unwrap(await supabase.from('project_files').select('*').eq('id', recordId).single()),
+    )
   },
 
   async removeFile(recordId: string): Promise<void> {
-    await pb.send(`/backend/v1/project-files/${recordId}`, {
-      method: 'DELETE',
-    })
+    const { error } = await supabase
+      .from('project_files')
+      .update({ status: 'removed' })
+      .eq('id', recordId)
+    if (error) throw error
   },
 
   async setPrimaryFile(recordId: string): Promise<void> {
-    await pb.send(`/backend/v1/project-files/${recordId}/set-primary`, {
-      method: 'PATCH',
-    })
+    unwrap(await supabase.rpc('set_primary_project_file', { p_id: recordId }))
   },
 
-  getFileUrl(record: { id: string; file: string }): string {
+  /** URL assinada (1h) para abrir/baixar o PDF privado. */
+  async getFileUrl(record: { file: string }): Promise<string> {
     if (!record.file) return ''
-    try {
-      return pb.files.getUrl(
-        { id: record.id, collectionId: 'project_files', collectionName: 'project_files' } as any,
-        record.file,
-      )
-    } catch {
-      return `${pb.baseUrl}/api/files/project_files/${record.id}/${record.file}`
-    }
+    const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(record.file, 3600)
+    if (error) throw error
+    return data.signedUrl
   },
 
   getErrorMessage(error: unknown): string {

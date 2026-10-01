@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import pb from '@/lib/pocketbase/client'
 import {
   analysisJobsService,
   type AnalysisJob,
@@ -7,7 +6,7 @@ import {
 } from '@/services/analysisJobsService'
 import { analysisIssuesService } from '@/services/analysisIssuesService'
 import { useRealtime } from '@/hooks/use-realtime'
-import { getErrorMessage } from '@/lib/pocketbase/errors'
+import { getErrorMessage } from '@/lib/supabase/errors'
 
 const FINAL_STATES = ['completed', 'completed_with_warnings', 'failed', 'cancelled']
 const POLL_INTERVAL = 10000
@@ -28,10 +27,8 @@ export function useAnalysisJob(fileId: string | null) {
       return
     }
     try {
-      const record = await pb
-        .collection('analysis_jobs')
-        .getFirstListItem(`file = "${fileId}"`, { sort: '-created' })
-      const jobData = record as unknown as AnalysisJob
+      const jobData = await analysisJobsService.getLatestJobForFile(fileId)
+      if (!jobData) throw new Error('no job')
       setJob(jobData)
       jobIdRef.current = jobData.id
       const issuesData = await analysisJobsService.getAnalysisIssues(jobData.id)

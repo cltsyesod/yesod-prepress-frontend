@@ -1,4 +1,4 @@
-import pb from '@/lib/pocketbase/client'
+import supabase from '@/lib/supabase/client'
 
 const FIXTURE_STEPS = [
   { status: 'preparing', progress: 10, current_step: 'Preparando análise' },
@@ -105,12 +105,57 @@ function checkDevAccess(): void {
   }
 }
 
-async function sendCallback(payload: Record<string, unknown>): Promise<void> {
-  await pb.send('/backend/v1/analyzer/callback', {
-    method: 'POST',
-    body: JSON.stringify(payload),
-    headers: { 'Content-Type': 'application/json' },
-  })
+const RUNNING = ['preparing', 'downloading', 'validating', 'extracting', 'analyzing', 'generating_preview']
+const TERMINAL = ['completed', 'completed_with_warnings', 'failed', 'cancelled']
+
+// Em dev, simula o callback do analisador escrevendo direto nas tabelas (RLS: o usuário é dono).
+// Em produção, quem faz isso é a Edge Function `analyzer-callback`.
+async function sendCallback(payload: Record<string, any>): Promise<void> {
+  const analysisId = payload.analysisId as string
+  const patch: Record<string, unknown> = {}
+  if (payload.status) {
+    patch.status = payload.status
+    if (RUNNING.includes(payload.status)) patch.started_at = new Date().toISOString()
+    if (TERMINAL.includes(payload.status)) patch.completed_at = new Date().toISOString()
+  }
+  if (payload.progress !== undefined) patch.progress = payload.progress
+  if (payload.currentStep) patch.current_step = payload.currentStep
+  if (payload.errorCode) patch.error_code = payload.errorCode
+  if (payload.errorMessage) patch.error_message = payload.errorMessage
+
+  const { data: job, error } = await supabase
+    .from('analysis_jobs')
+    .update(patch)
+    .eq('id', analysisId)
+    .select()
+    .single()
+  if (error) throw error
+
+  if (Array.isArray(payload.issues) && payload.issues.length > 0) {
+    const rows = payload.issues.map((i: any) => ({
+      analysis: analysisId,
+      project: job.project,
+      file: job.file,
+      user_id: job.user_id,
+      rule_code: i.ruleCode || '',
+      title: i.title || '',
+      category: i.category || '',
+      severity: i.severity || 'informational',
+      status: i.status || 'pending',
+      page: i.page || 0,
+      object_id: i.objectId || '',
+      coordinates: typeof i.coordinates === 'string' ? i.coordinates : JSON.stringify(i.coordinates ?? ''),
+      found_value: i.foundValue || '',
+      expected_value: i.expectedValue || '',
+      description: i.description || '',
+      recommendation: i.recommendation || '',
+      confidence: i.confidence || 0,
+      source: i.source || 'external_analyzer',
+      can_auto_correct: i.canAutoCorrect || false,
+    }))
+    const { error: issueErr } = await supabase.from('analysis_issues').insert(rows)
+    if (issueErr) throw issueErr
+  }
 }
 
 export async function runDevFixture(
@@ -198,14 +243,14 @@ export async function runDevFixtureFailure(
 }
 
 export async function findLatestJobId(fileId: string): Promise<string | null> {
-  try {
-    const record = await pb
-      .collection('analysis_jobs')
-      .getFirstListItem(`file = "${fileId}"`, { sort: '-created' })
-    return record.id
-  } catch {
-    return null
-  }
+  const { data } = await supabase
+    .from('analysis_jobs')
+    .select('id')
+    .eq('file', fileId)
+    .order('created', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  return data?.id ?? null
 }
 
 if (import.meta.env.DEV) {

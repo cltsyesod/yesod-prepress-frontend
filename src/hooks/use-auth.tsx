@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react'
-import pb from '@/lib/pocketbase/client'
+import supabase from '@/lib/supabase/client'
+import { mapSupabaseUser } from '@/services/authService'
 import type { User } from '@/types'
 
 interface AuthContextType {
@@ -12,72 +13,39 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
-function mapPbUser(record: any): User {
-  return {
-    id: record.id,
-    name: record.name || record.email || 'Usuário',
-    email: record.email || '',
-    avatarUrl: '',
-    company: 'Yesod Automation',
-    plan: 'Plano Profissional',
-    role: 'Operador',
-  }
-}
-
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
-  const [isAuthenticated, setIsAuthenticated] = useState(pb.authStore.isValid)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     localStorage.removeItem('yesod_prepress_user')
 
-    const init = async () => {
-      if (pb.authStore.isValid && pb.authStore.record) {
-        try {
-          await pb.collection('users').authRefresh()
-          setUser(mapPbUser(pb.authStore.record))
-          setIsAuthenticated(true)
-        } catch {
-          pb.authStore.clear()
-          setUser(null)
-          setIsAuthenticated(false)
-        }
-      } else {
-        pb.authStore.clear()
-        setUser(null)
-        setIsAuthenticated(false)
-      }
+    supabase.auth.getSession().then(({ data }) => {
+      setUser(data.session?.user ? mapSupabaseUser(data.session.user) : null)
       setLoading(false)
-    }
-    init()
+    })
 
-    const unsub = pb.authStore.onChange((_token, record) => {
-      if (pb.authStore.isValid && record) {
-        setUser(mapPbUser(record))
-        setIsAuthenticated(true)
-      } else {
-        setUser(null)
-        setIsAuthenticated(false)
-      }
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ? mapSupabaseUser(session.user) : null)
     })
 
     return () => {
-      unsub()
+      sub.subscription.unsubscribe()
     }
   }, [])
 
   const signIn = async (email: string, pass: string) => {
-    const authData = await pb.collection('users').authWithPassword(email, pass)
-    setUser(mapPbUser(authData.record))
-    setIsAuthenticated(true)
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password: pass })
+    if (error) throw error
+    setUser(mapSupabaseUser(data.user))
   }
 
   const signOut = async () => {
-    pb.authStore.clear()
+    await supabase.auth.signOut()
     setUser(null)
-    setIsAuthenticated(false)
   }
+
+  const isAuthenticated = user !== null
 
   return (
     <AuthContext.Provider value={{ user, isAuthenticated, loading, signIn, signOut }}>
