@@ -1,4 +1,5 @@
-import pb from '@/lib/pocketbase/client'
+import type { User as SupabaseUser } from '@supabase/supabase-js'
+import supabase from '@/lib/supabase/client'
 import { User } from '@/types'
 
 export const DEMO_USER: User = {
@@ -11,35 +12,32 @@ export const DEMO_USER: User = {
   role: 'Operador',
 }
 
+export function mapSupabaseUser(user: SupabaseUser): User {
+  const email = user.email || ''
+  return {
+    id: user.id,
+    name: (user.user_metadata?.name as string) || email || 'Usuário',
+    email,
+    avatarUrl: '',
+    company: 'Yesod Automation',
+    plan: 'Plano Profissional',
+    role: 'Operador',
+  }
+}
+
 export const authService = {
   async login(email: string, password: string): Promise<User> {
-    const authData = await pb.collection('users').authWithPassword(email, password)
-    return {
-      id: authData.record.id,
-      name: authData.record.name || authData.record.email,
-      email: authData.record.email,
-      avatarUrl: '',
-      company: 'Yesod Automation',
-      plan: 'Plano Profissional',
-      role: 'Operador',
-    }
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+    if (error) throw error
+    return mapSupabaseUser(data.user)
   },
 
   async logout(): Promise<void> {
-    pb.authStore.clear()
+    await supabase.auth.signOut()
   },
 
-  getCurrentUser(): User | null {
-    if (!pb.authStore.isValid || !pb.authStore.record) return null
-    const record = pb.authStore.record as any
-    return {
-      id: record.id,
-      name: record.name || record.email,
-      email: record.email,
-      avatarUrl: '',
-      company: 'Yesod Automation',
-      plan: 'Plano Profissional',
-      role: 'Operador',
-    }
+  async getCurrentUser(): Promise<User | null> {
+    const { data } = await supabase.auth.getUser()
+    return data.user ? mapSupabaseUser(data.user) : null
   },
 }

@@ -1,5 +1,5 @@
-import pb from '@/lib/pocketbase/client'
-import { getErrorMessage } from '@/lib/pocketbase/errors'
+import supabase from '@/lib/supabase/client'
+import { getErrorMessage, normalizeRow, unwrap } from '@/lib/supabase/errors'
 import type { ProductionProfile } from '@/types'
 
 export type AnalysisJobStatus =
@@ -77,60 +77,67 @@ export interface AnalysisIssue {
   updated: string
 }
 
-export interface ExternalAnalyzerPayload {
-  analysisId: string
-  projectId: string
-  fileId: string
-  versionId: string
-  productionProfile: {
-    id: string
-    rules: unknown[]
-    colorModeExpected: string
-    minimumResolutionDpi: number
-    minimumBleedMm: number
-    minimumSafetyMarginMm: number
-    requiresCutLayer: boolean
-  }
-  callbackUrl: string
-}
-
 export interface StartAnalysisParams {
   productionProfile: ProductionProfile | { id: string; rules?: unknown[] }
   version?: string
 }
 
+export const toJob = (row: Record<string, unknown>) => normalizeRow<AnalysisJob>(row)
+export const toIssue = (row: Record<string, unknown>) => normalizeRow<AnalysisIssue>(row)
+
 export const analysisJobsService = {
-  async startAnalysis(
-    fileId: string,
-    params: StartAnalysisParams,
-  ): Promise<ExternalAnalyzerPayload> {
-    return pb.send(`/backend/v1/files/${fileId}/analyze`, {
-      method: 'POST',
-      body: JSON.stringify(params),
-      headers: { 'Content-Type': 'application/json' },
-    })
+  async startAnalysis(fileId: string, params: StartAnalysisParams): Promise<AnalysisJob> {
+    const profile = params.productionProfile as { id?: string; name?: string }
+    return toJob(
+      unwrap(
+        await supabase.rpc('start_analysis', {
+          p_file: fileId,
+          p_production_profile: profile.id || profile.name || '',
+          p_version: params.version ?? null,
+        }),
+      ),
+    )
+  },
+
+  async getLatestJobForFile(fileId: string): Promise<AnalysisJob | null> {
+    const { data, error } = await supabase
+      .from('analysis_jobs')
+      .select('*')
+      .eq('file', fileId)
+      .order('created', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (error) throw error
+    return data ? toJob(data) : null
   },
 
   async getAnalysis(analysisId: string): Promise<AnalysisJob> {
-    return pb.send(`/backend/v1/analyses/${analysisId}`, { method: 'GET' })
+    return toJob(unwrap(await supabase.from('analysis_jobs').select('*').eq('id', analysisId).single()))
   },
 
   async getAnalysisStatus(analysisId: string): Promise<AnalysisJobStatusResponse> {
-    return pb.send(`/backend/v1/analyses/${analysisId}/status`, { method: 'GET' })
+    return this.getAnalysis(analysisId)
   },
 
   async getAnalysisIssues(analysisId: string): Promise<AnalysisIssue[]> {
-    return pb.send(`/backend/v1/analyses/${analysisId}/issues`, { method: 'GET' })
+    const rows = unwrap(
+      await supabase
+        .from('analysis_issues')
+        .select('*')
+        .eq('analysis', analysisId)
+        .order('created', { ascending: false }),
+    )
+    return rows.map(toIssue)
   },
 
   async retryAnalysis(
     analysisId: string,
   ): Promise<{ id: string; status: string; retry_count: number }> {
-    return pb.send(`/backend/v1/analyses/${analysisId}/retry`, { method: 'POST' })
+    return toJob(unwrap(await supabase.rpc('retry_analysis', { p_id: analysisId })))
   },
 
   async cancelAnalysis(analysisId: string): Promise<{ id: string; status: string }> {
-    return pb.send(`/backend/v1/analyses/${analysisId}/cancel`, { method: 'POST' })
+    return toJob(unwrap(await supabase.rpc('cancel_analysis', { p_id: analysisId })))
   },
 
   getErrorMessage(error: unknown): string {

@@ -1,21 +1,22 @@
 import { useEffect, useRef } from 'react'
-import type { RecordModel, RecordSubscription } from 'pocketbase'
 
-import pb from '@/lib/pocketbase/client'
+import supabase from '@/lib/supabase/client'
+import { normalizeRow } from '@/lib/supabase/errors'
+
+export interface RealtimeEvent<TRecord = Record<string, unknown>> {
+  action: 'create' | 'update' | 'delete'
+  record: TRecord
+}
 
 /**
- * Hook for real-time subscriptions to a PocketBase collection.
- * ALWAYS use this hook instead of subscribing inline.
- * Uses the per-listener UnsubscribeFunc so multiple components
- * can safely subscribe to the same collection without conflicts.
- *
- * Generic over the record type: pass your collection's interface as
- * `useRealtime<MyRecord>(...)` to get a typed subscription payload
- * instead of `unknown`.
+ * Hook para assinar mudanças em tempo real de uma tabela do Supabase.
+ * SEMPRE use este hook em vez de assinar diretamente.
+ * Cada chamada cria seu próprio canal, então vários componentes podem
+ * assinar a mesma tabela sem conflito.
  */
-export function useRealtime<TRecord extends RecordModel = RecordModel>(
-  collectionName: string,
-  callback: (data: RecordSubscription<TRecord>) => void,
+export function useRealtime<TRecord = Record<string, unknown>>(
+  table: string,
+  callback: (data: RealtimeEvent<TRecord>) => void,
   enabled: boolean = true,
 ) {
   const callbackRef = useRef(callback)
@@ -24,29 +25,20 @@ export function useRealtime<TRecord extends RecordModel = RecordModel>(
   useEffect(() => {
     if (!enabled) return
 
-    let unsubscribeFn: (() => Promise<void>) | undefined
-    let cancelled = false
-
-    pb.collection<TRecord>(collectionName)
-      .subscribe('*', (e) => {
-        callbackRef.current(e)
+    const channel = supabase
+      .channel(`rt-${table}-${Math.random().toString(36).slice(2)}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table }, (payload) => {
+        const action =
+          payload.eventType === 'INSERT' ? 'create' : payload.eventType === 'DELETE' ? 'delete' : 'update'
+        const row = (payload.eventType === 'DELETE' ? payload.old : payload.new) as Record<string, unknown>
+        callbackRef.current({ action, record: normalizeRow<TRecord>(row) })
       })
-      .then((fn) => {
-        if (cancelled) {
-          fn().catch(() => {})
-        } else {
-          unsubscribeFn = fn
-        }
-      })
-      .catch(() => {})
+      .subscribe()
 
     return () => {
-      cancelled = true
-      if (unsubscribeFn) {
-        unsubscribeFn().catch(() => {})
-      }
+      supabase.removeChannel(channel)
     }
-  }, [collectionName, enabled])
+  }, [table, enabled])
 }
 
 export default useRealtime

@@ -13,7 +13,6 @@ import {
 } from 'lucide-react'
 import { cn, formatFileSize } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
-import pb from '@/lib/pocketbase/client'
 import { projectFilesService } from '@/services/projectFilesService'
 import { useRealtime } from '@/hooks/use-realtime'
 import { activityService } from '@/services/activityService'
@@ -52,10 +51,7 @@ export function FilesTab({ project }: FilesTabProps) {
 
   const loadFiles = useCallback(async () => {
     try {
-      const records = await pb.collection('project_files').getFullList({
-        filter: `project = "${project.id}" && status != "removed"`,
-        sort: '-created',
-      })
+      const records = await projectFilesService.listFiles(project.id)
       setFiles(records)
       setError(false)
     } catch {
@@ -160,12 +156,12 @@ export function FilesTab({ project }: FilesTabProps) {
     }
   }
 
-  const getFileUrl = (record: any): string => {
-    if (!record.file) return ''
+  const openFile = async (record: any) => {
     try {
-      return pb.files.getUrl(record, record.file)
+      const url = await projectFilesService.getFileUrl(record)
+      if (url) window.open(url, '_blank', 'noopener,noreferrer')
     } catch {
-      return ''
+      /* intentionally ignored */
     }
   }
 
@@ -328,15 +324,15 @@ export function FilesTab({ project }: FilesTabProps) {
               </div>
               <div className="flex items-center gap-1 shrink-0">
                 {file.file && file.status === 'ready_for_analysis' && (
-                  <a href={getFileUrl(file)} target="_blank" rel="noopener noreferrer">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 text-slate-400 hover:text-slate-600"
-                    >
-                      <Download className="h-3.5 w-3.5" />
-                    </Button>
-                  </a>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => openFile(file)}
+                    className="h-7 w-7 text-slate-400 hover:text-slate-600"
+                    title="Baixar PDF"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                  </Button>
                 )}
                 {!file.is_primary && file.status === 'ready_for_analysis' && (
                   <Button
