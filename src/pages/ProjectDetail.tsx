@@ -13,20 +13,28 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { FolderX, AlertCircle, RotateCcw } from 'lucide-react'
 import { projectService } from '@/services/projectService'
+import { projectFilesService, type ProjectFileRecord } from '@/services/projectFilesService'
+import { useRealtime } from '@/hooks/use-realtime'
 import type { Project } from '@/types'
 
 export default function ProjectDetailPage() {
   const { id } = useParams()
   const [project, setProject] = useState<Project | null>(null)
+  const [primaryFile, setPrimaryFile] = useState<ProjectFileRecord | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
 
-  const loadProject = useCallback(async () => {
-    setLoading(true)
+  const loadProjectData = useCallback(async () => {
+    if (!id) return
     setError(false)
     try {
-      const p = await projectService.getProject(id || '')
+      const [p, files] = await Promise.all([
+        projectService.getProject(id),
+        projectFilesService.getProjectFiles(id).catch(() => []),
+      ])
       setProject(p)
+      const primary = files.find((f) => f.is_primary) || files[0] || null
+      setPrimaryFile(primary)
     } catch {
       setError(true)
     } finally {
@@ -35,8 +43,21 @@ export default function ProjectDetailPage() {
   }, [id])
 
   useEffect(() => {
-    loadProject()
-  }, [loadProject])
+    setLoading(true)
+    loadProjectData()
+  }, [loadProjectData])
+
+  useRealtime('projects', () => {
+    loadProjectData()
+  })
+
+  useRealtime('project_files', () => {
+    loadProjectData()
+  })
+
+  useRealtime('analysis_jobs', () => {
+    loadProjectData()
+  })
 
   if (loading) {
     return (
@@ -76,7 +97,7 @@ export default function ProjectDetailPage() {
           <p className="text-sm text-slate-500 max-w-sm mb-4">
             Ocorreu um erro ao carregar os dados do projeto.
           </p>
-          <Button onClick={loadProject} variant="outline" className="text-xs gap-1.5">
+          <Button onClick={loadProjectData} variant="outline" className="text-xs gap-1.5">
             <RotateCcw className="h-3.5 w-3.5" /> Tentar novamente
           </Button>
         </div>
@@ -145,7 +166,7 @@ export default function ProjectDetailPage() {
           <OverviewTab project={project} analysisSummary={analysisSummary} />
         </TabsContent>
         <TabsContent value="analysis">
-          <AnalysisTab project={project} />
+          <AnalysisTab project={project} file={primaryFile} />
         </TabsContent>
         <TabsContent value="files">
           <FilesTab project={project} />
