@@ -1,5 +1,8 @@
 import supabase from '@/lib/supabase/client'
 import { getErrorMessage, normalizeRow, unwrap } from '@/lib/supabase/errors'
+import type { ProjectFile } from '@/types'
+
+export type ProjectFileRecord = ProjectFile
 
 export interface RegisterFileParams {
   project: string
@@ -10,34 +13,163 @@ export interface RegisterFileParams {
   size_bytes: number
 }
 
-export interface ProjectFileRecord {
-  id: string
-  project: string
-  version: string
-  original_name: string
-  safe_name: string
-  extension: string
-  mime_type: string
-  size_bytes: number
-  sha256: string
-  user: string
-  status: string
-  error: string
-  is_primary: boolean
-  file: string
-  created: string
-  updated: string
+const PRIMARY_BUCKET = 'pdfs'
+const FALLBACK_BUCKET = 'project-files'
+
+async function calculateSHA256(file: File): Promise<string> {
+  try {
+    const buffer = await file.arrayBuffer()
+    const hashBuffer = await crypto.subtle.digest('SHA-256', buffer)
+    const hashArray = Array.from(new Uint8Array(hashBuffer))
+    return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('')
+  } catch {
+    return ''
+  }
 }
 
-const BUCKET = 'project-files'
-
-function toRecord(row: Record<string, unknown>): ProjectFileRecord {
-  const rec = normalizeRow<ProjectFileRecord & { storage_path: string }>(row)
-  // `file` mantém o contrato antigo: preenchido somente quando há PDF enviado
-  return { ...rec, file: rec.storage_path }
+function toRecord(row: Record<string, unknown>): ProjectFile {
+  const rec = normalizeRow<ProjectFile>(row)
+  return {
+    ...rec,
+    file: (row.storage_path as string) || (rec.file ?? ''),
+    storage_path: (row.storage_path as string) || (rec.file ?? ''),
+  }
 }
 
 export const projectFilesService = {
+  /**
+   * Upload direto de PDF para o bucket `pdfs` e registro na tabela `project_files`.
+   */
+  async uploadPDF(file: File, projectId: string): Promise<ProjectFile> {
+    const { data: auth, error: authErr } = await supabase.auth.getUser()
+    const userId = auth.user?.id
+    if (authErr || !userId) {
+      throw new Error('Autenticação necessária')
+    }
+
+    const sha256Hash = await calculateSHA256(file)
+    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
+    const storagePath = `${userId}/${projectId}/${Date.now()}_${safeName}`
+
+    // 1. Upload para o bucket pdfs (ou fallback project-files)
+    let uploadError: unknown = null
+    const { error: upErr1 } = await supabase.storage
+      .from(PRIMARY_BUCKET)
+      .upload(storagePath, file, { contentType: 'application/pdf', upsert: true })
+
+    if (upErr1) {
+      const { error: upErr2 } = await supabase.storage
+        .from(FALLBACK_BUCKET)
+        .upload(storagePath, file, { contentType: 'application/pdf', upsert: true })
+      uploadError = upErr2
+    }
+
+    if (uploadError) {
+      throw uploadError
+    }
+
+    // 2. Registro no banco
+    const { data, error: dbErr } = await supabase
+      .from('project_files')
+      .insert({
+        project: projectId,
+        original_name: file.name,
+        safe_name: safeName,
+        extension: 'PDF',
+        mime_type: 'application/pdf',
+        size_bytes: file.size,
+        sha256: sha256Hash,
+        user_id: userId,
+        storage_path: storagePath,
+        status: 'ready_for_analysis',
+        is_primary: true,
+      })
+      .select()
+      .single()
+
+    if (dbErr) throw dbErr
+    return toRecord(data)
+  },
+
+  /**
+   * Lista arquivos de um projeto.
+   */
+  async getProjectFiles(projectId: string): Promise<ProjectFile[]> {
+    const { data, error } = await supabase
+      .from('project_files')
+      .select('*')
+      .eq('project', projectId)
+      .neq('status', 'removed')
+      .order('created', { ascending: false })
+
+    if (error) throw error
+    return (data || []).map(toRecord)
+  },
+
+  /** Alias para manter compatibilidade com componentes existentes */
+  async listFiles(projectId: string): Promise<ProjectFile[]> {
+    return this.getProjectFiles(projectId)
+  },
+
+  /**
+   * Obtém detalhes de um arquivo por ID.
+   */
+  async getFile(fileId: string): Promise<ProjectFile> {
+    const { data, error } = await supabase
+      .from('project_files')
+      .select('*')
+      .eq('id', fileId)
+      .single()
+
+    if (error) throw error
+    return toRecord(data)
+  },
+
+  /**
+   * Gera URL assinada de download (1 hora de validade).
+   */
+  async getDownloadUrl(storagePath: string): Promise<string> {
+    if (!storagePath) return ''
+
+    // Tenta no bucket pdfs
+    const { data: d1 } = await supabase.storage.from(PRIMARY_BUCKET).createSignedUrl(storagePath, 3600)
+    if (d1?.signedUrl) return d1.signedUrl
+
+    // Fallback para project-files
+    const { data: d2, error } = await supabase.storage.from(FALLBACK_BUCKET).createSignedUrl(storagePath, 3600)
+    if (error) throw error
+    return d2.signedUrl
+  },
+
+  /** Alias para compatibilidade com registros que contêm o campo `file` */
+  async getFileUrl(record: { file?: string; storage_path?: string }): Promise<string> {
+    const path = record.storage_path || record.file || ''
+    return this.getDownloadUrl(path)
+  },
+
+  /**
+   * Remove arquivo do Storage e marca como removido no banco.
+   */
+  async deleteFile(fileId: string, storagePath?: string): Promise<void> {
+    if (storagePath) {
+      await supabase.storage.from(PRIMARY_BUCKET).remove([storagePath]).catch(() => null)
+      await supabase.storage.from(FALLBACK_BUCKET).remove([storagePath]).catch(() => null)
+    }
+
+    const { error } = await supabase
+      .from('project_files')
+      .update({ status: 'removed' })
+      .eq('id', fileId)
+
+    if (error) throw error
+  },
+
+  /** Alias para deleteFile */
+  async removeFile(fileId: string): Promise<void> {
+    return this.deleteFile(fileId)
+  },
+
+  // ---------- Métodos mantidos para retrocompatibilidade ----------
   async registerFile(params: RegisterFileParams): Promise<{ id: string; status: string }> {
     const row = unwrap(
       await supabase.rpc('register_project_file', {
@@ -58,9 +190,16 @@ export const projectFilesService = {
     if (!userId) throw new Error('Autenticação necessária')
 
     const path = `${userId}/${recordId}.pdf`
-    const { error: upErr } = await supabase.storage
-      .from(BUCKET)
+    let { error: upErr } = await supabase.storage
+      .from(PRIMARY_BUCKET)
       .upload(path, file, { contentType: 'application/pdf', upsert: true })
+
+    if (upErr) {
+      const { error: upErr2 } = await supabase.storage
+        .from(FALLBACK_BUCKET)
+        .upload(path, file, { contentType: 'application/pdf', upsert: true })
+      upErr = upErr2
+    }
     if (upErr) throw upErr
 
     const { error } = await supabase
@@ -70,46 +209,12 @@ export const projectFilesService = {
     if (error) throw error
   },
 
-  async confirmFile(recordId: string): Promise<ProjectFileRecord> {
+  async confirmFile(recordId: string): Promise<ProjectFile> {
     return toRecord(unwrap(await supabase.rpc('confirm_project_file', { p_id: recordId })))
-  },
-
-  async listFiles(projectId: string): Promise<ProjectFileRecord[]> {
-    const rows = unwrap(
-      await supabase
-        .from('project_files')
-        .select('*')
-        .eq('project', projectId)
-        .neq('status', 'removed')
-        .order('created', { ascending: false }),
-    )
-    return rows.map(toRecord)
-  },
-
-  async getFile(recordId: string): Promise<ProjectFileRecord> {
-    return toRecord(
-      unwrap(await supabase.from('project_files').select('*').eq('id', recordId).single()),
-    )
-  },
-
-  async removeFile(recordId: string): Promise<void> {
-    const { error } = await supabase
-      .from('project_files')
-      .update({ status: 'removed' })
-      .eq('id', recordId)
-    if (error) throw error
   },
 
   async setPrimaryFile(recordId: string): Promise<void> {
     unwrap(await supabase.rpc('set_primary_project_file', { p_id: recordId }))
-  },
-
-  /** URL assinada (1h) para abrir/baixar o PDF privado. */
-  async getFileUrl(record: { file: string }): Promise<string> {
-    if (!record.file) return ''
-    const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(record.file, 3600)
-    if (error) throw error
-    return data.signedUrl
   },
 
   getErrorMessage(error: unknown): string {

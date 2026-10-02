@@ -26,7 +26,7 @@ export function buildProject(
   const client = clients.find((c) => c.id === data.clientId)
   const user = MOCK_USERS.find((u) => u.id === data.responsibleId)
   const profile = WIZARD_PROFILES.find((p) => p.id === data.productionProfileId)
-  const completedFiles = data.files.filter((f) => f.status === 'completed')
+  const completedFiles = data.files.filter((f) => f.status === 'completed' || f.status === 'selected')
   const firstFile = completedFiles[0]
   const profileName = profile?.isCustom ? data.customProfileName : profile?.name
 

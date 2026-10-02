@@ -35,16 +35,7 @@ export interface AnalysisJob {
   updated: string
 }
 
-export interface AnalysisJobStatusResponse {
-  id: string
-  status: AnalysisJobStatus
-  progress: number
-  current_step: string
-  started_at: string
-  completed_at: string
-  error_code: string
-  error_message: string
-}
+export type AnalysisJobStatusResponse = AnalysisJob
 
 export type IssueSeverity = 'critical' | 'warning' | 'informational'
 export type IssueStatus = 'pending' | 'approved' | 'rejected' | 'ignored' | 'corrected'
@@ -86,17 +77,184 @@ export const toJob = (row: Record<string, unknown>) => normalizeRow<AnalysisJob>
 export const toIssue = (row: Record<string, unknown>) => normalizeRow<AnalysisIssue>(row)
 
 export const analysisJobsService = {
-  async startAnalysis(fileId: string, params: StartAnalysisParams): Promise<AnalysisJob> {
-    const profile = params.productionProfile as { id?: string; name?: string }
-    return toJob(
-      unwrap(
-        await supabase.rpc('start_analysis', {
-          p_file: fileId,
-          p_production_profile: profile.id || profile.name || '',
-          p_version: params.version ?? null,
-        }),
-      ),
+  /**
+   * Inicia a análise:
+   * 1. Registra o job no Supabase (via RPC start_analysis ou insert direto)
+   * 2. Aciona a Edge Function start_analysis para disparar o analisador Python
+   */
+  async startAnalysis(
+    fileId: string,
+    profileOrParams: string | StartAnalysisParams,
+  ): Promise<AnalysisJob> {
+    let profileId = ''
+    let version: string | undefined = undefined
+
+    if (typeof profileOrParams === 'string') {
+      profileId = profileOrParams
+    } else if (profileOrParams && typeof profileOrParams === 'object') {
+      const p = profileOrParams.productionProfile as { id?: string; name?: string }
+      profileId = p?.id || p?.name || ''
+      version = profileOrParams.version
+    }
+
+    if (!profileId) {
+      profileId = 'default'
+    }
+
+    // 1. Chamar RPC start_analysis
+    const row = unwrap(
+      await supabase.rpc('start_analysis', {
+        p_file: fileId,
+        p_production_profile: profileId,
+        p_version: version ?? null,
+      }),
     )
+    const job = toJob(row)
+
+    // 2. Acionar a Edge Function start_analysis
+    try {
+      const { data: sessionData } = await supabase.auth.getSession()
+      const token = sessionData.session?.access_token
+
+      await supabase.functions.invoke('start_analysis', {
+        body: {
+          jobId: job.id,
+          fileId: fileId,
+          profileId: profileId,
+        },
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      })
+    } catch (edgeErr) {
+      console.warn('Edge Function start_analysis não respondeu ou em mock; job permanece registrado:', edgeErr)
+    }
+
+    return job
+  },
+
+  /**
+   * Busca status detalhado de uma análise por ID.
+   */
+  async getAnalysisStatus(jobId: string): Promise<AnalysisJob> {
+    const { data, error } = await supabase
+      .from('analysis_jobs')
+      .select('*')
+      .eq('id', jobId)
+      .single()
+
+    if (error) throw error
+    return toJob(data)
+  },
+
+  /** Alias para manter compatibilidade */
+  async getAnalysis(analysisId: string): Promise<AnalysisJob> {
+    return this.getAnalysisStatus(analysisId)
+  },
+
+  /**
+   * Busca lista de ocorrências (issues) encontradas na análise ordenadas por severidade e página.
+   */
+  async getAnalysisIssues(jobId: string): Promise<AnalysisIssue[]> {
+    const { data, error } = await supabase
+      .from('analysis_issues')
+      .select('*')
+      .eq('analysis', jobId)
+      .order('severity', { ascending: false })
+      .order('page', { ascending: true })
+
+    if (error) throw error
+    return (data || []).map(toIssue)
+  },
+
+  /**
+   * Atualiza o status de uma ocorrência (aprovada, rejeitada, corrigida, ignorada).
+   */
+  async updateIssueStatus(issueId: string, status: string, reason?: string): Promise<void> {
+    const { data: auth } = await supabase.auth.getUser()
+    const { error } = await supabase
+      .from('analysis_issues')
+      .update({
+        status,
+        decision_reason: reason || '',
+        decision_user: auth.user?.id || null,
+        decision_at: new Date().toISOString(),
+      })
+      .eq('id', issueId)
+
+    if (error) throw error
+  },
+
+  /**
+   * Assina atualizações em tempo real do status de uma análise via Supabase Realtime.
+   * Retorna uma função para cancelar a assinatura (unsubscribe).
+   */
+  subscribeToAnalysisStatus(
+    jobId: string,
+    callback: (job: AnalysisJob) => void,
+    errorHandler?: (error: unknown) => void,
+  ): () => void {
+    const channel = supabase
+      .channel(`job-status-${jobId}-${Math.random().toString(36).slice(2, 8)}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'analysis_jobs',
+          filter: `id=eq.${jobId}`,
+        },
+        (payload) => {
+          if (payload.new) {
+            callback(toJob(payload.new as Record<string, unknown>))
+          }
+        },
+      )
+      .subscribe((subStatus, err) => {
+        if (err && errorHandler) {
+          errorHandler(err)
+        }
+      })
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  },
+
+  /**
+   * Cancela uma análise ativa.
+   */
+  async cancelAnalysis(jobId: string): Promise<void> {
+    try {
+      unwrap(await supabase.rpc('cancel_analysis', { p_id: jobId }))
+    } catch {
+      const { error } = await supabase
+        .from('analysis_jobs')
+        .update({ status: 'cancelled', completed_at: new Date().toISOString() })
+        .eq('id', jobId)
+      if (error) throw error
+    }
+  },
+
+  /**
+   * Retenta uma análise com falha.
+   */
+  async retryAnalysis(jobId: string): Promise<AnalysisJob> {
+    const job = toJob(unwrap(await supabase.rpc('retry_analysis', { p_id: jobId })))
+    try {
+      const { data: sessionData } = await supabase.auth.getSession()
+      const token = sessionData.session?.access_token
+
+      await supabase.functions.invoke('start_analysis', {
+        body: {
+          jobId: job.id,
+          fileId: job.file,
+          profileId: job.production_profile,
+        },
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      })
+    } catch (edgeErr) {
+      console.warn('Erro ao acionar start_analysis no retry:', edgeErr)
+    }
+    return job
   },
 
   async getLatestJobForFile(fileId: string): Promise<AnalysisJob | null> {
@@ -109,35 +267,6 @@ export const analysisJobsService = {
       .maybeSingle()
     if (error) throw error
     return data ? toJob(data) : null
-  },
-
-  async getAnalysis(analysisId: string): Promise<AnalysisJob> {
-    return toJob(unwrap(await supabase.from('analysis_jobs').select('*').eq('id', analysisId).single()))
-  },
-
-  async getAnalysisStatus(analysisId: string): Promise<AnalysisJobStatusResponse> {
-    return this.getAnalysis(analysisId)
-  },
-
-  async getAnalysisIssues(analysisId: string): Promise<AnalysisIssue[]> {
-    const rows = unwrap(
-      await supabase
-        .from('analysis_issues')
-        .select('*')
-        .eq('analysis', analysisId)
-        .order('created', { ascending: false }),
-    )
-    return rows.map(toIssue)
-  },
-
-  async retryAnalysis(
-    analysisId: string,
-  ): Promise<{ id: string; status: string; retry_count: number }> {
-    return toJob(unwrap(await supabase.rpc('retry_analysis', { p_id: analysisId })))
-  },
-
-  async cancelAnalysis(analysisId: string): Promise<{ id: string; status: string }> {
-    return toJob(unwrap(await supabase.rpc('cancel_analysis', { p_id: analysisId })))
   },
 
   getErrorMessage(error: unknown): string {
