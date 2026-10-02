@@ -12,6 +12,7 @@ import {
 import { Loader2, ArrowLeft, ArrowRight, Save, FileCheck, X } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import { projectService } from '@/services/projectService'
+import { projectFilesService } from '@/services/projectFilesService'
 import { profileService } from '@/services/profileService'
 import { MOCK_CLIENTS } from '@/services/mockData'
 import { WizardStepper } from '@/components/projects/WizardStepper'
@@ -54,7 +55,7 @@ export default function NewProjectPage() {
         e.customProfileName = 'Campo obrigatório'
     }
     if (step === 3) {
-      if (!data.files.some((f) => f.status === 'completed'))
+      if (!data.files.some((f) => f.status === 'completed' || f.status === 'selected'))
         e.files = 'Envie pelo menos um arquivo válido'
     }
     setErrors(e)
@@ -86,21 +87,45 @@ export default function NewProjectPage() {
   }
 
   const handleCreate = async () => {
-    const project = buildProject(data, clients, 'analyzing')
-    const profiles = profileService.getProfilesSync()
-    const prof = profiles.find((p) => p.id === data.productionProfileId)
-    if (prof) {
-      project.productionProfile = prof.name
-      project.productionType = prof.category
-      project.profileId = prof.id
-    }
-    const created = await projectService.createProject(project)
     setProcessing(true)
-    setTimeout(async () => {
+    try {
+      const project = buildProject(data, clients, 'analyzing')
+      const profiles = profileService.getProfilesSync()
+      const prof = profiles.find((p) => p.id === data.productionProfileId)
+      if (prof) {
+        project.productionProfile = prof.name
+        project.productionType = prof.category
+        project.profileId = prof.id
+      }
+      const created = await projectService.createProject(project)
+
+      // Upload automático dos arquivos selecionados para o Supabase
+      const filesToUpload = data.files.filter((f) => f.rawFile)
+      for (const item of filesToUpload) {
+        if (item.rawFile) {
+          try {
+            await projectFilesService.uploadPDF(item.rawFile, created.id)
+          } catch (upErr) {
+            console.warn('Erro ao subir arquivo do assistente:', upErr)
+          }
+        }
+      }
+
       await projectService.updateProject(created.id, { status: 'needs_review' })
-      setProcessing(false)
+      toast({
+        title: 'Projeto criado com sucesso!',
+        description: 'Redirecionando para os detalhes do projeto...',
+      })
       navigate(`/projects/${created.id}`)
-    }, 3000)
+    } catch (err: any) {
+      toast({
+        title: 'Erro ao criar projeto',
+        description: err?.message || 'Falha ao processar.',
+        variant: 'destructive',
+      })
+    } finally {
+      setProcessing(false)
+    }
   }
 
   const addClient = (client: Client) => {
