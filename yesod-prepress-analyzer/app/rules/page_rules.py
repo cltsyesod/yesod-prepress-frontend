@@ -3,6 +3,7 @@ from __future__ import annotations
 from app.analyzer.context import DocumentContext, PageInfo
 from app.analyzer.page_inspector import bleed_margins_mm, box_size_mm
 from app.contracts.issue import AnalysisIssue
+from app.contracts.production_profile import ProductionProfile
 from app.fixes.geometry import describe_mm, target_trim
 from app.rules.base import Rule
 
@@ -134,6 +135,34 @@ def _likely_scale(ratio: float) -> int | None:
     return None
 
 
+def _size_candidates(
+    page: PageInfo, profile: ProductionProfile
+) -> list[tuple[tuple[float, float], str]]:
+    """Possible finished sizes in the file, in mm.
+
+    With a TrimBox there is only one reading. Without it, the MediaBox may include
+    bleed, so the page minus the job's bleed (at final size or as drawn in the file)
+    is also considered.
+    """
+
+    if page.trim_box is not None:
+        return [(box_size_mm(page.trim_box), "TrimBox")]
+    media = box_size_mm(page.media_box)
+    if min(media) <= 0:
+        return []
+    candidates = [(media, "MediaBox")]
+    bleeds = {profile.minimum_bleed_mm, profile.minimum_bleed_mm / profile.file_scale}
+    for bleed in sorted(value for value in bleeds if value > 0):
+        if min(media) > 2 * bleed:
+            candidates.append(
+                (
+                    (media[0] - 2 * bleed, media[1] - 2 * bleed),
+                    f"MediaBox sem {bleed:g} mm de sangria",
+                )
+            )
+    return candidates
+
+
 class DimensionRule(Rule):
     """Compares the final size (TrimBox × file scale) with the size ordered for the job."""
 
@@ -148,18 +177,33 @@ class DimensionRule(Rule):
         tolerance = profile.dimension_tolerance_mm
         issues: list[AnalysisIssue] = []
         for page in context.pages:
-            in_file = box_size_mm(page.trim_box or page.media_box)
-            if min(in_file) <= 0:
+            measured = []
+            for in_file, box in _size_candidates(page, profile):
+                final = (in_file[0] * profile.file_scale, in_file[1] * profile.file_scale)
+                if (final[0] > final[1]) != (expected[0] > expected[1]):
+                    final = (final[1], final[0])
+                    in_file = (in_file[1], in_file[0])
+                ratios = (expected[0] / final[0], expected[1] / final[1])
+                scale = _likely_scale(ratios[0])
+                measured.append(
+                    (
+                        in_file,
+                        box,
+                        final,
+                        ratios,
+                        scale,
+                        scale is not None and scale == _likely_scale(ratios[1]),
+                    )
+                )
+            if not measured or any(
+                all(abs(a - b) <= tolerance for a, b in zip(m[2], expected, strict=True))
+                for m in measured
+            ):
                 continue
-            final = (in_file[0] * profile.file_scale, in_file[1] * profile.file_scale)
-            if (final[0] > final[1]) != (expected[0] > expected[1]):
-                final = (final[1], final[0])
-                in_file = (in_file[1], in_file[0])
-            if all(abs(a - b) <= tolerance for a, b in zip(final, expected, strict=True)):
-                continue
-            ratios = (expected[0] / final[0], expected[1] / final[1])
-            scale = _likely_scale(ratios[0])
-            same_scale = scale is not None and scale == _likely_scale(ratios[1])
+            # Prefer the reading that explains the difference as a 1:N file.
+            in_file, box, final, ratios, scale, same_scale = next(
+                (m for m in measured if m[5]), measured[0]
+            )
             fix = None
             if same_scale:
                 suggested = scale * profile.file_scale
@@ -190,7 +234,6 @@ class DimensionRule(Rule):
                     "Não reescale sem aprovação: a arte seria distorcida ou cortada. "
                     "Solicite ao cliente o arquivo na medida correta."
                 )
-            box = "TrimBox" if page.trim_box else "MediaBox"
             issues.append(
                 self.issue(
                     context,

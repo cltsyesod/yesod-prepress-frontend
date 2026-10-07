@@ -102,6 +102,25 @@ def test_dimension_detects_wrong_proportion():
     assert issues and "proporção" in issues[0].description
 
 
+def untrimmed_page(width_mm: float, height_mm: float) -> PageInfo:
+    return PageInfo(number=1, media_box=(0, 0, width_mm * MM, height_mm * MM))
+
+
+def test_dimension_without_trimbox_discounts_bleed_to_find_scale():
+    # 1:10 file of a 1000 x 500 mm banner with 3 mm bleed drawn in the file.
+    profile = ProductionProfile(id="p", finalWidthMm=1000, finalHeightMm=500, minimumBleedMm=3)
+    issues = DimensionRule().evaluate(make_context(profile, pages=[untrimmed_page(106, 56)]))
+    assert issues and issues[0].fix["params"] == {"fileScale": "1:10"}
+    assert "sem 3 mm de sangria" in issues[0].found_value
+
+
+def test_dimension_without_trimbox_accepts_page_with_bleed_at_declared_scale():
+    profile = ProductionProfile(
+        id="p", finalWidthMm=1000, finalHeightMm=500, minimumBleedMm=3, fileScale="1:10"
+    )
+    assert DimensionRule().evaluate(make_context(profile, pages=[untrimmed_page(106, 56)])) == []
+
+
 def test_dimension_skipped_without_ordered_size():
     context = make_context(ProductionProfile(id="p"), pages=[page(1, 1)])
     assert DimensionRule().evaluate(context) == []
