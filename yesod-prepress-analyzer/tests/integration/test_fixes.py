@@ -102,6 +102,33 @@ def test_crop_marks_enlarge_page_outside_bleed(tmp_path):
         assert "/Separation" in str(pdf.pages[0].Resources.ColorSpace)
 
 
+def test_reapplying_drawn_fixes_does_not_duplicate(tmp_path):
+    source = blank_pdf(tmp_path / "in.pdf", 206, 306)
+    profile = ProductionProfile(id="p", minimumBleedMm=3, finalWidthMm=200, finalHeightMm=300)
+    fixes = [FixRequest(id="add_cut_contour"), FixRequest(id="add_crop_marks")]
+    once, twice = tmp_path / "once.pdf", tmp_path / "twice.pdf"
+    apply_fixes(source, once, fixes, profile)
+    applied = apply_fixes(once, twice, fixes, profile)
+
+    assert all("já tinha" in fix.details[0] for fix in applied)
+    assert boxes(twice)["MediaBox"] == boxes(once)["MediaBox"]
+    with pikepdf.open(twice) as pdf:
+        assert len(pdf.Root.OCProperties.OCGs) == 1
+
+
+def test_page_boxes_find_trim_in_undeclared_scale_file(tmp_path):
+    # 1:10 file of a 1000 x 500 mm banner, sent while the ticket still says 1:1:
+    # the ordered size cannot fit, but the page minus 3 mm of bleed has its proportion.
+    source = blank_pdf(tmp_path / "in.pdf", 106, 56)
+    profile = ProductionProfile(id="p", minimumBleedMm=3, finalWidthMm=1000, finalHeightMm=500)
+    out = tmp_path / "out.pdf"
+    applied = apply_fixes(source, out, [FixRequest(id="set_page_boxes")], profile)
+
+    trim = boxes(out)["TrimBox"]
+    assert trim[2] - trim[0] == pytest.approx(100 * MM, abs=0.01)
+    assert "proporção da ficha" in applied[0].details[0]
+
+
 def test_scaled_file_draws_marks_at_file_scale(tmp_path):
     # 1:10 file: 20 x 30 mm on the page for a 200 x 300 mm piece.
     source = blank_pdf(tmp_path / "in.pdf", 20, 30)

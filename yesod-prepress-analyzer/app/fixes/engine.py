@@ -50,6 +50,21 @@ def _separation(pdf: pikepdf.Pdf, name: str, cmyk: list[float]) -> pikepdf.Objec
     return pdf.make_indirect(pikepdf.Array(space))
 
 
+_MARKER = pikepdf.Name("/YesodFixes")
+
+
+def _already_applied(page: pikepdf.Page, fix_id: str) -> bool:
+    """Fixes that draw on the page record themselves, so re-running never duplicates."""
+
+    return any(str(item) == fix_id for item in page.obj.get(_MARKER, []))
+
+
+def _record(page: pikepdf.Page, fix_id: str) -> None:
+    if _MARKER not in page.obj:
+        page.obj[_MARKER] = pikepdf.Array()
+    page.obj[_MARKER].append(pikepdf.String(fix_id))
+
+
 def _isolate_existing_content(page: pikepdf.Page, clip: Box | None = None) -> None:
     """Wrap the current content in q/Q (and optionally a clip) before drawing on top."""
 
@@ -103,10 +118,16 @@ def _add_cut_contour(pdf: pikepdf.Pdf, profile: ProductionProfile, params: dict)
     overprint = pdf.make_indirect(
         pikepdf.Dictionary(Type=pikepdf.Name.ExtGState, OP=True, op=True, OPM=1)
     )
-    _register_layer(pdf, layer)
 
     details: list[str] = []
+    registered = False
     for info, page in zip(inspect_pages(pdf), pdf.pages, strict=True):
+        if _already_applied(page, "add_cut_contour"):
+            details.append(f"Página {info.number}: já tinha faca inserida pelo sistema")
+            continue
+        if not registered:
+            _register_layer(pdf, layer)
+            registered = True
         trim, how = target_trim(info, profile)
         cs = page.add_resource(color, pikepdf.Name.ColorSpace, prefix="YesodCut")
         oc = page.add_resource(layer, pikepdf.Name.Properties, prefix="YesodOC")
@@ -119,6 +140,7 @@ def _add_cut_contour(pdf: pikepdf.Pdf, profile: ProductionProfile, params: dict)
                 f"{_num(x0)} {_num(y0)} {_num(x1 - x0)} {_num(y1 - y0)} re S Q EMC\n"
             ).encode()
         )
+        _record(page, "add_cut_contour")
         details.append(f"Página {info.number}: faca {describe_mm(trim, scale)} ({how})")
     return AppliedFix(
         id="add_cut_contour", label=f"Faca retangular inserida ({name})", details=details
@@ -153,6 +175,9 @@ def _add_crop_marks(pdf: pikepdf.Pdf, profile: ProductionProfile, params: dict) 
 
     details: list[str] = []
     for info, page in zip(inspect_pages(pdf), pdf.pages, strict=True):
+        if _already_applied(page, "add_crop_marks"):
+            details.append(f"Página {info.number}: já tinha marcas de corte do sistema")
+            continue
         trim, how = target_trim(info, profile)
         bleed = info.bleed_box or trim
         x0, y0, x1, y1 = trim
@@ -182,6 +207,7 @@ def _add_crop_marks(pdf: pikepdf.Pdf, profile: ProductionProfile, params: dict) 
         page.contents_add(
             (f"q {cs} CS 1 SCN {_num(width_pt)} w 0 J " + " ".join(segments) + " S Q\n").encode()
         )
+        _record(page, "add_crop_marks")
         details.append(
             f"Página {info.number}: marcas em {describe_mm(trim, scale)} ({how}), "
             f"página ampliada para {describe_mm(outer, scale)}"

@@ -65,6 +65,16 @@ def target_trim(page: PageInfo, profile: ProductionProfile) -> tuple[Box, str]:
             x = visible[0] + (width - w) / 2
             y = visible[1] + (height - h) / 2
             return (x, y, x + w, y + h), "medida da ficha centralizada na página"
+        # The ordered size does not fit at the declared scale (e.g. an undeclared 1:N
+        # file). If the page minus the bleed has the ordered proportion, that is the
+        # finished format, whatever the scale turns out to be.
+        ordered = w / h
+        bleeds = {profile.minimum_bleed_mm, profile.minimum_bleed_mm / profile.file_scale}
+        for bleed_mm in sorted((b for b in bleeds if b > 0), reverse=True):
+            inner = expand(visible, -bleed_mm * MM)
+            iw, ih = inner[2] - inner[0], inner[3] - inner[1]
+            if iw > 0 and ih > 0 and abs(iw / ih - ordered) / ordered <= 0.01:
+                return inner, f"página sem {bleed_mm:g} mm de sangria, na proporção da ficha"
     return visible, "página inteira como formato final"
 
 

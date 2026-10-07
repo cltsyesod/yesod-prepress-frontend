@@ -154,7 +154,7 @@ async function settleCorrectedFile(db: any, job: any, event: string, corrected: 
   if (!['completed', 'failed', 'cancelled'].includes(event) || !job.file) return
   const { data: file } = await db
     .from('project_files')
-    .select('id, project, status, derived_from')
+    .select('id, project, status, derived_from, applied_fixes')
     .eq('id', job.file)
     .maybeSingle()
   if (!file || file.status !== 'pending' || !file.derived_from) return
@@ -171,7 +171,11 @@ async function settleCorrectedFile(db: any, job: any, event: string, corrected: 
       is_primary: true,
       sha256: String(corrected.sha256 || ''),
       size_bytes: Number(corrected.sizeBytes) || 0,
-      applied_fixes: Array.isArray(corrected.appliedFixes) ? corrected.appliedFixes : [],
+      // Histórico desde o arquivo do cliente: o que veio da versão anterior + o desta correção.
+      applied_fixes: [
+        ...(Array.isArray(file.applied_fixes) ? file.applied_fixes : []),
+        ...(Array.isArray(corrected.appliedFixes) ? corrected.appliedFixes : []),
+      ],
     })
     .eq('id', file.id)
 }

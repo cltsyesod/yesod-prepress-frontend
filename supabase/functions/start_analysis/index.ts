@@ -107,7 +107,9 @@ Deno.serve(async (req: Request) => {
           storage_path: `${user.id}/${source.project}/${Date.now()}_${safeName}`,
           status: 'pending',
           is_primary: false,
-          derived_from: source.id,
+          // Sempre o arquivo do cliente; as correções anteriores seguem no histórico.
+          derived_from: source.derived_from || source.id,
+          applied_fixes: Array.isArray(source.applied_fixes) ? source.applied_fixes : [],
         })
         .select('*')
         .single()

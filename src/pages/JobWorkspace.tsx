@@ -205,6 +205,12 @@ export default function JobWorkspacePage() {
 
   const cutLayerName = profiles.find((p) => p.id === profileId)?.cutLayerName?.trim() || ''
 
+  // Histórico de correções desde o arquivo do cliente, sem as que não mudaram nada.
+  const appliedFixes = (file?.applied_fixes ?? []).filter(
+    (fix) => fix.details.length > 0 && !fix.details.every((d) => d.includes('já tinha')),
+  )
+  const applied = (id: string) => appliedFixes.some((fix) => fix.id === id)
+
   const viewerSrc = useMemo(() => (pdfUrl ? `${pdfUrl}#page=${page}&view=FitH` : ''), [pdfUrl, page])
 
   if (loadError) {
@@ -265,10 +271,14 @@ export default function JobWorkspacePage() {
                 {pendingPdfFixes.length > 0 && ` (${pendingPdfFixes.length})`}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onSelect={() => applyFixes([{ id: 'set_page_boxes' }, { id: 'add_crop_marks' }])}>
-                Inserir marcas de corte
+              <DropdownMenuItem
+                disabled={applied('add_crop_marks')}
+                onSelect={() => applyFixes([{ id: 'set_page_boxes' }, { id: 'add_crop_marks' }])}
+              >
+                Inserir marcas de corte{applied('add_crop_marks') && ' (já inseridas)'}
               </DropdownMenuItem>
               <DropdownMenuItem
+                disabled={applied('add_cut_contour')}
                 onSelect={() =>
                   applyFixes([
                     { id: 'set_page_boxes' },
@@ -277,6 +287,7 @@ export default function JobWorkspacePage() {
                 }
               >
                 Inserir faca retangular{cutLayerName ? ` (${cutLayerName})` : ''}
+                {applied('add_cut_contour') && ' — já inserida'}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -321,7 +332,7 @@ export default function JobWorkspacePage() {
         </section>
       )}
 
-      {!!file?.applied_fixes?.length && !correction && (
+      {!!file?.derived_from && !correction && (
         <div className="flex flex-col gap-2 rounded-lg border border-primary/30 bg-primary/5 p-4 text-sm sm:flex-row sm:items-start sm:justify-between">
           <div className="space-y-1">
             <p className="flex items-center gap-2 font-medium text-foreground">
@@ -329,8 +340,8 @@ export default function JobWorkspacePage() {
               Versão corrigida automaticamente
             </p>
             <ul className="text-muted-foreground">
-              {file.applied_fixes.map((fix) => (
-                <li key={fix.id}>
+              {appliedFixes.map((fix, index) => (
+                <li key={`${fix.id}-${index}`}>
                   {fix.label}
                   {fix.details.length > 0 && <span className="text-xs"> — {fix.details.join(' · ')}</span>}
                 </li>
