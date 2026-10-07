@@ -20,10 +20,11 @@ interface PdfPreviewProps {
 
 const MM = 72 / 25.4
 
-// Cores das guias (as mesmas da legenda).
+// Cores das guias de tela (as mesmas da legenda). Magenta fica reservado para a faca
+// real do arquivo (CutContour), para a guia nunca ser confundida com um corte.
 const GUIDES = {
-  bleed: { label: 'Sangria', color: '#3b82f6', dash: '6 4' },
-  trim: { label: 'Corte', color: '#ec4899', dash: '' },
+  bleed: { label: 'Sangria (BleedBox)', color: '#3b82f6', dash: '6 4' },
+  trim: { label: 'Formato final (TrimBox)', color: '#22c55e', dash: '' },
   safety: { label: 'Segurança', color: '#f59e0b', dash: '2 3' },
 } as const
 
@@ -177,9 +178,12 @@ export function PdfPreview({ url, page, onPageChange, safetyPt }: PdfPreviewProp
           <Plus className="h-4 w-4" />
         </Button>
         <span className="mx-1 h-4 w-px bg-border" />
-        <label className="flex cursor-pointer items-center gap-1.5 text-muted-foreground">
+        <label
+          className="flex cursor-pointer items-center gap-1.5 text-muted-foreground"
+          title="Linhas só de conferência na tela; não vão para o PDF nem para a impressão"
+        >
           <input type="checkbox" checked={showGuides} onChange={(e) => setShowGuides(e.target.checked)} />
-          Guias
+          Guias de tela
         </label>
         {showGuides && (
           <div className="flex flex-wrap items-center gap-3 text-xs">
@@ -195,7 +199,11 @@ export function PdfPreview({ url, page, onPageChange, safetyPt }: PdfPreviewProp
         )}
         {layers.length > 0 && <span className="mx-1 h-4 w-px bg-border" />}
         {layers.map((layer) => (
-          <label key={layer.id} className="flex cursor-pointer items-center gap-1.5 text-muted-foreground" title="Camada do PDF">
+          <label
+            key={layer.id}
+            className="flex cursor-pointer items-center gap-1.5 text-muted-foreground"
+            title="Camada do próprio PDF (ex.: a faca que vai para o plotter)"
+          >
             <input
               type="checkbox"
               checked={layer.visible}
@@ -206,6 +214,7 @@ export function PdfPreview({ url, page, onPageChange, safetyPt }: PdfPreviewProp
               }
             />
             {layer.name}
+            <span className="text-xs">(camada do PDF)</span>
           </label>
         ))}
         {missing && <span className="text-xs text-amber-600 dark:text-amber-400">Sem TrimBox: linha de corte não definida</span>}
