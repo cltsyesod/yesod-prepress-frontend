@@ -97,6 +97,16 @@ export function toAnalyzerProfile(id: string, profile: Json, ticket: Json): Json
       )
     : []
 
+  // A ficha tem prioridade: o que ela exige é verificado mesmo com a regra desligada no perfil.
+  const forced = [
+    ...(ticket.cutLayerRequired === true ? ['FINISHING_CUT_LAYER'] : []),
+    ...(positive(ticket.finalWidthMm) && positive(ticket.finalHeightMm) ? ['PAGE_DIMENSION_MISMATCH'] : []),
+  ]
+  for (const code of forced) {
+    const rule = rules.find((r) => r.code === code)
+    if (rule) rule.enabled = true
+  }
+
   return {
     id: id || 'job',
     name: text(profile.name),
