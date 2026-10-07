@@ -53,15 +53,18 @@ class BleedRule(Rule):
                     )
                 )
                 continue
-            margins = bleed_margins_mm(page.trim_box, page.bleed_box)
+            # The minimum is expressed at final size; a 1:N file needs 1/N of it.
+            scale = context.profile.file_scale
+            margins = [value * scale for value in bleed_margins_mm(page.trim_box, page.bleed_box)]
             if min(margins) + 0.01 < minimum:
+                suffix = f" no tamanho final (escala 1:{scale:g})" if scale != 1 else ""
                 issues.append(
                     self.issue(
                         context,
                         page=page.number,
                         title="Sangria insuficiente",
                         category="Sangria",
-                        found_value=" / ".join(f"{value:.2f} mm" for value in margins),
+                        found_value=" / ".join(f"{value:.2f} mm" for value in margins) + suffix,
                         expected_value=f"Ao menos {minimum:g} mm em todos os lados",
                         description="A BleedBox não cobre a sangria mínima definida no perfil.",
                         recommendation="Amplie a arte e reexporte com a sangria correta.",
@@ -101,4 +104,86 @@ class PageSizeConsistencyRule(Rule):
                         recommendation="Confirme se a variação é intencional antes da produção.",
                     )
                 )
+        return issues
+
+
+_COMMON_SCALES = (2, 4, 5, 10, 20, 25, 50, 100)
+
+
+def _likely_scale(ratio: float) -> int | None:
+    """Return N when the ratio between ordered and measured size matches a 1:N file."""
+
+    for factor in _COMMON_SCALES:
+        if abs(ratio - factor) / factor <= 0.01:
+            return factor
+    return None
+
+
+class DimensionRule(Rule):
+    """Compares the final size (TrimBox × file scale) with the size ordered for the job."""
+
+    code = "PAGE_DIMENSION_MISMATCH"
+    default_severity = "critical"
+
+    def evaluate(self, context: DocumentContext) -> list[AnalysisIssue]:
+        profile = context.profile
+        if profile.final_width_mm is None or profile.final_height_mm is None:
+            return []
+        expected = (profile.final_width_mm, profile.final_height_mm)
+        tolerance = profile.dimension_tolerance_mm
+        issues: list[AnalysisIssue] = []
+        for page in context.pages:
+            in_file = box_size_mm(page.trim_box or page.media_box)
+            if min(in_file) <= 0:
+                continue
+            final = (in_file[0] * profile.file_scale, in_file[1] * profile.file_scale)
+            if (final[0] > final[1]) != (expected[0] > expected[1]):
+                final = (final[1], final[0])
+                in_file = (in_file[1], in_file[0])
+            if all(abs(a - b) <= tolerance for a, b in zip(final, expected, strict=True)):
+                continue
+            ratios = (expected[0] / final[0], expected[1] / final[1])
+            scale = _likely_scale(ratios[0])
+            same_scale = scale is not None and scale == _likely_scale(ratios[1])
+            if same_scale:
+                suggested = scale * profile.file_scale
+                description = (
+                    f"O arquivo tem a proporção correta, mas parece estar em escala "
+                    f"1:{suggested:g}, e o trabalho declara 1:{profile.file_scale:g}."
+                )
+                recommendation = (
+                    f"Se o arquivo foi feito em 1:{suggested:g}, ajuste a escala do trabalho; "
+                    "caso contrário, solicite o arquivo no tamanho correto."
+                )
+            elif abs(ratios[0] - ratios[1]) / max(ratios) <= 0.01:
+                description = (
+                    "O arquivo tem a proporção do pedido, mas em outro tamanho "
+                    f"(fator {ratios[0]:.3f})."
+                )
+                recommendation = "Confirme se a peça pode ser reescalada proporcionalmente."
+            else:
+                description = "A proporção do arquivo é diferente da medida pedida."
+                recommendation = (
+                    "Não reescale sem aprovação: a arte seria distorcida ou cortada. "
+                    "Solicite ao cliente o arquivo na medida correta."
+                )
+            box = "TrimBox" if page.trim_box else "MediaBox"
+            issues.append(
+                self.issue(
+                    context,
+                    page=page.number,
+                    title="Dimensão diferente da pedida",
+                    category="Página",
+                    found_value=(
+                        f"{final[0]:.1f} × {final[1]:.1f} mm no tamanho final "
+                        f"({box} {in_file[0]:.1f} × {in_file[1]:.1f} mm, "
+                        f"escala 1:{profile.file_scale:g})"
+                    ),
+                    expected_value=(
+                        f"{expected[0]:g} × {expected[1]:g} mm (± {tolerance:g} mm)"
+                    ),
+                    description=description,
+                    recommendation=recommendation,
+                )
+            )
         return issues

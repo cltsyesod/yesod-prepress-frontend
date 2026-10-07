@@ -1,5 +1,6 @@
 import supabase from '@/lib/supabase/client'
 import { getErrorMessage, normalizeRow, unwrap } from '@/lib/supabase/errors'
+import { profileService } from '@/services/profileService'
 import type { ProductionProfile } from '@/types'
 
 export type AnalysisJobStatus =
@@ -76,6 +77,11 @@ export interface StartAnalysisParams {
 export const toJob = (row: Record<string, unknown>) => normalizeRow<AnalysisJob>(row)
 export const toIssue = (row: Record<string, unknown>) => normalizeRow<AnalysisIssue>(row)
 
+// Os perfis ainda vivem no navegador: o perfil completo segue junto com o job
+// para que o analisador aplique os parâmetros definidos pelo operador.
+const resolveProfile = (idOrName: string): ProductionProfile | undefined =>
+  profileService.getProfilesSync().find((p) => p.id === idOrName || p.name === idOrName)
+
 export const analysisJobsService = {
   /**
    * Inicia a análise:
@@ -121,6 +127,7 @@ export const analysisJobsService = {
           jobId: job.id,
           fileId: fileId,
           profileId: profileId,
+          productionProfile: resolveProfile(profileId),
         },
         headers: token ? { Authorization: `Bearer ${token}` } : undefined,
       })
@@ -248,6 +255,7 @@ export const analysisJobsService = {
           jobId: job.id,
           fileId: job.file,
           profileId: job.production_profile,
+          productionProfile: resolveProfile(job.production_profile),
         },
         headers: token ? { Authorization: `Bearer ${token}` } : undefined,
       })

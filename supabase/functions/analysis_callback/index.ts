@@ -1,11 +1,31 @@
 import { createClient } from 'npm:@supabase/supabase-js@2'
 import { corsHeaders } from '../_shared/cors.ts'
+import { verifySignature } from '../_shared/analyzer.ts'
+
+// Recebe os eventos do yesod-prepress-analyzer: progress, issues, completed, failed, cancelled.
+// Deploy com --no-verify-jwt: a autenticação é a assinatura HMAC (ANALYZER_CALLBACK_SECRET).
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), {
     status,
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   })
+
+const JOB_STATUSES = [
+  'queued',
+  'preparing',
+  'downloading',
+  'validating',
+  'extracting',
+  'analyzing',
+  'generating_preview',
+  'completed',
+  'completed_with_warnings',
+  'failed',
+  'cancelled',
+]
+const FINAL_STATUSES = ['completed', 'completed_with_warnings', 'failed', 'cancelled']
+const SEVERITIES = ['critical', 'warning', 'informational']
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
@@ -19,116 +39,103 @@ Deno.serve(async (req: Request) => {
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')
     const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+    const callbackSecret = Deno.env.get('ANALYZER_CALLBACK_SECRET')
 
-    if (!supabaseUrl || !serviceRoleKey) {
-      return json(500, { error: 'Supabase configuration missing in Edge Function' })
+    if (!supabaseUrl || !serviceRoleKey || !callbackSecret) {
+      return json(500, { error: 'Callback do analisador não configurado' })
     }
 
-    const body = await req.json().catch(() => ({}))
-    const jobId = body.job_id || body.jobId || body.analysisId || body.analysis_id
-    const incomingStatus = body.status
+    // A assinatura cobre o corpo exatamente como recebido.
+    const raw = await req.text()
+    const valid = await verifySignature(
+      callbackSecret,
+      req.headers.get('X-Yesod-Timestamp'),
+      req.headers.get('X-Yesod-Request-Id'),
+      req.headers.get('X-Yesod-Signature'),
+      raw,
+    )
+    if (!valid) {
+      return json(401, { error: 'Assinatura inválida' })
+    }
 
-    if (!jobId || !incomingStatus) {
-      return json(400, { error: 'job_id e status são obrigatórios' })
+    const body = JSON.parse(raw)
+    const jobId = body.analysisId
+    const event = String(body.event || '')
+    const sequence = Number(body.sequence) || 0
+    if (!jobId || !body.event_id || !event) {
+      return json(400, { error: 'analysisId, event_id e event são obrigatórios' })
     }
 
     const db = createClient(supabaseUrl, serviceRoleKey)
 
-    // 1. Buscar job
     const { data: job, error: findErr } = await db
       .from('analysis_jobs')
       .select('*')
       .eq('id', jobId)
       .maybeSingle()
-
     if (findErr || !job) {
+      // 4xx diferente de 409/429 faz o analisador desistir em vez de repetir.
       return json(404, { error: 'Análise não encontrada' })
     }
 
-    const hasError = Boolean(body.error_code || body.errorMessage || body.error_message)
-    const isCompleted = incomingStatus === 'completed' && !hasError
-    const finalStatus = isCompleted ? 'completed' : incomingStatus === 'completed' ? 'failed' : incomingStatus
-
-    const patch: Record<string, unknown> = {
-      status: finalStatus,
-      progress: body.progress !== undefined ? Math.max(0, Math.min(100, Number(body.progress))) : (isCompleted ? 100 : job.progress),
-      error_code: body.error_code || body.errorCode || '',
-      error_message: body.error_message || body.errorMessage || '',
-      current_step: isCompleted
-        ? 'Análise concluída com sucesso'
-        : hasError
-          ? (body.error_message || 'Falha no processamento')
-          : (body.current_step || body.currentStep || 'Processando análise'),
+    // Idempotência: o analisador repete o mesmo event_id em caso de falha de rede.
+    const { error: dupErr } = await db
+      .from('analysis_callback_events')
+      .insert({ event_id: body.event_id, analysis: jobId, event, sequence })
+    if (dupErr) {
+      if (dupErr.code === '23505') return json(409, { duplicate: true })
+      return json(500, { error: dupErr.message })
     }
 
-    if (['completed', 'completed_with_warnings', 'failed', 'cancelled'].includes(finalStatus)) {
-      patch.completed_at = new Date().toISOString()
-    }
-
-    const { error: upErr } = await db.from('analysis_jobs').update(patch).eq('id', jobId)
-    if (upErr) {
-      return json(500, { error: upErr.message })
-    }
-
-    // 2. Se status="completed" e sem erro, inserir issues
-    if (isCompleted && Array.isArray(body.issues) && body.issues.length > 0) {
-      const rows = body.issues.map((i: any) => {
-        let rawSev = String(i.severity || 'informational').toLowerCase()
-        if (rawSev === 'info') rawSev = 'informational'
-        if (!['critical', 'warning', 'informational'].includes(rawSev)) {
-          rawSev = 'informational'
-        }
-
-        return {
-          analysis: jobId,
-          project: job.project,
-          file: job.file,
-          user_id: job.user_id,
-          rule_code: i.rule_code || i.ruleCode || '',
-          title: i.title || '',
-          category: i.category || '',
-          severity: rawSev,
-          status: i.status || 'pending',
-          page: typeof i.page === 'number' ? i.page : 1,
-          object_id: i.object_id || i.objectId || '',
-          coordinates:
-            typeof (i.coordinates || i.coords) === 'string'
-              ? (i.coordinates || i.coords)
-              : JSON.stringify(i.coordinates || i.coords || ''),
-          found_value: i.found_value || i.foundValue || '',
-          expected_value: i.expected_value || i.expectedValue || '',
-          description: i.description || '',
-          recommendation: i.recommendation || '',
-          confidence: typeof i.confidence === 'number' ? i.confidence : 1.0,
-          source: i.source || 'color_inspector',
-          can_auto_correct: Boolean(i.can_auto_correct || i.canAutoCorrect),
-        }
-      })
-
+    // Ocorrências chegam em lotes no evento "issues".
+    if (event === 'issues' && Array.isArray(body.issues) && body.issues.length > 0) {
+      const rows = body.issues.map((i: any) => ({
+        analysis: jobId,
+        project: job.project,
+        file: job.file,
+        user_id: job.user_id,
+        rule_code: String(i.rule_code || ''),
+        title: String(i.title || ''),
+        category: String(i.category || ''),
+        severity: SEVERITIES.includes(i.severity) ? i.severity : 'informational',
+        status: 'pending',
+        page: Number.isInteger(i.page) ? i.page : 0,
+        object_id: String(i.object_id || ''),
+        coordinates: typeof i.coordinates === 'string' ? i.coordinates : JSON.stringify(i.coordinates ?? ''),
+        found_value: String(i.found_value || ''),
+        expected_value: String(i.expected_value || ''),
+        description: String(i.description || ''),
+        recommendation: String(i.recommendation || ''),
+        confidence: typeof i.confidence === 'number' ? i.confidence : 100,
+        source: String(i.source || 'external_analyzer'),
+        can_auto_correct: Boolean(i.can_auto_correct),
+      }))
       const { error: issErr } = await db.from('analysis_issues').insert(rows)
       if (issErr) {
-        console.error('Erro ao inserir issues:', issErr)
+        // Libera o event_id para que a nova tentativa do analisador seja aceita.
+        await db.from('analysis_callback_events').delete().eq('event_id', body.event_id)
+        return json(500, { error: issErr.message })
       }
     }
 
-    // 3. Contar issues pendentes do projeto e atualizar projects table
-    if (job.project) {
-      try {
-        const { count } = await db
-          .from('analysis_issues')
-          .select('*', { count: 'exact', head: true })
-          .eq('project', job.project)
-          .eq('status', 'pending')
+    // Status: só avança; eventos antigos não sobrescrevem um estado mais novo.
+    if (sequence > (job.last_sequence ?? 0) && !FINAL_STATUSES.includes(job.status)) {
+      const status = JOB_STATUSES.includes(body.status) ? body.status : job.status
+      const patch: Record<string, unknown> = {
+        status,
+        last_sequence: sequence,
+        progress: Math.max(0, Math.min(100, Number(body.progress ?? job.progress) || 0)),
+        current_step: String(body.currentStep || job.current_step || ''),
+        error_code: String(body.errorCode || ''),
+        error_message: String(body.errorMessage || ''),
+      }
+      if (FINAL_STATUSES.includes(status)) patch.completed_at = new Date().toISOString()
 
-        await db
-          .from('projects')
-          .update({
-            issue_count: count ?? 0,
-            status: 'needs_review',
-          })
-          .eq('id', job.project)
-      } catch (projErr) {
-        console.warn('Atualização de projects ignorada ou tabela ausente:', projErr)
+      const { error: upErr } = await db.from('analysis_jobs').update(patch).eq('id', jobId)
+      if (upErr) return json(500, { error: upErr.message })
+
+      if (event === 'completed' && job.project) {
+        await updateProjectSummary(db, job.project)
       }
     }
 
@@ -137,3 +144,29 @@ Deno.serve(async (req: Request) => {
     return json(500, { error: err?.message || 'Internal server error' })
   }
 })
+
+async function updateProjectSummary(db: any, projectId: string) {
+  try {
+    const { data: pending } = await db
+      .from('analysis_issues')
+      .select('severity')
+      .eq('project', projectId)
+      .eq('status', 'pending')
+    const severities = (pending ?? []).map((row: any) => row.severity)
+    const actionable = severities.filter((s: string) => s !== 'informational')
+    await db
+      .from('projects')
+      .update({
+        issue_count: actionable.length,
+        severity: severities.includes('critical')
+          ? 'critical'
+          : severities.includes('warning')
+            ? 'warning'
+            : 'none',
+        status: actionable.length > 0 ? 'needs_review' : 'pending_approval',
+      })
+      .eq('id', projectId)
+  } catch (projErr) {
+    console.warn('Resumo do projeto não atualizado:', projErr)
+  }
+}

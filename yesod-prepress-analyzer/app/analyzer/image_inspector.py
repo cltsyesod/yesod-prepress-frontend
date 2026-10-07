@@ -6,11 +6,28 @@ import pikepdf
 
 from app.analyzer.context import ImageInfo
 
+_ICC_COMPONENTS = {1: "Gray", 3: "RGB", 4: "CMYK"}
+
 
 def _name(value: object) -> str:
+    """Readable color-space label that keeps managed (ICCBased) and Device spaces apart."""
+
     if value is None:
         return "Unknown"
-    if isinstance(value, pikepdf.Array):
+    if isinstance(value, pikepdf.Array) and len(value):
+        kind = str(value[0]).lstrip("/")
+        try:
+            if kind == "ICCBased":
+                components = int(value[1].get("/N", 0))
+                return f"ICCBased {_ICC_COMPONENTS.get(components, components)}"
+            if kind == "Indexed":
+                return f"Indexed {_name(value[1])}"
+            if kind == "Separation":
+                return f"Separation/{str(value[1]).lstrip('/')}"
+        except Exception:
+            return kind
+        if kind == "DeviceN":
+            return "DeviceN"
         return "/".join(str(item).lstrip("/") for item in value[:2])
     return str(value).lstrip("/")
 

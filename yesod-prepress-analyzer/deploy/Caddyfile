@@ -1,0 +1,8 @@
+{$ANALYZER_DOMAIN} {
+	encode gzip
+	# Só JSON de jobs passa por aqui; os PDFs são baixados pelo worker.
+	request_body {
+		max_size 2MB
+	}
+	reverse_proxy api:8000
+}

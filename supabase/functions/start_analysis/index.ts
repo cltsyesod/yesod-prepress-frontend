@@ -1,5 +1,6 @@
 import { createClient } from 'npm:@supabase/supabase-js@2'
 import { corsHeaders } from '../_shared/cors.ts'
+import { signRequest, toAnalyzerProfile } from '../_shared/analyzer.ts'
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), {
@@ -20,7 +21,7 @@ Deno.serve(async (req: Request) => {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')
     const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')
     const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
-    const analyzerUrl = (Deno.env.get('ANALYZER_URL') || 'http://localhost:8000').replace(/\/+$/, '')
+    const analyzerUrl = (Deno.env.get('ANALYZER_URL') || '').replace(/\/+$/, '')
 
     if (!supabaseUrl || !serviceRoleKey) {
       return json(500, { error: 'Supabase configuration missing in Edge Function' })
@@ -107,54 +108,107 @@ Deno.serve(async (req: Request) => {
       signedUrl = signedFallback.signedUrl
     }
 
-    // 5. Fazer POST para o analisador Python
-    const callbackUrl = `${supabaseUrl}/functions/v1/analysis_callback`
-    const analyzerPayload = {
-      job_id: jobId,
-      pdf_url: signedUrl,
-      callback_url: callbackUrl,
-      production_profile_id: profileId,
-    }
-
-    let externalJobId = jobId
-    let externalDispatched = false
-
-    try {
-      const analyzerRes = await fetch(`${analyzerUrl}/analyze`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(analyzerPayload),
-      })
-
-      if (analyzerRes.ok) {
-        const analyzerData = await analyzerRes.json().catch(() => ({}))
-        if (analyzerData.external_job_id) {
-          externalJobId = analyzerData.external_job_id
-        }
-        externalDispatched = true
-
+    // 5. Enviar o job assinado ao analisador Python (POST /v1/jobs)
+    if (analyzerUrl) {
+      const inboundSecret = Deno.env.get('ANALYZER_INBOUND_SECRET')
+      const failJob = async (code: string, message: string) => {
         await adminDb
           .from('analysis_jobs')
           .update({
-            external_job_id: externalJobId,
-            status: 'downloading',
-            current_step: 'Downloading PDF',
-            started_at: new Date().toISOString(),
+            status: 'failed',
+            error_code: code,
+            error_message: message,
+            current_step: 'Falha ao enviar para o analisador',
+            completed_at: new Date().toISOString(),
           })
           .eq('id', jobId)
-
-        return json(200, {
-          success: true,
-          external_job_id: externalJobId,
-          dispatch: 'external_analyzer',
-        })
+        return json(502, { error: message })
       }
-    } catch (_fetchErr: any) {
-      // Analisador externo inacessível (ex: localhost em ambiente de nuvem) — acionando motor interno de preflight
+
+      if (!inboundSecret) {
+        return failJob('analyzer_not_configured', 'ANALYZER_INBOUND_SECRET não configurado')
+      }
+
+      const { data: job } = await adminDb
+        .from('analysis_jobs')
+        .select('project, version')
+        .eq('id', jobId)
+        .maybeSingle()
+      const projectId = String(job?.project || file.project || '')
+
+      const { data: project } = projectId
+        ? await adminDb.from('projects').select('job_ticket').eq('id', projectId).maybeSingle()
+        : { data: null }
+
+      // Perfil: enviado pelo frontend ou salvo em production_profiles.
+      let profileSettings: Record<string, unknown> =
+        body.productionProfile && typeof body.productionProfile === 'object'
+          ? body.productionProfile
+          : {}
+      if (!Object.keys(profileSettings).length && /^[0-9a-f-]{36}$/i.test(profileId)) {
+        const { data: stored } = await adminDb
+          .from('production_profiles')
+          .select('name, settings')
+          .eq('id', profileId)
+          .maybeSingle()
+        if (stored) profileSettings = { ...(stored.settings ?? {}), name: stored.name }
+      }
+
+      const payload = JSON.stringify({
+        analysisId: jobId,
+        projectId: projectId || 'sem-projeto',
+        fileId,
+        versionId: String(job?.version || file.version || ''),
+        productionProfile: toAnalyzerProfile(profileId, profileSettings, project?.job_ticket ?? {}),
+        downloadUrl: signedUrl,
+        fileSha256: /^[0-9a-f]{64}$/i.test(file.sha256 || '') ? file.sha256 : undefined,
+        fileSizeBytes: file.size_bytes || undefined,
+        callbackUrl: `${supabaseUrl}/functions/v1/analysis_callback`,
+      })
+      const timestamp = String(Math.floor(Date.now() / 1000))
+      const requestId = crypto.randomUUID()
+
+      let analyzerRes: Response
+      try {
+        analyzerRes = await fetch(`${analyzerUrl}/v1/jobs`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Yesod-Timestamp': timestamp,
+            'X-Yesod-Request-Id': requestId,
+            'X-Yesod-Signature': await signRequest(inboundSecret, timestamp, requestId, payload),
+          },
+          body: payload,
+        })
+      } catch (fetchErr: any) {
+        return failJob('analyzer_unreachable', `Analisador inacessível: ${fetchErr?.message || fetchErr}`)
+      }
+
+      if (!analyzerRes.ok) {
+        const detail = await analyzerRes.text().catch(() => '')
+        return failJob(
+          'analyzer_rejected',
+          `Analisador recusou o job (HTTP ${analyzerRes.status}): ${detail.slice(0, 500)}`,
+        )
+      }
+
+      const accepted = await analyzerRes.json().catch(() => ({}))
+      const externalJobId = String(accepted.external_job_id || jobId)
+      await adminDb
+        .from('analysis_jobs')
+        .update({
+          external_job_id: externalJobId,
+          status: 'queued',
+          current_step: 'Na fila do analisador',
+          started_at: new Date().toISOString(),
+        })
+        .eq('id', jobId)
+
+      return json(200, { success: true, external_job_id: externalJobId, dispatch: 'external_analyzer' })
     }
 
-    if (!externalDispatched) {
-      // 6. Motor interno de pré-impressão (preflight engine)
+    // Sem ANALYZER_URL: verificação simplificada (apenas cores especiais), útil só em desenvolvimento.
+    if (!analyzerUrl) {
       await adminDb
         .from('analysis_jobs')
         .update({

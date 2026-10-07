@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 
 class RuleOverride(BaseModel):
@@ -12,6 +12,11 @@ class RuleOverride(BaseModel):
     enabled: bool = True
     severity: Literal["critical", "warning", "informational"] | None = None
     parameters: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("severity", mode="before")
+    @classmethod
+    def accept_short_severity(cls, value: object) -> object:
+        return "informational" if value == "info" else value
 
 
 class ProductionProfile(BaseModel):
@@ -71,6 +76,50 @@ class ProductionProfile(BaseModel):
             "maximumInkCoveragePercent", "maximum_ink_coverage_percent", "inkCoverageLimit"
         ),
     )
+    # Job ticket parameters. All are chosen per job by the operator; none is a fixed rule.
+    rgb_policy: Literal["managed", "cmyk_only"] = Field(
+        default="managed",
+        validation_alias=AliasChoices("rgbPolicy", "rgb_policy"),
+        description=(
+            "managed: RGB with an ICC profile is accepted and converted by the RIP; "
+            "cmyk_only: any RGB content is reported."
+        ),
+    )
+    file_scale: float = Field(
+        default=1.0,
+        gt=0,
+        le=1000,
+        validation_alias=AliasChoices("fileScale", "file_scale", "scale"),
+        description="Scale factor to the final size: 2 for a 1:2 file, 10 for 1:10.",
+    )
+    final_width_mm: float | None = Field(
+        default=None,
+        gt=0,
+        validation_alias=AliasChoices("finalWidthMm", "final_width_mm"),
+    )
+    final_height_mm: float | None = Field(
+        default=None,
+        gt=0,
+        validation_alias=AliasChoices("finalHeightMm", "final_height_mm"),
+    )
+    dimension_tolerance_mm: float = Field(
+        default=1.0,
+        ge=0,
+        validation_alias=AliasChoices("dimensionToleranceMm", "dimension_tolerance_mm"),
+    )
+
+    @field_validator("file_scale", mode="before")
+    @classmethod
+    def parse_ratio(cls, value: object) -> object:
+        """Accept the operator notation "1:5" as well as the factor 5."""
+
+        if isinstance(value, str) and ":" in value:
+            left, _, right = value.partition(":")
+            try:
+                return float(right) / float(left)
+            except (ValueError, ZeroDivisionError):
+                return value
+        return value
 
     def rule_override(self, code: str) -> RuleOverride | None:
         return next((rule for rule in self.rules if rule.code == code), None)
