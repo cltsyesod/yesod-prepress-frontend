@@ -205,7 +205,12 @@ export default function JobWorkspacePage() {
               <Loader2 className="h-4 w-4 animate-spin" />
               {analysis.job.current_step || 'Na fila do analisador'}
             </span>
-            <span className="text-muted-foreground">{analysis.job.progress}%</span>
+            <span className="flex items-center gap-3 text-muted-foreground">
+              {analysis.job.progress}%
+              <Button size="sm" variant="ghost" onClick={analysis.cancelAnalysis}>
+                Cancelar
+              </Button>
+            </span>
           </div>
           <Progress value={analysis.job.progress} />
         </div>
