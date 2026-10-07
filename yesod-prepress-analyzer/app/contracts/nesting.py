@@ -79,6 +79,12 @@ class NestingCutLines(BaseModel):
 
     add: bool = False
     name: str = "CutContour"
+    offset_mm: float = Field(
+        default=0.0, ge=-50, le=500, validation_alias=AliasChoices("offsetMm", "offset_mm")
+    )
+    merge_mm: float = Field(
+        default=3.0, ge=0, le=500, validation_alias=AliasChoices("mergeMm", "merge_mm")
+    )
 
 
 class NestingRequest(BaseModel):

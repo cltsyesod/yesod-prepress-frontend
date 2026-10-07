@@ -33,9 +33,13 @@ class SourcePiece:
 @dataclass(slots=True)
 class CutLines:
     add: bool = False
-    """Draw the cut line of pieces that have no die line of their own."""
+    """Generate the die line of pieces that have none: traced around the artwork."""
     name: str = "CutContour"
     width_pt: float = 0.25
+    offset_mm: float = 0.0
+    """Distance from the artwork to the generated die line, at final size (+ = outside)."""
+    merge_mm: float = 3.0
+    """Artwork closer than this is one piece (letters of a word); farther apart, separate."""
 
 
 def _num(value: float) -> str:

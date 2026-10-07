@@ -170,3 +170,40 @@ def test_each_die_line_on_a_sheet_is_its_own_piece(tmp_path):
     summary = plan([item], PlanOptions(width_mm=250, gap_mm=5), tmp_path / "out.pdf")
     # 3 shapes x 2 copies, each placed on its own (the sheet is 330 mm, wider than the roll).
     assert summary["placed"] == 6 and summary["unplaced"] == []
+
+
+def art_only_pdf(path: Path) -> Path:
+    """Client file with artwork only: a circle and a square, no die line."""
+
+    pdf = pikepdf.Pdf.new()
+    pdf.add_blank_page(page_size=(230 * MM, 110 * MM))
+    k = 0.5523 * 50 * MM
+    cx, cy, r = 55 * MM, 55 * MM, 50 * MM
+    circle = (
+        f"{cx + r:.2f} {cy:.2f} m "
+        f"{cx + r:.2f} {cy + k:.2f} {cx + k:.2f} {cy + r:.2f} {cx:.2f} {cy + r:.2f} c "
+        f"{cx - k:.2f} {cy + r:.2f} {cx - r:.2f} {cy + k:.2f} {cx - r:.2f} {cy:.2f} c "
+        f"{cx - r:.2f} {cy - k:.2f} {cx - k:.2f} {cy - r:.2f} {cx:.2f} {cy - r:.2f} c "
+        f"{cx + k:.2f} {cy - r:.2f} {cx + r:.2f} {cy - k:.2f} {cx + r:.2f} {cy:.2f} c h"
+    )
+    square = f"{125 * MM:.2f} {5 * MM:.2f} {100 * MM:.2f} {100 * MM:.2f} re"
+    pdf.pages[0].contents_add(f"0 1 1 0 k {circle} f 1 0 1 0 k {square} f".encode())
+    pdf.save(path)
+    return path
+
+
+def test_system_generates_die_line_around_the_art(tmp_path):
+    item = PlanItem("art", art_only_pdf(tmp_path / "art.pdf"), "Arte", 1)
+    options = PlanOptions(
+        width_mm=400, gap_mm=5, cut_lines=CutLines(add=True, offset_mm=2), allow_rotation=False
+    )
+    out = tmp_path / "out.pdf"
+    summary = plan([item], options, out)
+    # Two separate shapes -> two pieces, each with a generated die line.
+    assert summary["placed"] == 2 and summary["dieLines"] == []
+    with pikepdf.open(out) as pdf:
+        cut = die_line(pdf.pages[0], ["CutContour"])
+    assert cut is not None
+    widths = sorted(round((g.bounds[2] - g.bounds[0]) / MM) for g in cut.geoms)
+    # 100 mm shapes + 2 mm of clearance on each side, outside the artwork.
+    assert widths == [104, 104]

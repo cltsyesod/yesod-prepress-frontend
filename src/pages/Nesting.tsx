@@ -282,8 +282,11 @@ export default function NestingPage() {
 
           <div className="flex items-start justify-between gap-3">
             <div>
-              <Label>Linha de corte nas peças sem faca</Label>
-              <p className="text-xs text-muted-foreground">Contorno do formato final na cor especial abaixo.</p>
+              <Label>Gerar faca pelo contorno da arte</Label>
+              <p className="text-xs text-muted-foreground">
+                Para arquivos sem faca: o sistema contorna cada peça por fora da arte. Cada forma separada vira
+                uma peça.
+              </p>
             </div>
             <Switch
               checked={params.cutLines.add}
@@ -291,11 +294,37 @@ export default function NestingPage() {
             />
           </div>
           {params.cutLines.add && (
-            <Input
-              aria-label="Nome da cor de corte"
-              value={params.cutLines.name}
-              onChange={(e) => setParams((p) => ({ ...p, cutLines: { ...p.cutLines, name: e.target.value || 'CutContour' } }))}
-            />
+            <div className="grid grid-cols-3 gap-3">
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Afastamento da arte (mm)</Label>
+                <Input
+                  inputMode="decimal"
+                  value={params.cutLines.offsetMm ?? 0}
+                  onChange={(e) =>
+                    setParams((p) => ({ ...p, cutLines: { ...p.cutLines, offsetMm: numberOr(e.target.value, 0) } }))
+                  }
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Juntar artes a menos de (mm)</Label>
+                <Input
+                  inputMode="decimal"
+                  value={params.cutLines.mergeMm ?? 3}
+                  onChange={(e) =>
+                    setParams((p) => ({ ...p, cutLines: { ...p.cutLines, mergeMm: numberOr(e.target.value, 0) } }))
+                  }
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Cor da faca</Label>
+                <Input
+                  value={params.cutLines.name}
+                  onChange={(e) =>
+                    setParams((p) => ({ ...p, cutLines: { ...p.cutLines, name: e.target.value || 'CutContour' } }))
+                  }
+                />
+              </div>
+            </div>
           )}
 
           {problem && params.material.widthMm > 0 && (

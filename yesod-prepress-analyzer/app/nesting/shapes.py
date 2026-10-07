@@ -248,5 +248,44 @@ def page_pieces(
     return pieces
 
 
+def contour_pieces(
+    pdf_path,
+    page: pikepdf.Page,
+    page_index: int,
+    offset_pt: float,
+    merge_pt: float,
+) -> list[PieceShape]:
+    """Pieces of a page without die line: the system creates the die line itself.
+
+    Everything printed is traced; art closer than `merge_pt` belongs to the same
+    piece (letters of a word, a logo and its text), separate shapes become separate
+    pieces. Each die line runs `offset_pt` outside the artwork, so nothing printed
+    is ever cut off.
+    """
+
+    from app.fixes.contour import artwork_silhouette  # pdfium only needed here
+
+    media = _page_box(page, "/MediaBox") or (0.0, 0.0, 0.0, 0.0)
+    crop = _page_box(page, "/CropBox") or media
+    visible = box(*crop).intersection(box(*media))
+    bleed_box = _page_box(page, "/BleedBox")
+    region = box(*bleed_box).intersection(visible) if bleed_box else visible
+    silhouette = artwork_silhouette(pdf_path, page_index, region.bounds, origin=crop[:2])
+    if silhouette is None or silhouette.is_empty:
+        return []
+
+    reach = max(merge_pt, offset_pt, 0.0)
+    grouped = silhouette.buffer(reach, join_style="round", quad_segs=8)
+    die = grouped.buffer(offset_pt - reach, join_style="round", quad_segs=8) if reach else grouped
+    parts = die.geoms if isinstance(die, MultiPolygon) else [die]
+    pieces = [
+        PieceShape(cut=Polygon(part.exterior), bleed=Polygon(part.exterior), from_die_line=False)
+        for part in parts
+        if isinstance(part, Polygon) and not part.is_empty
+    ]
+    pieces.sort(key=lambda p: (-round(p.cut.bounds[3]), p.cut.bounds[0]))
+    return pieces
+
+
 def scaled(geometry: BaseGeometry, factor: float) -> BaseGeometry:
     return affinity.scale(geometry, xfact=factor, yfact=factor, origin=(0, 0))

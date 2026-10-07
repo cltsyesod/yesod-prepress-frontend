@@ -80,7 +80,12 @@ class NestingService:
                     gap_mm=material.gap_mm,
                     allow_rotation=request.rotation.allow,
                     rotation_step=request.rotation.step_degrees,
-                    cut_lines=CutLines(add=request.cut_lines.add, name=request.cut_lines.name),
+                    cut_lines=CutLines(
+                        add=request.cut_lines.add,
+                        name=request.cut_lines.name,
+                        offset_mm=request.cut_lines.offset_mm,
+                        merge_mm=request.cut_lines.merge_mm,
+                    ),
                     max_roll_length_mm=material.max_roll_length_mm,
                 )
                 output = workspace / "montagem.pdf"

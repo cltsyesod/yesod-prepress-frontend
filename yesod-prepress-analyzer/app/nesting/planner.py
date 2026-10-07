@@ -7,7 +7,7 @@ import pikepdf
 
 from app.nesting.engine import Material, NestItem, NestResult, efficiency, nest, rotation_steps
 from app.nesting.imposition import CutLines, SourcePiece, build_layout
-from app.nesting.shapes import page_pieces, scaled
+from app.nesting.shapes import contour_pieces, page_pieces, scaled
 
 MM = 72 / 25.4
 
@@ -72,6 +72,16 @@ def plan(items: list[PlanItem], options: PlanOptions, output: Path) -> dict:
                 page = pdf.pages[number - 1]
                 bleed_in_file = item.bleed_mm / item.file_scale * MM
                 shapes = page_pieces(page, item.cut_names, bleed_in_file, item.use_die_line)
+                if options.cut_lines.add and not shapes[0].from_die_line:
+                    # No die line in the file: the system traces it around the artwork.
+                    traced = contour_pieces(
+                        item.path,
+                        page,
+                        number - 1,
+                        offset_pt=options.cut_lines.offset_mm / item.file_scale * MM,
+                        merge_pt=options.cut_lines.merge_mm / item.file_scale * MM,
+                    )
+                    shapes = traced or shapes
                 for index, shape in enumerate(shapes, start=1):
                     key = f"{item.key}#{number}.{index}"
                     sources[key] = SourcePiece(

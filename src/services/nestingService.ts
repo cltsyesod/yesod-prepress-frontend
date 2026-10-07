@@ -12,7 +12,8 @@ export interface NestingParams {
     gapMm: number
   }
   rotation: { allow: boolean; stepDegrees: number }
-  cutLines: { add: boolean; name: string }
+  /** Faca gerada pelo contorno da arte (arquivos sem faca). Valores no tamanho final. */
+  cutLines: { add: boolean; name: string; offsetMm?: number; mergeMm?: number }
 }
 
 export interface NestingItem {
