@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Check, ChevronDown, CircleAlert, Info, OctagonX, RotateCcw, Undo2 } from 'lucide-react'
+import { Check, ChevronDown, CircleAlert, Info, OctagonX, RotateCcw, Undo2, Wand2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
@@ -38,9 +38,12 @@ interface IssueChecklistProps {
   issues: AnalysisIssue[]
   onDecide: (issueId: string, status: string, reason?: string) => Promise<void>
   onShowPage: (page: number) => void
+  /** Aplica a correção automática oferecida pela ocorrência. */
+  onFix: (issue: AnalysisIssue) => Promise<void>
+  fixing: boolean
 }
 
-export function IssueChecklist({ issues, onDecide, onShowPage }: IssueChecklistProps) {
+export function IssueChecklist({ issues, onDecide, onShowPage, onFix, fixing }: IssueChecklistProps) {
   if (!issues.length) {
     return (
       <div className="rounded-lg border border-emerald-500/40 bg-emerald-500/5 p-6 text-center">
@@ -79,6 +82,8 @@ export function IssueChecklist({ issues, onDecide, onShowPage }: IssueChecklistP
                   informational={group.severity === 'informational'}
                   onDecide={onDecide}
                   onShowPage={onShowPage}
+                  onFix={onFix}
+                  fixing={fixing}
                 />
               ))}
             </ul>
@@ -94,11 +99,15 @@ function IssueItem({
   informational,
   onDecide,
   onShowPage,
+  onFix,
+  fixing,
 }: {
   issue: AnalysisIssue
   informational: boolean
   onDecide: IssueChecklistProps['onDecide']
   onShowPage: IssueChecklistProps['onShowPage']
+  onFix: IssueChecklistProps['onFix']
+  fixing: boolean
 }) {
   const [open, setOpen] = useState(false)
   const [askReason, setAskReason] = useState(false)
@@ -130,7 +139,12 @@ function IssueItem({
         aria-expanded={open}
       >
         <div className="min-w-0 flex-1">
-          <p className="font-medium text-foreground">{issue.title}</p>
+          <p className="flex items-center gap-2 font-medium text-foreground">
+            {issue.title}
+            {issue.fix && !decided && (
+              <Wand2 className="h-3.5 w-3.5 shrink-0 text-primary" aria-label="Correção automática disponível" />
+            )}
+          </p>
           <p className="text-sm text-muted-foreground">
             {issue.found_value}
             {issue.expected_value && !informational && (
@@ -171,6 +185,21 @@ function IssueItem({
               <span className="font-medium">Como resolver: </span>
               {issue.recommendation}
             </p>
+          )}
+
+          {issue.fix && !decided && (
+            <div className="flex flex-col gap-2 rounded-md bg-primary/5 p-2.5 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-xs text-muted-foreground">
+                {issue.fix.preview ||
+                  (issue.fix.target === 'pdf'
+                    ? 'Gera uma versão corrigida; o original fica guardado.'
+                    : 'Atualiza a ficha do trabalho e reanalisa.')}
+              </p>
+              <Button size="sm" className="shrink-0" disabled={busy || fixing} onClick={() => onFix(issue)}>
+                <Wand2 className="h-4 w-4" />
+                {issue.fix.label}
+              </Button>
+            </div>
           )}
 
           {!informational &&

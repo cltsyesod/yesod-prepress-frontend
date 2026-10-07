@@ -62,11 +62,29 @@ export interface AnalysisIssue {
   confidence: number
   source: string
   can_auto_correct: boolean
+  fix: IssueFix | null
   decision_reason: string
   decision_user: string
   decision_at: string
   created: string
   updated: string
+}
+
+/**
+ * Correção oferecida pelo analisador. `pdf`: gera uma cópia corrigida do arquivo;
+ * `ticket`: só altera a ficha do trabalho (ex.: escala) e reanalisa.
+ */
+export interface IssueFix {
+  id: string
+  label: string
+  target: 'pdf' | 'ticket'
+  preview?: string
+  params?: Record<string, unknown>
+}
+
+export interface FixRequest {
+  id: string
+  params?: Record<string, unknown>
 }
 
 export interface StartAnalysisParams {
@@ -136,6 +154,26 @@ export const analysisJobsService = {
     }
 
     return job
+  },
+
+  /**
+   * Correção automática: a Edge Function cria a cópia corrigida e o job; o analisador
+   * aplica as correções sobre `fileId`, salva a cópia e a analisa. O original é mantido.
+   */
+  async startCorrection(fileId: string, profileId: string, fixes: FixRequest[]): Promise<string> {
+    const { data, error } = await supabase.functions.invoke('start_analysis', {
+      body: {
+        fileId,
+        profileId: profileId || 'default',
+        productionProfile: resolveProfile(profileId),
+        fixes,
+      },
+    })
+    if (error) {
+      const detail = await (error as { context?: Response }).context?.json?.().catch(() => null)
+      throw new Error(detail?.error || getErrorMessage(error))
+    }
+    return String(data?.jobId || '')
   },
 
   /**

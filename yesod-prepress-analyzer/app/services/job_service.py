@@ -13,8 +13,10 @@ from app.contracts.issue import AnalysisIssue
 from app.contracts.job_request import JobRequest
 from app.core.config import Settings
 from app.core.exceptions import AnalyzerError, JobCancelled
+from app.fixes.engine import apply_fixes
 from app.services.callback_client import CallbackClient
 from app.services.file_downloader import FileDownloader
+from app.services.file_uploader import FileUploader
 from app.services.temp_files import job_workspace
 
 logger = logging.getLogger(__name__)
@@ -32,6 +34,7 @@ class JobService:
         self.downloader = FileDownloader(settings)
         self.callbacks = CallbackClient(settings)
         self.engine = AnalyzerEngine(settings)
+        self.uploader = FileUploader(settings)
 
     def _key(self, analysis_id: str, suffix: str) -> str:
         return f"yesod:analysis:{analysis_id}:{suffix}"
@@ -101,6 +104,23 @@ class JobService:
                 await self.downloader.download(request.file, pdf_path)
                 if self._cancelled(request.analysis_id):
                     raise JobCancelled("job cancelled after download")
+                corrected: dict[str, object] = {}
+                if request.fixes:
+                    await notify("progress", "analyzing", 14, "Aplicando correções")
+                    fixed_path = workspace / "corrected.pdf"
+                    applied = apply_fixes(
+                        pdf_path, fixed_path, request.fixes, request.production_profile
+                    )
+                    await notify("progress", "analyzing", 18, "Salvando o PDF corrigido")
+                    size, sha256 = await self.uploader.upload(
+                        str(request.output_upload_url), fixed_path
+                    )
+                    corrected = {
+                        "sizeBytes": size,
+                        "sha256": sha256,
+                        "appliedFixes": [fix.model_dump() for fix in applied],
+                    }
+                    pdf_path = fixed_path
                 await notify("progress", "validating", 20, "Validando estrutura PDF")
                 await notify("progress", "extracting", 35, "Inspecionando objetos técnicos")
                 result = self.engine.analyze(pdf_path, request.production_profile)
@@ -118,7 +138,11 @@ class JobService:
                     result.final_status,
                     100,
                     "Análise concluída",
-                    summary=result.summary,
+                    summary=(
+                        {**result.summary, "correctedFile": corrected}
+                        if corrected
+                        else result.summary
+                    ),
                 )
         except JobCancelled as exc:
             await notify("cancelled", "cancelled", 100, "Análise cancelada", error_message=str(exc))

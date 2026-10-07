@@ -109,6 +109,7 @@ Deno.serve(async (req: Request) => {
         confidence: typeof i.confidence === 'number' ? i.confidence : 100,
         source: String(i.source || 'external_analyzer'),
         can_auto_correct: Boolean(i.can_auto_correct),
+        fix: i.fix && typeof i.fix === 'object' ? i.fix : null,
       }))
       const { error: issErr } = await db.from('analysis_issues').insert(rows)
       if (issErr) {
@@ -131,12 +132,14 @@ Deno.serve(async (req: Request) => {
       }
       if (FINAL_STATUSES.includes(status)) patch.completed_at = new Date().toISOString()
 
-      const { error: upErr } = await db.from('analysis_jobs').update(patch).eq('id', jobId)
-      if (upErr) return json(500, { error: upErr.message })
-
+      // Arquivos e resumo antes do status: a tela recarrega quando o job chega ao fim.
+      await settleCorrectedFile(db, job, event, body.summary?.correctedFile)
       if (event === 'completed' && job.project) {
         await updateProjectSummary(db, job.project, jobId)
       }
+
+      const { error: upErr } = await db.from('analysis_jobs').update(patch).eq('id', jobId)
+      if (upErr) return json(500, { error: upErr.message })
     }
 
     return json(200, { success: true })
@@ -144,6 +147,34 @@ Deno.serve(async (req: Request) => {
     return json(500, { error: err?.message || 'Internal server error' })
   }
 })
+
+// Correção automática: a análise roda sobre a cópia corrigida (status "pending" até aqui).
+// Concluída, a cópia vira o arquivo principal; falhou, ela é descartada e o original segue.
+async function settleCorrectedFile(db: any, job: any, event: string, corrected: any) {
+  if (!['completed', 'failed', 'cancelled'].includes(event) || !job.file) return
+  const { data: file } = await db
+    .from('project_files')
+    .select('id, project, status, derived_from')
+    .eq('id', job.file)
+    .maybeSingle()
+  if (!file || file.status !== 'pending' || !file.derived_from) return
+
+  if (event !== 'completed' || !corrected) {
+    await db.from('project_files').update({ status: 'removed', is_primary: false }).eq('id', file.id)
+    return
+  }
+  await db.from('project_files').update({ is_primary: false }).eq('project', file.project).neq('id', file.id)
+  await db
+    .from('project_files')
+    .update({
+      status: 'ready_for_analysis',
+      is_primary: true,
+      sha256: String(corrected.sha256 || ''),
+      size_bytes: Number(corrected.sizeBytes) || 0,
+      applied_fixes: Array.isArray(corrected.appliedFixes) ? corrected.appliedFixes : [],
+    })
+    .eq('id', file.id)
+}
 
 // Resumo da fila: só as ocorrências desta análise (as anteriores ficam no histórico).
 async function updateProjectSummary(db: any, projectId: string, analysisId: string) {

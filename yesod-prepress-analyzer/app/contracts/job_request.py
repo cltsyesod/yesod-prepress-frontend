@@ -12,6 +12,7 @@ from pydantic import (
     model_validator,
 )
 
+from app.contracts.fix import FixRequest
 from app.contracts.production_profile import ProductionProfile
 
 
@@ -116,6 +117,19 @@ class JobRequest(BaseModel):
         ge=1,
         validation_alias=AliasChoices("fileSizeBytes", "file_size_bytes", "sizeBytes"),
     )
+    # Correction run: apply the fixes, upload the corrected copy, then analyse that copy.
+    fixes: list[FixRequest] = Field(default_factory=list)
+    output_upload_url: AnyHttpUrl | None = Field(
+        default=None,
+        repr=False,
+        validation_alias=AliasChoices("outputUploadUrl", "output_upload_url"),
+    )
+
+    @model_validator(mode="after")
+    def require_upload_target_for_fixes(self) -> JobRequest:
+        if self.fixes and self.output_upload_url is None:
+            raise ValueError("outputUploadUrl is required when fixes are requested")
+        return self
 
     @model_validator(mode="after")
     def require_download_source(self) -> JobRequest:

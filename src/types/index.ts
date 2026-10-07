@@ -116,6 +116,9 @@ export interface ProjectFile {
   file: string
   created: string
   updated: string
+  /** Arquivo corrigido automaticamente: aponta para o original, que é mantido. */
+  derived_from?: string | null
+  applied_fixes?: { id: string; label: string; details: string[] }[]
 }
 
 export interface WizardData {

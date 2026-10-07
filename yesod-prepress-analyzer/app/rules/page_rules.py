@@ -1,9 +1,20 @@
 from __future__ import annotations
 
-from app.analyzer.context import DocumentContext
+from app.analyzer.context import DocumentContext, PageInfo
 from app.analyzer.page_inspector import bleed_margins_mm, box_size_mm
 from app.contracts.issue import AnalysisIssue
+from app.fixes.geometry import describe_mm, target_trim
 from app.rules.base import Rule
+
+
+def page_boxes_fix(context: DocumentContext, page: PageInfo) -> dict:
+    trim, how = target_trim(page, context.profile)
+    return {
+        "id": "set_page_boxes",
+        "target": "pdf",
+        "label": "Definir TrimBox e BleedBox",
+        "preview": f"Formato final {describe_mm(trim, context.profile.file_scale)} ({how})",
+    }
 
 
 class PageBoxRule(Rule):
@@ -21,6 +32,8 @@ class PageBoxRule(Rule):
                 expected_value="TrimBox explícito",
                 description="A caixa de corte final não está definida nesta página.",
                 recommendation="Defina o formato final (TrimBox) durante a exportação.",
+                can_auto_correct=True,
+                fix=page_boxes_fix(context, page),
             )
             for page in context.pages
             if page.trim_box is None
@@ -50,6 +63,8 @@ class BleedRule(Rule):
                             "As caixas necessárias para medir a sangria não estão definidas."
                         ),
                         recommendation="Exporte o PDF com TrimBox e BleedBox explícitos.",
+                        can_auto_correct=True,
+                        fix=page_boxes_fix(context, page),
                     )
                 )
                 continue
@@ -145,6 +160,7 @@ class DimensionRule(Rule):
             ratios = (expected[0] / final[0], expected[1] / final[1])
             scale = _likely_scale(ratios[0])
             same_scale = scale is not None and scale == _likely_scale(ratios[1])
+            fix = None
             if same_scale:
                 suggested = scale * profile.file_scale
                 description = (
@@ -155,6 +171,13 @@ class DimensionRule(Rule):
                     f"Se o arquivo foi feito em 1:{suggested:g}, ajuste a escala do trabalho; "
                     "caso contrário, solicite o arquivo no tamanho correto."
                 )
+                fix = {
+                    "id": "set_scale",
+                    "target": "ticket",
+                    "label": f"Usar escala 1:{suggested:g}",
+                    "preview": "Atualiza a ficha do trabalho e reanalisa; o PDF não muda.",
+                    "params": {"fileScale": f"1:{suggested:g}"},
+                }
             elif abs(ratios[0] - ratios[1]) / max(ratios) <= 0.01:
                 description = (
                     "O arquivo tem a proporção do pedido, mas em outro tamanho "
@@ -184,6 +207,8 @@ class DimensionRule(Rule):
                     ),
                     description=description,
                     recommendation=recommendation,
+                    can_auto_correct=fix is not None,
+                    fix=fix,
                 )
             )
         return issues

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -32,6 +32,8 @@ class AnalysisIssue(BaseModel):
     confidence: int = Field(default=100, ge=0, le=100)
     source: Literal["qpdf", "pikepdf", "pdfium", "fonttools", "lcms"] = "pikepdf"
     can_auto_correct: bool = False
+    # Correction offered to the operator: {"id", "label", "target": "pdf" | "ticket", "params"}.
+    fix: dict[str, Any] | None = None
 
     @classmethod
     def with_box(cls, *, box: BoundingBox | None = None, **kwargs):

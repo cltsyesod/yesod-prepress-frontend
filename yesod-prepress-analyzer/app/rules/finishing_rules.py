@@ -16,6 +16,7 @@ class CutLayerRule(Rule):
         found = {name.casefold() for name in context.layers | context.colors.spot_names}
         if expected & found:
             return []
+        name = (context.profile.cut_layer_names or ["CutContour"])[0]
         return [
             self.issue(
                 context,
@@ -27,7 +28,18 @@ class CutLayerRule(Rule):
                 expected_value=", ".join(context.profile.cut_layer_names),
                 description="O perfil exige uma camada ou cor especial destinada ao corte.",
                 recommendation=(
-                    "Crie a faca como spot color/camada usando o nome previsto no perfil."
+                    "Crie a faca como spot color/camada usando o nome previsto no perfil. "
+                    "Em peças retangulares, a faca pode ser inserida automaticamente."
                 ),
+                can_auto_correct=True,
+                fix={
+                    "id": "add_cut_contour",
+                    "target": "pdf",
+                    "label": "Inserir faca retangular",
+                    "preview": (
+                        f"Contorno do formato final na cor especial {name}, em camada própria"
+                    ),
+                    "params": {"name": name},
+                },
             )
         ]

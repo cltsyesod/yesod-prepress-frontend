@@ -149,9 +149,34 @@ export const jobsService = {
     if (error) throw error
   },
 
-  async getPrimaryFile(projectId: string): Promise<ProjectFile | null> {
+  /**
+   * Arquivo principal do trabalho e, se houver, a correção automática em andamento
+   * (cópia ainda "pending" cuja análise não terminou).
+   */
+  async getFiles(projectId: string): Promise<{ primary: ProjectFile | null; correction: ProjectFile | null }> {
     const files = await projectFilesService.getProjectFiles(projectId)
-    return files.find((f) => f.is_primary) ?? files[0] ?? null
+    const ready = files.filter((f) => f.status !== 'pending' || !f.derived_from)
+    const primary = ready.find((f) => f.is_primary) ?? ready[0] ?? null
+
+    const pending = files.find((f) => f.status === 'pending' && f.derived_from)
+    let correction: ProjectFile | null = null
+    if (pending) {
+      const job = await analysisJobsService.getLatestJobForFile(pending.id)
+      if (job && ACTIVE.includes(job.status)) correction = pending
+    }
+    return { primary, correction }
+  },
+
+  /** Volta a usar outra versão (ex.: o original de uma cópia corrigida) como principal. */
+  async setPrimaryFile(projectId: string, fileId: string): Promise<void> {
+    const { error: clearErr } = await supabase
+      .from('project_files')
+      .update({ is_primary: false })
+      .eq('project', projectId)
+      .neq('id', fileId)
+    if (clearErr) throw clearErr
+    const { error } = await supabase.from('project_files').update({ is_primary: true }).eq('id', fileId)
+    if (error) throw error
   },
 
   /** Mantém o resumo da fila coerente com as decisões tomadas na tela do trabalho. */
