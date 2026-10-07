@@ -124,7 +124,8 @@ def test_plan_builds_layout_pdf(tmp_path):
     with pikepdf.open(out) as pdf:
         page = pdf.pages[0]
         assert float(page.MediaBox[2]) == pytest.approx(400 * MM, abs=0.01)
-        assert len(page.Resources.XObject) == 10
+        # One form per source page, reused by every copy.
+        assert len(page.Resources.XObject) == 2
         layers = {str(group.Name) for group in pdf.Root.OCProperties.OCGs}
         assert "CutContour" in layers
 
@@ -134,3 +135,38 @@ def test_scaled_file_is_nested_at_final_size(tmp_path):
     item = PlanItem("card", card_pdf(tmp_path / "small.pdf", 9, 5, 0.3), "Cartão", 1, file_scale=10)
     summary = plan([item], PlanOptions(width_mm=200), tmp_path / "out.pdf")
     assert summary["sheets"][0]["lengthMm"] == pytest.approx(56, abs=0.5)
+
+
+def sheet_of_shapes_pdf(path: Path) -> Path:
+    """One page with a circle, a square and a triangle, each with its own die line."""
+
+    pdf = pikepdf.Pdf.new()
+    pdf.add_blank_page(page_size=(330 * MM, 120 * MM))
+    page = pdf.pages[0]
+    tint = pikepdf.Dictionary(FunctionType=2, Domain=[0, 1], C0=[0, 0, 0, 0], C1=[0, 1, 0, 0], N=1)
+    space = pikepdf.Array(
+        [pikepdf.Name.Separation, pikepdf.Name("/CutContour"), pikepdf.Name.DeviceCMYK, tint]
+    )
+    page.obj.Resources = pikepdf.Dictionary(ColorSpace=pikepdf.Dictionary(CS0=space))
+    circle = Point(60 * MM, 60 * MM).buffer(45 * MM, 32)
+    square = box(120 * MM, 15 * MM, 210 * MM, 105 * MM)
+    triangle = Polygon([(230 * MM, 15 * MM), (320 * MM, 15 * MM), (275 * MM, 105 * MM)])
+    paths = []
+    for shape in (circle, square, triangle):
+        coords = list(shape.exterior.coords)[:-1]
+        paths.append(
+            " ".join([f"{coords[0][0]:.2f} {coords[0][1]:.2f} m"])
+            + " "
+            + " ".join(f"{x:.2f} {y:.2f} l" for x, y in coords[1:])
+            + " h"
+        )
+    page.contents_add(f"/CS0 CS 1 SCN {' '.join(paths)} S".encode())
+    pdf.save(path)
+    return path
+
+
+def test_each_die_line_on_a_sheet_is_its_own_piece(tmp_path):
+    item = PlanItem("sheet", sheet_of_shapes_pdf(tmp_path / "sheet.pdf"), "Formas", 2, bleed_mm=2)
+    summary = plan([item], PlanOptions(width_mm=250, gap_mm=5), tmp_path / "out.pdf")
+    # 3 shapes x 2 copies, each placed on its own (the sheet is 330 mm, wider than the roll).
+    assert summary["placed"] == 6 and summary["unplaced"] == []

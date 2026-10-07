@@ -17,7 +17,7 @@ class NestingSource(BaseModel):
     label: str = ""
     file: DownloadSource
     quantity: int = Field(default=1, ge=1, le=10_000)
-    pages: list[int] = Field(default_factory=lambda: [1])
+    pages: list[int] = Field(default_factory=list)  # vazio = todas as páginas
     file_scale: float = Field(
         default=1.0, gt=0, le=1000, validation_alias=AliasChoices("fileScale", "file_scale")
     )

@@ -76,7 +76,8 @@ Deno.serve(async (req: Request) => {
           sizeBytes: file.size_bytes || undefined,
         },
         quantity: Math.max(1, Number(item.quantity) || 1),
-        pages: Array.isArray(item.pages) && item.pages.length ? item.pages : [1],
+        // Sem lista de páginas, o analisador usa todas as páginas do arquivo.
+        pages: Array.isArray(item.pages) ? item.pages : [],
         fileScale: item.fileScale || 1,
         bleedMm: Number(item.bleedMm) || 0,
         cutNames: Array.isArray(item.cutNames) && item.cutNames.length ? item.cutNames : undefined,

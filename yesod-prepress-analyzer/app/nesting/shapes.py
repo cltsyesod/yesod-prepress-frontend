@@ -211,5 +211,33 @@ def piece_shape(
     return PieceShape(cut=cut, bleed=printed, from_die_line=from_die_line)
 
 
+def page_pieces(
+    page: pikepdf.Page, cut_names: list[str], bleed_pt: float, use_die_line: bool = True
+) -> list[PieceShape]:
+    """Every piece on a page: each separate die-line outline is its own piece.
+
+    A sheet of stickers (several shapes on one page) becomes several pieces, each
+    one printed with its own bleed around its own cut line. A page without a die
+    line, or with a single outline, is one piece.
+    """
+
+    whole = piece_shape(page, cut_names, bleed_pt, use_die_line)
+    if not whole.from_die_line or not isinstance(whole.cut, MultiPolygon):
+        return [whole]
+    media = _page_box(page, "/MediaBox") or (0.0, 0.0, 0.0, 0.0)
+    visible = box(*(_page_box(page, "/CropBox") or media)).intersection(box(*media))
+    pieces = []
+    for part in whole.cut.geoms:
+        printed = part.buffer(bleed_pt, join_style="mitre", mitre_limit=2.0).intersection(visible)
+        pieces.append(
+            PieceShape(
+                cut=part, bleed=printed if not printed.is_empty else part, from_die_line=True
+            )
+        )
+    # Reading order (top to bottom, left to right) keeps piece numbers predictable.
+    pieces.sort(key=lambda p: (-round(p.cut.bounds[3]), p.cut.bounds[0]))
+    return pieces
+
+
 def scaled(geometry: BaseGeometry, factor: float) -> BaseGeometry:
     return affinity.scale(geometry, xfact=factor, yfact=factor, origin=(0, 0))

@@ -7,7 +7,7 @@ import pikepdf
 
 from app.nesting.engine import Material, NestItem, NestResult, efficiency, nest, rotation_steps
 from app.nesting.imposition import CutLines, SourcePiece, build_layout
-from app.nesting.shapes import piece_shape, scaled
+from app.nesting.shapes import page_pieces, scaled
 
 MM = 72 / 25.4
 
@@ -18,7 +18,8 @@ class PlanItem:
     path: Path
     label: str = ""
     quantity: int = 1
-    pages: list[int] = field(default_factory=lambda: [1])
+    pages: list[int] = field(default_factory=list)
+    """Pages to use (1-based); empty = all pages."""
     file_scale: float = 1.0
     bleed_mm: float = 0.0
     """Bleed at final size, used only when the piece has a die line or no BleedBox."""
@@ -63,30 +64,34 @@ def plan(items: list[PlanItem], options: PlanOptions, output: Path) -> dict:
         for item in items:
             pdf = pikepdf.open(item.path)
             opened.append(pdf)
-            for number in item.pages:
+            # No page list = every page of the file is part of the job.
+            numbers = item.pages or list(range(1, len(pdf.pages) + 1))
+            for number in numbers:
                 if not 1 <= number <= len(pdf.pages):
                     continue
                 page = pdf.pages[number - 1]
                 bleed_in_file = item.bleed_mm / item.file_scale * MM
-                shape = piece_shape(page, item.cut_names, bleed_in_file, item.use_die_line)
-                key = f"{item.key}#{number}"
-                sources[key] = SourcePiece(
-                    pdf=pdf,
-                    page_index=number - 1,
-                    scale=item.file_scale,
-                    shape=shape,
-                    label=item.label,
-                )
-                outline = scaled(shape.bleed, item.file_scale)
-                rectangle = abs(outline.area - outline.envelope.area) < 1e-6 * outline.envelope.area
-                nest_items.append(
-                    NestItem(
-                        key=key,
-                        outline=outline,
-                        quantity=item.quantity,
-                        rotations=_rotations_for(rectangle, steps),
+                shapes = page_pieces(page, item.cut_names, bleed_in_file, item.use_die_line)
+                for index, shape in enumerate(shapes, start=1):
+                    key = f"{item.key}#{number}.{index}"
+                    sources[key] = SourcePiece(
+                        pdf=pdf,
+                        page_index=number - 1,
+                        scale=item.file_scale,
+                        shape=shape,
+                        label=item.label,
                     )
-                )
+                    outline = scaled(shape.bleed, item.file_scale)
+                    envelope = outline.envelope.area
+                    rectangle = abs(outline.area - envelope) < 1e-6 * envelope
+                    nest_items.append(
+                        NestItem(
+                            key=key,
+                            outline=outline,
+                            quantity=item.quantity,
+                            rotations=_rotations_for(rectangle, steps),
+                        )
+                    )
 
         result = nest(nest_items, material)
         layout = build_layout(result, material, sources, options.cut_lines)

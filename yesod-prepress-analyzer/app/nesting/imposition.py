@@ -103,7 +103,7 @@ def build_layout(
     cut_lines: CutLines,
 ) -> pikepdf.Pdf:
     out = pikepdf.Pdf.new()
-    forms: dict[str, pikepdf.Object] = {}
+    forms: dict[tuple[int, int], pikepdf.Object] = {}
     layers: set = set()
 
     cut_space = cut_layer = overprint = None
@@ -138,17 +138,24 @@ def build_layout(
         page = out.pages[-1]
         content: list[str] = []
         cut_paths: list[str] = []
+        names: dict[tuple[int, int], pikepdf.Name] = {}
 
         for placement in sheet.placements:
             source = sources[placement.key]
-            if placement.key not in forms:
+            # One form per source page: pieces cut from the same sheet share it.
+            page_key = (id(source.pdf), source.page_index)
+            if page_key not in forms:
                 src_page = source.pdf.pages[source.page_index]
                 form = src_page.as_form_xobject(handle_transformations=False)
                 # qpdf clips the form at the TrimBox; the bleed must stay printable.
                 form.BBox = pikepdf.Array([float(v) for v in src_page.obj.MediaBox])
-                forms[placement.key] = out.copy_foreign(form)
-                _register_layers(out, forms[placement.key], layers)
-            name = page.add_resource(forms[placement.key], pikepdf.Name.XObject, prefix="Pc")
+                forms[page_key] = out.copy_foreign(form)
+                _register_layers(out, forms[page_key], layers)
+            if page_key not in names:
+                names[page_key] = page.add_resource(
+                    forms[page_key], pikepdf.Name.XObject, prefix="Pc"
+                )
+            name = names[page_key]
             clip = _path(placed(source.shape.bleed, source, placement))
             content.append(f"q {clip} W n {_matrix(source, placement)} {name} Do Q")
             if cut_lines.add and not source.shape.from_die_line:
