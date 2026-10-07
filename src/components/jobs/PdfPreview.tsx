@@ -39,7 +39,7 @@ export function PdfPreview({ url, page, onPageChange, safetyPt }: PdfPreviewProp
   const [doc, setDoc] = useState<import('pdfjs-dist').PDFDocumentProxy | null>(null)
   const [boxes, setBoxes] = useState<PageBoxes[]>([])
   const [error, setError] = useState('')
-  const [width, setWidth] = useState(0)
+  const [area, setArea] = useState({ width: 0, height: 0 })
   const [zoom, setZoom] = useState(1)
   const [showGuides, setShowGuides] = useState(true)
   // Camadas do PDF (ex.: a faca CutContour): o operador liga e desliga como no Acrobat.
@@ -89,7 +89,9 @@ export function PdfPreview({ url, page, onPageChange, safetyPt }: PdfPreviewProp
   useEffect(() => {
     const element = containerRef.current
     if (!element) return
-    const observer = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width))
+    const observer = new ResizeObserver(([entry]) =>
+      setArea({ width: entry.contentRect.width, height: entry.contentRect.height }),
+    )
     observer.observe(element)
     return () => observer.disconnect()
   }, [])
@@ -102,13 +104,15 @@ export function PdfPreview({ url, page, onPageChange, safetyPt }: PdfPreviewProp
 
   // Desenha a página e calcula as guias no mesmo viewport.
   useEffect(() => {
-    if (!doc || !width || !canvasRef.current) return
+    if (!doc || !area.width || !area.height || !canvasRef.current) return
     let task: import('pdfjs-dist').RenderTask | null = null
     let cancelled = false
     ;(async () => {
       const pdfPage = await doc.getPage(current)
       const base = pdfPage.getViewport({ scale: 1 })
-      const viewport = pdfPage.getViewport({ scale: ((width - 32) / base.width) * zoom })
+      // 100% = página inteira visível (sem rolagem); o zoom só amplia a partir disso.
+      const fit = Math.min((area.width - 16) / base.width, (area.height - 16) / base.height)
+      const viewport = pdfPage.getViewport({ scale: fit * zoom })
       const canvas = canvasRef.current
       if (!canvas || cancelled) return
       const ratio = window.devicePixelRatio || 1
@@ -153,7 +157,7 @@ export function PdfPreview({ url, page, onPageChange, safetyPt }: PdfPreviewProp
       cancelled = true
       task?.cancel()
     }
-  }, [doc, current, width, zoom, boxes, safetyPt, layers, dieCut])
+  }, [doc, current, area, zoom, boxes, safetyPt, layers, dieCut])
 
   const info = boxes[current - 1]
   const missing = doc && info && !info.trim
@@ -223,7 +227,13 @@ export function PdfPreview({ url, page, onPageChange, safetyPt }: PdfPreviewProp
         {missing && <span className="text-xs text-amber-600 dark:text-amber-400">Sem TrimBox: linha de corte não definida</span>}
       </div>
 
-      <div ref={containerRef} className="relative flex-1 overflow-auto bg-muted p-4">
+      <div
+        ref={containerRef}
+        className={cn(
+          'relative min-h-0 flex-1 bg-muted p-2',
+          zoom > 1 ? 'overflow-auto' : 'flex items-center justify-center overflow-hidden',
+        )}
+      >
         {error ? (
           <p className="p-6 text-center text-sm text-destructive">Não foi possível abrir o PDF ({error}).</p>
         ) : !doc ? (
