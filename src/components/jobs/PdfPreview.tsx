@@ -96,7 +96,8 @@ export function PdfPreview({ url, page, onPageChange, safetyPt }: PdfPreviewProp
     return () => observer.disconnect()
   }, [])
 
-  // Peça com faca: a margem de segurança segue o contorno, não um retângulo; não desenhamos.
+  // Peça com faca: o formato final é a própria faca. Retângulos de formato e de segurança
+  // atravessariam a arte, então só a moldura de sangria (por fora de tudo) é desenhada.
   const dieCut = layers.some((layer) => /cut|corte|faca|contour|kiss/i.test(layer.name))
 
   const pageCount = doc?.numPages ?? 0
@@ -149,7 +150,11 @@ export function PdfPreview({ url, page, onPageChange, safetyPt }: PdfPreviewProp
         setOverlay({
           w: viewport.width,
           h: viewport.height,
-          rects: { bleed: toView(info.bleed), trim: toView(info.trim), safety: toView(safety) },
+          rects: {
+            bleed: toView(info.bleed),
+            trim: dieCut ? null : toView(info.trim),
+            safety: toView(safety),
+          },
         })
       }
     })()
@@ -194,7 +199,7 @@ export function PdfPreview({ url, page, onPageChange, safetyPt }: PdfPreviewProp
         </label>
         {showGuides && (
           <div className="flex flex-wrap items-center gap-3 text-xs">
-            {Object.entries(GUIDES).filter(([key]) => !(dieCut && key === 'safety')).map(([key, guide]) => (
+            {Object.entries(GUIDES).filter(([key]) => !dieCut || key === 'bleed').map(([key, guide]) => (
               <span key={key} className="flex items-center gap-1">
                 <svg width="18" height="6" aria-hidden>
                   <line x1="0" y1="3" x2="18" y2="3" stroke={guide.color} strokeWidth="2" strokeDasharray={guide.dash} />
@@ -224,7 +229,12 @@ export function PdfPreview({ url, page, onPageChange, safetyPt }: PdfPreviewProp
             <span className="text-xs">(camada do PDF)</span>
           </label>
         ))}
-        {missing && <span className="text-xs text-amber-600 dark:text-amber-400">Sem TrimBox: linha de corte não definida</span>}
+        {dieCut && showGuides && (
+          <span className="text-xs text-muted-foreground">Formato final = a faca</span>
+        )}
+        {missing && !dieCut && (
+          <span className="text-xs text-amber-600 dark:text-amber-400">Sem TrimBox: linha de corte não definida</span>
+        )}
       </div>
 
       <div
