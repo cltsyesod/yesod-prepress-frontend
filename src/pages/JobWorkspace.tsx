@@ -18,7 +18,7 @@ import { useAnalysisJob } from '@/hooks/use-analysis-job'
 import { toast } from '@/hooks/use-toast'
 import { buildClientMessage } from '@/lib/clientMessage'
 import { getErrorMessage } from '@/lib/supabase/errors'
-import { jobsService, type Job, type JobTicket } from '@/services/jobsService'
+import { jobsService, summarizeIssues, type Job, type JobTicket } from '@/services/jobsService'
 import { profileService } from '@/services/profileService'
 import { projectFilesService } from '@/services/projectFilesService'
 import type { ProjectFile } from '@/types'
@@ -133,7 +133,7 @@ export default function JobWorkspacePage() {
   }
 
   const liveJob: Job = analysis.job
-    ? { ...job, latestAnalysis: analysis.job }
+    ? { ...job, ...summarizeIssues(analysis.issues), latestAnalysis: analysis.job }
     : job
 
   return (

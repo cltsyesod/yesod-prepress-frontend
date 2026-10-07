@@ -156,19 +156,25 @@ export const jobsService = {
 
   /** Mantém o resumo da fila coerente com as decisões tomadas na tela do trabalho. */
   async syncSummary(projectId: string, issues: AnalysisIssue[]): Promise<void> {
-    const pending = issues.filter((i) => i.status === 'pending' && i.severity !== 'informational')
-    const severity = pending.some((i) => i.severity === 'critical')
-      ? 'critical'
-      : pending.length
-        ? 'warning'
-        : 'none'
+    const { issueCount, severity } = summarizeIssues(issues)
     await supabase
       .from('projects')
       .update({
-        issue_count: pending.length,
+        issue_count: issueCount,
         severity,
-        status: pending.length ? 'needs_review' : 'pending_approval',
+        status: issueCount ? 'needs_review' : 'pending_approval',
       })
       .eq('id', projectId)
   },
+}
+
+/** Pendências que impedem o "Pronto": tudo que não é informativo e ainda não foi decidido. */
+export function summarizeIssues(issues: AnalysisIssue[]): Pick<Job, 'issueCount' | 'severity'> {
+  const pending = issues.filter((i) => i.status === 'pending' && i.severity !== 'informational')
+  const severity = pending.some((i) => i.severity === 'critical')
+    ? 'critical'
+    : pending.length
+      ? 'warning'
+      : 'none'
+  return { issueCount: pending.length, severity }
 }
