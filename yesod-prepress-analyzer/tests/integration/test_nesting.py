@@ -5,7 +5,7 @@ import pikepdf
 import pytest
 from shapely.geometry import Point, Polygon, box
 
-from app.nesting.engine import Material, NestItem, nest, rotation_steps
+from app.nesting.engine import Material, NestItem, efficiency, nest, rotation_steps
 from app.nesting.imposition import CutLines
 from app.nesting.planner import PlanItem, PlanOptions, plan
 from app.nesting.shapes import die_line
@@ -88,6 +88,30 @@ def test_nesting_keeps_gap_and_stays_inside_material():
         for b in placed[:i]:
             if a.sheet == b.sheet:
                 assert a.footprint.distance(b.footprint) >= material.gap - 0.01
+
+
+def test_repeated_triangles_are_tiled_alternating():
+    r = 58 * MM
+    angles = [math.radians(90 + i * 120) for i in range(3)]
+    triangle = Polygon([(r * math.cos(a), r * math.sin(a)) for a in angles])
+    material = Material(width=600 * MM, length=1000 * MM, margin=3 * MM, gap=3 * MM)
+    result = nest([NestItem("tri", triangle, 40, rotation_steps(11.25))], material)
+
+    sheet = result.sheets[0]
+    assert len(sheet.placements) == 40 and not result.unplaced
+    # Pieces point up and down (pairs turned 180 degrees), packed far denser than loose.
+    assert len({round(p.rotation % 360) for p in sheet.placements}) == 2
+    pieces = sum(p.footprint.area for p in sheet.placements)
+    assert pieces / (material.width * sheet.used_length) > 0.7
+    for i, a in enumerate(sheet.placements):
+        for b in sheet.placements[:i]:
+            assert a.footprint.distance(b.footprint) >= material.gap - 0.01
+
+
+def test_sheet_efficiency_counts_the_whole_sheet():
+    material = Material(width=200 * MM, length=400 * MM)
+    sheet = nest([NestItem("sq", box(0, 0, 100 * MM, 100 * MM), 1, (0.0,))], material).sheets[0]
+    assert efficiency(sheet, material) == pytest.approx(1 / 8, rel=0.02)
 
 
 def test_rotation_steps():
