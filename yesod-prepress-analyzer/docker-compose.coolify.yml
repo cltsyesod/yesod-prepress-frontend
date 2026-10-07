@@ -32,6 +32,13 @@ services:
     build: .
     command: ['celery', '-A', 'app.workers.celery_app:celery_app', 'worker', '--loglevel=INFO', '--queues=prepress', '--concurrency=2']
     environment: *analyzer-env
+    # O HEALTHCHECK do Dockerfile testa a API (porta 8000); o worker não escuta nela.
+    healthcheck:
+      test: ['CMD', 'celery', '-A', 'app.workers.celery_app:celery_app', 'inspect', 'ping', '--timeout', '10']
+      interval: 30s
+      timeout: 20s
+      start_period: 30s
+      retries: 3
     depends_on:
       valkey:
         condition: service_healthy
