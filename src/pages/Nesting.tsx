@@ -486,7 +486,7 @@ function RunDetail({
 
       <div className="h-[70vh] overflow-hidden rounded-lg border border-border bg-muted">
         {outputUrl ? (
-          <PdfPreview url={outputUrl} page={page} onPageChange={onPageChange} safetyPt={0} />
+          <PdfPreview url={outputUrl} page={page} onPageChange={onPageChange} />
         ) : (
           <div className="flex h-full items-center justify-center">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />

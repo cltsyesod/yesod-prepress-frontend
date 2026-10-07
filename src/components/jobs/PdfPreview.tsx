@@ -14,8 +14,6 @@ interface PdfPreviewProps {
   url: string
   page: number
   onPageChange: (page: number) => void
-  /** Margem de segurança em pontos, já na escala do arquivo (0 = não desenha). */
-  safetyPt: number
 }
 
 const MM = 72 / 25.4
@@ -23,17 +21,20 @@ const MM = 72 / 25.4
 // Cores das guias de tela (as mesmas da legenda). Magenta fica reservado para a faca
 // real do arquivo (CutContour), para a guia nunca ser confundida com um corte.
 const GUIDES = {
-  bleed: { label: 'Sangria (BleedBox)', color: '#3b82f6', dash: '6 4' },
+  bleed: { label: 'Sangria (BleedBox)', color: '#3b82f6', dash: '' },
   trim: { label: 'Formato final (TrimBox)', color: '#22c55e', dash: '' },
-  safety: { label: 'Segurança', color: '#f59e0b', dash: '2 3' },
 } as const
 
+// Espaço em volta da página para as guias, que ficam sempre do lado de fora da arte.
+const GUIDE_ROOM = 22
+
 /**
- * Pré-visualização do PDF com as guias de pré-impressão desenhadas por cima:
- * linha de corte (TrimBox), sangria (BleedBox) e área de segurança. O visualizador
- * do navegador não mostra essas caixas, e é nelas que as correções automáticas mexem.
+ * Pré-visualização do PDF com as guias de pré-impressão (TrimBox e BleedBox), que o
+ * visualizador do navegador não mostra. Nenhuma guia é desenhada sobre a arte: a
+ * sangria é uma moldura por fora da área impressa e o formato final aparece como
+ * marcas na margem, alinhadas às linhas de corte, como as marcas de corte reais.
  */
-export function PdfPreview({ url, page, onPageChange, safetyPt }: PdfPreviewProps) {
+export function PdfPreview({ url, page, onPageChange }: PdfPreviewProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [doc, setDoc] = useState<import('pdfjs-dist').PDFDocumentProxy | null>(null)
@@ -96,8 +97,7 @@ export function PdfPreview({ url, page, onPageChange, safetyPt }: PdfPreviewProp
     return () => observer.disconnect()
   }, [])
 
-  // Peça com faca: o formato final é a própria faca. Retângulos de formato e de segurança
-  // atravessariam a arte, então só a moldura de sangria (por fora de tudo) é desenhada.
+  // Peça com faca: o formato final é a própria faca, então só a sangria é marcada.
   const dieCut = layers.some((layer) => /cut|corte|faca|contour|kiss/i.test(layer.name))
 
   const pageCount = doc?.numPages ?? 0
@@ -112,7 +112,8 @@ export function PdfPreview({ url, page, onPageChange, safetyPt }: PdfPreviewProp
       const pdfPage = await doc.getPage(current)
       const base = pdfPage.getViewport({ scale: 1 })
       // 100% = página inteira visível (sem rolagem); o zoom só amplia a partir disso.
-      const fit = Math.min((area.width - 16) / base.width, (area.height - 16) / base.height)
+      const room = 16 + GUIDE_ROOM * 2
+      const fit = Math.min((area.width - room) / base.width, (area.height - room) / base.height)
       const viewport = pdfPage.getViewport({ scale: fit * zoom })
       const canvas = canvasRef.current
       if (!canvas || cancelled) return
@@ -137,15 +138,6 @@ export function PdfPreview({ url, page, onPageChange, safetyPt }: PdfPreviewProp
         return [Math.min(x0, x1), Math.min(y0, y1), Math.max(x0, x1), Math.max(y0, y1)]
       }
       const info = boxes[current - 1] ?? { trim: null, bleed: null }
-      const safety =
-        info.trim && safetyPt > 0 && !dieCut
-          ? ([
-              info.trim[0] + safetyPt,
-              info.trim[1] + safetyPt,
-              info.trim[2] - safetyPt,
-              info.trim[3] - safetyPt,
-            ] as Box)
-          : null
       if (!cancelled) {
         setOverlay({
           w: viewport.width,
@@ -153,7 +145,6 @@ export function PdfPreview({ url, page, onPageChange, safetyPt }: PdfPreviewProp
           rects: {
             bleed: toView(info.bleed),
             trim: dieCut ? null : toView(info.trim),
-            safety: toView(safety),
           },
         })
       }
@@ -162,7 +153,7 @@ export function PdfPreview({ url, page, onPageChange, safetyPt }: PdfPreviewProp
       cancelled = true
       task?.cancel()
     }
-  }, [doc, current, area, zoom, boxes, safetyPt, layers, dieCut])
+  }, [doc, current, area, zoom, boxes, layers, dieCut])
 
   const info = boxes[current - 1]
   const missing = doc && info && !info.trim
@@ -251,27 +242,35 @@ export function PdfPreview({ url, page, onPageChange, safetyPt }: PdfPreviewProp
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
         ) : null}
-        <div className={cn('relative mx-auto w-fit shadow-md', !doc && 'hidden')}>
-          <canvas ref={canvasRef} className="block bg-white" />
+        <div className={cn('relative mx-auto w-fit', !doc && 'hidden')} style={{ margin: GUIDE_ROOM }}>
+          <canvas ref={canvasRef} className="block bg-white shadow-md" />
           {showGuides && overlay && (
-            <svg className="pointer-events-none absolute inset-0" width={overlay.w} height={overlay.h} aria-hidden>
+            // Só na margem em volta da página: nenhuma linha passa por cima do que é impresso.
+            <svg
+              className="pointer-events-none absolute left-0 top-0 overflow-visible"
+              width={overlay.w}
+              height={overlay.h}
+              aria-hidden
+            >
               {(Object.keys(GUIDES) as (keyof typeof GUIDES)[]).map((key) => {
                 const rect = overlay.rects[key]
                 if (!rect) return null
-                const guide = GUIDES[key]
-                return (
-                  <rect
-                    key={key}
-                    x={rect[0]}
-                    y={rect[1]}
-                    width={rect[2] - rect[0]}
-                    height={rect[3] - rect[1]}
-                    fill="none"
-                    stroke={guide.color}
-                    strokeWidth={1.5}
-                    strokeDasharray={guide.dash}
-                  />
-                )
+                // Formato final mais perto da página, sangria mais longe: não se sobrepõem.
+                const [near, far] = key === 'trim' ? [3, 11] : [12, GUIDE_ROOM - 2]
+                const { w, h } = overlay
+                const ticks = [
+                  ...[rect[0], rect[2]].flatMap((x) => [
+                    [x, -far, x, -near],
+                    [x, h + near, x, h + far],
+                  ]),
+                  ...[rect[1], rect[3]].flatMap((y) => [
+                    [-far, y, -near, y],
+                    [w + near, y, w + far, y],
+                  ]),
+                ]
+                return ticks.map(([x1, y1, x2, y2], i) => (
+                  <line key={`${key}-${i}`} x1={x1} y1={y1} x2={x2} y2={y2} stroke={GUIDES[key].color} strokeWidth={1.5} />
+                ))
               })}
             </svg>
           )}

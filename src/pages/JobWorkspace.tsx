@@ -24,7 +24,7 @@ import { IssueChecklist } from '@/components/jobs/IssueChecklist'
 import { JobStateBadge } from '@/components/jobs/JobStateBadge'
 import { JobTicketFields } from '@/components/jobs/JobTicketFields'
 import { ContourCutDialog, type ContourCutOptions } from '@/components/jobs/ContourCutDialog'
-import { mmToPt, PdfPreview } from '@/components/jobs/PdfPreview'
+import { PdfPreview } from '@/components/jobs/PdfPreview'
 import { useAnalysisJob } from '@/hooks/use-analysis-job'
 import { toast } from '@/hooks/use-toast'
 import { buildClientMessage } from '@/lib/clientMessage'
@@ -232,11 +232,6 @@ export default function JobWorkspacePage() {
     (fix) => fix.details.length > 0 && !fix.details.every((d) => d.includes('já tinha')),
   )
   const applied = (id: string) => appliedFixes.some((fix) => fix.id === id)
-
-  // Área de segurança desenhada no PDF: margem da ficha/perfil, na escala do arquivo.
-  const profile = profiles.find((p) => p.id === profileId)
-  const fileScale = parseScale(ticket.fileScale) ?? parseScale(profile?.scale) ?? 1
-  const safetyPt = mmToPt((profile?.safetyMargin ?? 0) / fileScale)
 
   // Marcas e faca são desenhadas no tamanho do arquivo: com uma escala ainda por
   // confirmar, sairiam N vezes maiores (ou menores) na peça final.
@@ -455,7 +450,7 @@ export default function JobWorkspacePage() {
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,440px)]">
         <div className="h-[60vh] overflow-hidden rounded-lg border border-border bg-muted lg:sticky lg:top-[72px] lg:h-[calc(100vh-120px)]">
           {pdfUrl ? (
-            <PdfPreview url={pdfUrl} page={page} onPageChange={setPage} safetyPt={safetyPt} />
+            <PdfPreview url={pdfUrl} page={page} onPageChange={setPage} />
           ) : (
             <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
               {file ? 'Carregando o PDF...' : 'Este trabalho não tem arquivo.'}
@@ -487,16 +482,6 @@ export default function JobWorkspacePage() {
       </div>
     </div>
   )
-}
-
-/** "1:10", "1:10 (painel)" ou "10" -> 10. */
-function parseScale(value: unknown): number | undefined {
-  const text = String(value ?? '')
-  const match = text.match(/(\d+(?:[.,]\d+)?)\s*:\s*(\d+(?:[.,]\d+)?)/)
-  const n = match
-    ? Number(match[2].replace(',', '.')) / Number(match[1].replace(',', '.'))
-    : Number(text.replace(',', '.'))
-  return Number.isFinite(n) && n > 0 ? n : undefined
 }
 
 function BackLink() {
