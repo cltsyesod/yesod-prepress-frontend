@@ -23,6 +23,7 @@ import { Progress } from '@/components/ui/progress'
 import { IssueChecklist } from '@/components/jobs/IssueChecklist'
 import { JobStateBadge } from '@/components/jobs/JobStateBadge'
 import { JobTicketFields } from '@/components/jobs/JobTicketFields'
+import { ContourCutDialog, type ContourCutOptions } from '@/components/jobs/ContourCutDialog'
 import { mmToPt, PdfPreview } from '@/components/jobs/PdfPreview'
 import { useAnalysisJob } from '@/hooks/use-analysis-job'
 import { toast } from '@/hooks/use-toast'
@@ -114,6 +115,26 @@ export default function JobWorkspacePage() {
     [file, profileId, loadJob],
   )
 
+  // A faca pelo contorno depende do afastamento escolhido pelo operador: pergunta antes.
+  const [contourFixes, setContourFixes] = useState<FixRequest[] | null>(null)
+  const requestFixes = useCallback(
+    async (fixes: FixRequest[]) => {
+      if (fixes.some((fix) => fix.id === 'add_contour_cut')) {
+        setContourFixes(fixes)
+        return
+      }
+      await applyFixes(fixes)
+    },
+    [applyFixes],
+  )
+  const confirmContour = async (options: ContourCutOptions) => {
+    const fixes = (contourFixes ?? []).map((fix) =>
+      fix.id === 'add_contour_cut' ? { ...fix, params: { ...fix.params, ...options } } : fix,
+    )
+    setContourFixes(null)
+    await applyFixes(fixes)
+  }
+
   const fixIssue = useCallback(
     async (issue: AnalysisIssue) => {
       if (!issue.fix || !job) return
@@ -130,9 +151,9 @@ export default function JobWorkspacePage() {
         }
         return
       }
-      await applyFixes([{ id: issue.fix.id, params: issue.fix.params }])
+      await requestFixes([{ id: issue.fix.id, params: issue.fix.params }])
     },
-    [job, ticket, profileId, analysis, loadJob, applyFixes],
+    [job, ticket, profileId, analysis, loadJob, requestFixes],
   )
 
   const pendingPdfFixes = useMemo(() => {
@@ -285,7 +306,7 @@ export default function JobWorkspacePage() {
             <DropdownMenuContent align="end" className="w-72">
               <DropdownMenuItem
                 disabled={!pendingPdfFixes.length}
-                onSelect={guardScale(() => applyFixes(pendingPdfFixes))}
+                onSelect={guardScale(() => requestFixes(pendingPdfFixes))}
               >
                 Corrigir tudo que for automático
                 {pendingPdfFixes.length > 0 && ` (${pendingPdfFixes.length})`}
@@ -298,7 +319,18 @@ export default function JobWorkspacePage() {
                 Inserir marcas de corte{applied('add_crop_marks') && ' (já inseridas)'}
               </DropdownMenuItem>
               <DropdownMenuItem
-                disabled={applied('add_cut_contour')}
+                disabled={applied('add_contour_cut') || applied('add_cut_contour')}
+                onSelect={guardScale(() =>
+                  requestFixes([
+                    { id: 'add_contour_cut', params: cutLayerName ? { name: cutLayerName } : {} },
+                  ]),
+                )}
+              >
+                Faca pelo contorno da arte…
+                {applied('add_contour_cut') && ' — já inserida'}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                disabled={applied('add_cut_contour') || applied('add_contour_cut')}
                 onSelect={guardScale(() =>
                   applyFixes([
                     { id: 'set_page_boxes' },
@@ -331,6 +363,13 @@ export default function JobWorkspacePage() {
           </Button>
         </div>
       </header>
+
+      <ContourCutDialog
+        open={!!contourFixes}
+        defaultName={cutLayerName}
+        onCancel={() => setContourFixes(null)}
+        onConfirm={confirmContour}
+      />
 
       {editingTicket && (
         <section className="space-y-4 rounded-lg border border-border bg-card p-4">

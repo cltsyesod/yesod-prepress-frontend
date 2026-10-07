@@ -205,10 +205,18 @@ def piece_shape(
         printed = box(*bleed_box)
     else:
         printed = cut.buffer(bleed_pt, join_style="mitre")
-    printed = printed.intersection(visible)
+    printed = printed.intersection(_print_limit(visible, bleed_box))
     if printed.is_empty:
         printed = cut
     return PieceShape(cut=cut, bleed=printed, from_die_line=from_die_line)
+
+
+def _print_limit(visible: BaseGeometry, bleed_box) -> BaseGeometry:
+    """Nothing is printed beyond the BleedBox (1 pt of slack keeps the die-line stroke whole)."""
+
+    if not bleed_box:
+        return visible
+    return box(*bleed_box).buffer(1.0, join_style="mitre").intersection(visible)
 
 
 def page_pieces(
@@ -226,9 +234,10 @@ def page_pieces(
         return [whole]
     media = _page_box(page, "/MediaBox") or (0.0, 0.0, 0.0, 0.0)
     visible = box(*(_page_box(page, "/CropBox") or media)).intersection(box(*media))
+    limit = _print_limit(visible, _page_box(page, "/BleedBox"))
     pieces = []
     for part in whole.cut.geoms:
-        printed = part.buffer(bleed_pt, join_style="mitre", mitre_limit=2.0).intersection(visible)
+        printed = part.buffer(bleed_pt, join_style="mitre", mitre_limit=2.0).intersection(limit)
         pieces.append(
             PieceShape(
                 cut=part, bleed=printed if not printed.is_empty else part, from_die_line=True

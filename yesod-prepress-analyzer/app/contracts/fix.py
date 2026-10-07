@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 # Fixes that change the PDF. "set_scale" is offered on issues too, but it only
 # changes the job ticket, so the frontend handles it and it never reaches here.
-FixId = Literal["set_page_boxes", "add_cut_contour", "add_crop_marks"]
+FixId = Literal["set_page_boxes", "add_contour_cut", "add_cut_contour", "add_crop_marks"]
 
 
 class FixRequest(BaseModel):

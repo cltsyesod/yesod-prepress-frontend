@@ -11,15 +11,17 @@ from __future__ import annotations
 from pathlib import Path
 
 import pikepdf
+from shapely.geometry import MultiPolygon
 
 from app.analyzer.page_inspector import inspect_pages
 from app.contracts.fix import AppliedFix, FixRequest
 from app.contracts.production_profile import ProductionProfile
 from app.core.exceptions import AnalyzerError
+from app.fixes.contour import artwork_silhouette, contour_die_line
 from app.fixes.geometry import MM, Box, describe_mm, expand, intersect, target_trim, visible_box
 
 # Order matters: boxes first, because the die line and the marks use the TrimBox.
-_ORDER = ("set_page_boxes", "add_cut_contour", "add_crop_marks")
+_ORDER = ("set_page_boxes", "add_contour_cut", "add_cut_contour", "add_crop_marks")
 
 
 class FixError(AnalyzerError):
@@ -147,6 +149,87 @@ def _add_cut_contour(pdf: pikepdf.Pdf, profile: ProductionProfile, params: dict)
     )
 
 
+def _add_contour_cut(
+    pdf: pikepdf.Pdf, profile: ProductionProfile, params: dict, source: Path
+) -> AppliedFix:
+    """Die line that follows the outside of the printed artwork.
+
+    Nothing printed is lost: with offset 0 the line runs on the edge of the artwork,
+    a positive offset moves it outward, a negative one inward (operator's choice).
+    """
+
+    name = str(params.get("name") or (profile.cut_layer_names or ["CutContour"])[0]).strip()
+    scale = profile.file_scale
+    try:
+        offset_mm = float(params.get("offsetMm", 0) or 0)
+    except (TypeError, ValueError):
+        offset_mm = 0.0
+    offset_pt = offset_mm / scale * MM
+    width_pt = _param(params, "lineWidthPt", 0.25) / scale
+    color = _separation(pdf, name, [0, 1, 0, 0])
+    layer = pdf.make_indirect(pikepdf.Dictionary(Type=pikepdf.Name.OCG, Name=name))
+    overprint = pdf.make_indirect(
+        pikepdf.Dictionary(Type=pikepdf.Name.ExtGState, OP=True, op=True, OPM=1)
+    )
+
+    details: list[str] = []
+    registered = False
+    pages = inspect_pages(pdf, profile.cut_layer_names)
+    for index, (info, page) in enumerate(zip(pages, pdf.pages, strict=True)):
+        if _already_applied(page, "add_contour_cut") or info.die_line_box is not None:
+            details.append(f"Página {info.number}: já tinha faca")
+            continue
+        visible = visible_box(info)
+        region = intersect(info.bleed_box, visible) if info.bleed_box else visible
+        silhouette = artwork_silhouette(source, index, region, origin=(visible[0], visible[1]))
+        if silhouette is None or silhouette.is_empty:
+            details.append(f"Página {info.number}: nenhuma arte encontrada para contornar")
+            continue
+        die = contour_die_line(silhouette, offset_pt)
+        polygons = die.geoms if isinstance(die, MultiPolygon) else [die]
+        paths = []
+        for polygon in polygons:
+            coords = list(polygon.exterior.coords)[:-1]
+            paths.append(
+                f"{_num(coords[0][0])} {_num(coords[0][1])} m "
+                + " ".join(f"{_num(x)} {_num(y)} l" for x, y in coords[1:])
+                + " h S"
+            )
+        if not registered:
+            _register_layer(pdf, layer)
+            registered = True
+        cs = page.add_resource(color, pikepdf.Name.ColorSpace, prefix="YesodCut")
+        oc = page.add_resource(layer, pikepdf.Name.Properties, prefix="YesodOC")
+        gs = page.add_resource(overprint, pikepdf.Name.ExtGState, prefix="YesodGS")
+        _isolate_existing_content(page)
+        page.contents_add(
+            (
+                f"/OC {oc} BDC q {gs} gs {cs} CS 1 SCN {_num(width_pt)} w 1 J 1 j "
+                + " ".join(paths)
+                + " Q EMC\n"
+            ).encode()
+        )
+        # The finished format is the die line; nothing printed sits outside it.
+        bounds = intersect(die.bounds, visible)
+        if info.trim_box is None:
+            page.obj.TrimBox = _array(bounds)
+        if info.bleed_box is None:
+            page.obj.BleedBox = _array(intersect(expand(bounds, max(offset_pt, 0)), visible))
+        _record(page, "add_contour_cut")
+        where = (
+            "na borda da arte"
+            if not offset_mm
+            else f"{abs(offset_mm):g} mm {'para fora' if offset_mm > 0 else 'para dentro'} da arte"
+        )
+        details.append(
+            f"Página {info.number}: {len(polygons)} contorno(s) {where}, "
+            f"formato {describe_mm(bounds, scale)}"
+        )
+    return AppliedFix(
+        id="add_contour_cut", label=f"Faca pelo contorno da arte ({name})", details=details
+    )
+
+
 def _register_layer(pdf: pikepdf.Pdf, layer: pikepdf.Object) -> None:
     root = pdf.Root
     if "/OCProperties" not in root:
@@ -230,7 +313,12 @@ def apply_fixes(
     try:
         with pikepdf.open(source) as pdf:
             for fix_id in _ORDER:
-                if fix_id in requested:
+                if fix_id == "add_contour_cut" and fix_id in requested:
+                    # Needs the untouched source file to render the artwork.
+                    applied.append(
+                        _add_contour_cut(pdf, profile, requested[fix_id].params, source)
+                    )
+                elif fix_id in requested:
                     applied.append(_FIXES[fix_id](pdf, profile, requested[fix_id].params))
             pdf.save(destination)
     except FixError:

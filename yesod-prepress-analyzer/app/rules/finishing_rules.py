@@ -28,16 +28,17 @@ class CutLayerRule(Rule):
                 expected_value=", ".join(context.profile.cut_layer_names),
                 description="O perfil exige uma camada ou cor especial destinada ao corte.",
                 recommendation=(
-                    "Crie a faca como spot color/camada usando o nome previsto no perfil. "
-                    "Em peças retangulares, a faca pode ser inserida automaticamente."
+                    "Crie a faca como spot color/camada usando o nome previsto no perfil, "
+                    "ou gere automaticamente pelo contorno da arte (por fora dela)."
                 ),
                 can_auto_correct=True,
                 fix={
-                    "id": "add_cut_contour",
+                    "id": "add_contour_cut",
                     "target": "pdf",
-                    "label": "Inserir faca retangular",
+                    "label": "Gerar faca pelo contorno da arte",
                     "preview": (
-                        f"Contorno do formato final na cor especial {name}, em camada própria"
+                        f"Faca na cor especial {name}, em camada própria, contornando a arte "
+                        "por fora com o afastamento que você definir"
                     ),
                     "params": {"name": name},
                 },

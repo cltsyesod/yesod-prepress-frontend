@@ -51,6 +51,10 @@ class BleedRule(Rule):
             return []
         issues: list[AnalysisIssue] = []
         for page in context.pages:
+            # Die-cut piece: the cut follows the die line (usually outside the artwork),
+            # so the page's rectangular bleed does not apply.
+            if page.die_line_box is not None:
+                continue
             if page.trim_box is None or page.bleed_box is None:
                 issues.append(
                     self.issue(
