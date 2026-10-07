@@ -41,6 +41,8 @@ export function PdfPreview({ url, page, onPageChange, safetyPt }: PdfPreviewProp
   const [width, setWidth] = useState(0)
   const [zoom, setZoom] = useState(1)
   const [showGuides, setShowGuides] = useState(true)
+  // Camadas do PDF (ex.: a faca CutContour): o operador liga e desliga como no Acrobat.
+  const [layers, setLayers] = useState<{ id: string; name: string; visible: boolean }[]>([])
   const [overlay, setOverlay] = useState<{ w: number; h: number; rects: Record<string, Box | null> }>()
 
   // Carrega o documento (pdf.js para desenhar, pdf-lib para ler TrimBox/BleedBox).
@@ -63,8 +65,15 @@ export function PdfPreview({ url, page, onPageChange, safetyPt }: PdfPreviewProp
         pdfjs.GlobalWorkerOptions.workerSrc = worker.default
         const pageBoxes = await readBoxes(pdfLib, bytes.slice(0))
         loaded = await pdfjs.getDocument({ data: new Uint8Array(bytes) }).promise
+        const config = await loaded.getOptionalContentConfig()
+        const groups = [...config].map(([id, group]) => ({
+          id,
+          name: group.name || 'Camada',
+          visible: group.visible,
+        }))
         if (cancelled) return
         setBoxes(pageBoxes)
+        setLayers(groups)
         setDoc(loaded)
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err))
@@ -103,10 +112,13 @@ export function PdfPreview({ url, page, onPageChange, safetyPt }: PdfPreviewProp
       canvas.height = Math.floor(viewport.height * ratio)
       canvas.style.width = `${viewport.width}px`
       canvas.style.height = `${viewport.height}px`
+      const optional = await doc.getOptionalContentConfig()
+      for (const layer of layers) optional.setVisibility(layer.id, layer.visible)
       task = pdfPage.render({
         canvas,
         viewport,
         transform: ratio !== 1 ? [ratio, 0, 0, ratio, 0, 0] : undefined,
+        optionalContentConfigPromise: Promise.resolve(optional),
       })
       await task.promise.catch(() => null)
 
@@ -137,7 +149,7 @@ export function PdfPreview({ url, page, onPageChange, safetyPt }: PdfPreviewProp
       cancelled = true
       task?.cancel()
     }
-  }, [doc, current, width, zoom, boxes, safetyPt])
+  }, [doc, current, width, zoom, boxes, safetyPt, layers])
 
   const info = boxes[current - 1]
   const missing = doc && info && !info.trim
@@ -181,6 +193,21 @@ export function PdfPreview({ url, page, onPageChange, safetyPt }: PdfPreviewProp
             ))}
           </div>
         )}
+        {layers.length > 0 && <span className="mx-1 h-4 w-px bg-border" />}
+        {layers.map((layer) => (
+          <label key={layer.id} className="flex cursor-pointer items-center gap-1.5 text-muted-foreground" title="Camada do PDF">
+            <input
+              type="checkbox"
+              checked={layer.visible}
+              onChange={(e) =>
+                setLayers((prev) =>
+                  prev.map((l) => (l.id === layer.id ? { ...l, visible: e.target.checked } : l)),
+                )
+              }
+            />
+            {layer.name}
+          </label>
+        ))}
         {missing && <span className="text-xs text-amber-600 dark:text-amber-400">Sem TrimBox: linha de corte não definida</span>}
       </div>
 
