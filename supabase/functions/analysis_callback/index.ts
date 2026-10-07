@@ -135,7 +135,7 @@ Deno.serve(async (req: Request) => {
       if (upErr) return json(500, { error: upErr.message })
 
       if (event === 'completed' && job.project) {
-        await updateProjectSummary(db, job.project)
+        await updateProjectSummary(db, job.project, jobId)
       }
     }
 
@@ -145,12 +145,13 @@ Deno.serve(async (req: Request) => {
   }
 })
 
-async function updateProjectSummary(db: any, projectId: string) {
+// Resumo da fila: só as ocorrências desta análise (as anteriores ficam no histórico).
+async function updateProjectSummary(db: any, projectId: string, analysisId: string) {
   try {
     const { data: pending } = await db
       .from('analysis_issues')
       .select('severity')
-      .eq('project', projectId)
+      .eq('analysis', analysisId)
       .eq('status', 'pending')
     const severities = (pending ?? []).map((row: any) => row.severity)
     const actionable = severities.filter((s: string) => s !== 'informational')

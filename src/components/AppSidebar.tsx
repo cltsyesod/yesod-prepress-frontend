@@ -1,12 +1,8 @@
 import { NavLink } from 'react-router-dom'
 import {
-  LayoutDashboard,
-  FolderKanban,
-  PlusCircle,
-  FileText,
+  Inbox,
   Settings2,
   Cog,
-  Users,
   LogOut,
   ChevronLeft,
   ChevronRight,
@@ -22,13 +18,9 @@ interface AppSidebarProps {
 }
 
 const NAV_ITEMS = [
-  { label: 'Visão Geral', icon: LayoutDashboard, to: '/dashboard' },
-  { label: 'Projetos', icon: FolderKanban, to: '/projects' },
-  { label: 'Novo Projeto', icon: PlusCircle, to: '/projects/new' },
-  { label: 'Relatórios', icon: FileText, to: '/reports' },
-  { label: 'Perfis de Produção', icon: Settings2, to: '/production-profiles' },
-  { label: 'Configurações', icon: Cog, to: '/settings' },
-  { label: 'Equipe', icon: Users, to: '/team' },
+  { label: 'Fila de trabalho', icon: Inbox, to: '/trabalhos' },
+  { label: 'Perfis de produção', icon: Settings2, to: '/perfis' },
+  { label: 'Configurações', icon: Cog, to: '/configuracoes' },
 ]
 
 export function AppSidebar({ collapsed, onToggleCollapse, onNavigateMobile }: AppSidebarProps) {

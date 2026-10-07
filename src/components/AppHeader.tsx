@@ -1,6 +1,5 @@
-import { Menu, Bell, HelpCircle, Search, Sun, Moon, Monitor, Check } from 'lucide-react'
+import { Menu, Sun, Moon, Monitor, Check } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -54,33 +53,6 @@ export function AppHeader({ onOpenMobileMenu }: AppHeaderProps) {
       </div>
 
       <div className="flex items-center gap-3">
-        <div className="relative hidden sm:block w-[240px]">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            type="search"
-            placeholder="Buscar projetos..."
-            className="pl-8 h-9 text-sm bg-input border-border text-foreground placeholder:text-muted-foreground focus-visible:ring-ring"
-          />
-        </div>
-
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-9 w-9 text-muted-foreground hover:bg-accent"
-          title="Notificações"
-        >
-          <Bell className="h-4 w-4" />
-        </Button>
-
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-9 w-9 text-muted-foreground hover:bg-accent"
-          title="Ajuda"
-        >
-          <HelpCircle className="h-4 w-4" />
-        </Button>
-
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
@@ -118,7 +90,7 @@ export function AppHeader({ onOpenMobileMenu }: AppHeaderProps) {
             </div>
             <DropdownMenuSeparator />
             <DropdownMenuItem
-              onClick={() => navigate('/settings')}
+              onClick={() => navigate('/configuracoes')}
               className="text-sm cursor-pointer text-muted-foreground"
             >
               Configurações
