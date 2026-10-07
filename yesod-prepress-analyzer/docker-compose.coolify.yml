@@ -1,0 +1,53 @@
+# Deploy pelo Coolify (Build Pack: Docker Compose).
+# Sem portas publicadas: o proxy do Coolify cuida do domínio e do HTTPS.
+# No Coolify, defina o domínio apenas no serviço "api" como https://<subdominio>:8000
+# e cadastre as variáveis abaixo em "Environment Variables".
+x-analyzer-env: &analyzer-env
+  ENVIRONMENT: production
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  INBOUND_SIGNING_SECRET: ${INBOUND_SIGNING_SECRET:?}
+  CALLBACK_SIGNING_SECRET: ${CALLBACK_SIGNING_SECRET:?}
+  ALLOWED_DOWNLOAD_HOSTS: ${ALLOWED_DOWNLOAD_HOSTS:?}
+  ALLOWED_CALLBACK_HOSTS: ${ALLOWED_CALLBACK_HOSTS:?}
+  VALKEY_URL: redis://valkey:6379/0
+
+services:
+  api:
+    build: .
+    command: ['uvicorn', 'app.main:app', '--host', '0.0.0.0', '--port', '8000', '--proxy-headers', '--forwarded-allow-ips', '*']
+    environment: *analyzer-env
+    expose:
+      - '8000'
+    depends_on:
+      valkey:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:size=1g,mode=1770,uid=10001,gid=10001
+    cap_drop: ['ALL']
+    security_opt: ['no-new-privileges:true']
+    restart: unless-stopped
+
+  worker:
+    build: .
+    command: ['celery', '-A', 'app.workers.celery_app:celery_app', 'worker', '--loglevel=INFO', '--queues=prepress', '--concurrency=2']
+    environment: *analyzer-env
+    depends_on:
+      valkey:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:size=4g,mode=1770,uid=10001,gid=10001
+    cap_drop: ['ALL']
+    security_opt: ['no-new-privileges:true']
+    restart: unless-stopped
+
+  valkey:
+    image: valkey/valkey:8.1.3-alpine
+    command: ['valkey-server', '--save', '', '--appendonly', 'no', '--maxmemory', '256mb', '--maxmemory-policy', 'allkeys-lru']
+    healthcheck:
+      test: ['CMD', 'valkey-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
