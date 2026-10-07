@@ -4,7 +4,7 @@ from functools import lru_cache
 from typing import Annotated
 
 from pydantic import AnyHttpUrl, Field, SecretStr, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -39,8 +39,9 @@ class Settings(BaseSettings):
     temp_root: str | None = None
 
     allow_http_downloads: bool = False
-    allowed_download_hosts: list[str] = []
-    allowed_callback_hosts: list[str] = []
+    # NoDecode: the env value is "host1,host2", not JSON; parse_hosts splits it.
+    allowed_download_hosts: Annotated[list[str], NoDecode] = []
+    allowed_callback_hosts: Annotated[list[str], NoDecode] = []
     user_agent: str = "yesod-prepress-analyzer/0.1.0"
 
     health_public_url: AnyHttpUrl | None = None
