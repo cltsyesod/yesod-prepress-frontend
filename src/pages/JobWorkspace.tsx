@@ -23,6 +23,7 @@ import { Progress } from '@/components/ui/progress'
 import { IssueChecklist } from '@/components/jobs/IssueChecklist'
 import { JobStateBadge } from '@/components/jobs/JobStateBadge'
 import { JobTicketFields } from '@/components/jobs/JobTicketFields'
+import { mmToPt, PdfPreview } from '@/components/jobs/PdfPreview'
 import { useAnalysisJob } from '@/hooks/use-analysis-job'
 import { toast } from '@/hooks/use-toast'
 import { buildClientMessage } from '@/lib/clientMessage'
@@ -211,7 +212,26 @@ export default function JobWorkspacePage() {
   )
   const applied = (id: string) => appliedFixes.some((fix) => fix.id === id)
 
-  const viewerSrc = useMemo(() => (pdfUrl ? `${pdfUrl}#page=${page}&view=FitH` : ''), [pdfUrl, page])
+  // Área de segurança desenhada no PDF: margem da ficha/perfil, na escala do arquivo.
+  const profile = profiles.find((p) => p.id === profileId)
+  const fileScale = parseScale(ticket.fileScale) ?? parseScale(profile?.scale) ?? 1
+  const safetyPt = mmToPt((profile?.safetyMargin ?? 0) / fileScale)
+
+  // Marcas e faca são desenhadas no tamanho do arquivo: com uma escala ainda por
+  // confirmar, sairiam N vezes maiores (ou menores) na peça final.
+  const pendingScale = analysis.issues.find(
+    (issue) => issue.status === 'pending' && issue.fix?.id === 'set_scale',
+  )
+  const guardScale = (run: () => void) => () => {
+    if (pendingScale?.fix) {
+      toast({
+        title: 'Confirme a escala primeiro',
+        description: `O arquivo parece estar em outra escala. Clique em "${pendingScale.fix.label}" (ou devolva ao cliente) antes de inserir marcas ou faca.`,
+      })
+      return
+    }
+    run()
+  }
 
   if (loadError) {
     return (
@@ -265,7 +285,7 @@ export default function JobWorkspacePage() {
             <DropdownMenuContent align="end" className="w-72">
               <DropdownMenuItem
                 disabled={!pendingPdfFixes.length}
-                onSelect={() => applyFixes(pendingPdfFixes)}
+                onSelect={guardScale(() => applyFixes(pendingPdfFixes))}
               >
                 Corrigir tudo que for automático
                 {pendingPdfFixes.length > 0 && ` (${pendingPdfFixes.length})`}
@@ -273,18 +293,18 @@ export default function JobWorkspacePage() {
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 disabled={applied('add_crop_marks')}
-                onSelect={() => applyFixes([{ id: 'set_page_boxes' }, { id: 'add_crop_marks' }])}
+                onSelect={guardScale(() => applyFixes([{ id: 'set_page_boxes' }, { id: 'add_crop_marks' }]))}
               >
                 Inserir marcas de corte{applied('add_crop_marks') && ' (já inseridas)'}
               </DropdownMenuItem>
               <DropdownMenuItem
                 disabled={applied('add_cut_contour')}
-                onSelect={() =>
+                onSelect={guardScale(() =>
                   applyFixes([
                     { id: 'set_page_boxes' },
                     { id: 'add_cut_contour', params: cutLayerName ? { name: cutLayerName } : {} },
-                  ])
-                }
+                  ]),
+                )}
               >
                 Inserir faca retangular{cutLayerName ? ` (${cutLayerName})` : ''}
                 {applied('add_cut_contour') && ' — já inserida'}
@@ -395,8 +415,8 @@ export default function JobWorkspacePage() {
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,440px)]">
         <div className="h-[60vh] overflow-hidden rounded-lg border border-border bg-muted lg:sticky lg:top-[72px] lg:h-[calc(100vh-120px)]">
-          {viewerSrc ? (
-            <iframe key={viewerSrc} src={viewerSrc} title="PDF do cliente" className="h-full w-full" />
+          {pdfUrl ? (
+            <PdfPreview url={pdfUrl} page={page} onPageChange={setPage} safetyPt={safetyPt} />
           ) : (
             <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
               {file ? 'Carregando o PDF...' : 'Este trabalho não tem arquivo.'}
@@ -428,6 +448,16 @@ export default function JobWorkspacePage() {
       </div>
     </div>
   )
+}
+
+/** "1:10", "1:10 (painel)" ou "10" -> 10. */
+function parseScale(value: unknown): number | undefined {
+  const text = String(value ?? '')
+  const match = text.match(/(\d+(?:[.,]\d+)?)\s*:\s*(\d+(?:[.,]\d+)?)/)
+  const n = match
+    ? Number(match[2].replace(',', '.')) / Number(match[1].replace(',', '.'))
+    : Number(text.replace(',', '.'))
+  return Number.isFinite(n) && n > 0 ? n : undefined
 }
 
 function BackLink() {
