@@ -44,8 +44,9 @@ def intersect(box: Box, limit: Box) -> Box:
 def target_trim(page: PageInfo, profile: ProductionProfile) -> tuple[Box, str]:
     """TrimBox the fixer will use, and how it was chosen (shown to the operator).
 
-    An existing TrimBox always wins. Otherwise, when the job ticket gives the final
-    size and it fits on the page, the trim is that size centred on the page (the
+    An existing TrimBox always wins, then the outline of the die line. Otherwise, when
+    the job ticket gives the final size and it fits on the page, the trim is that size
+    centred on the page (the
     extra area is treated as bleed); when it does not, the whole visible page is
     the finished format.
     """
@@ -53,6 +54,10 @@ def target_trim(page: PageInfo, profile: ProductionProfile) -> tuple[Box, str]:
     if page.trim_box is not None:
         return normalize(page.trim_box), "TrimBox existente"
     visible = visible_box(page)
+    if page.die_line_box is not None:
+        # Die-cut piece: the finished format is the outline of the die line, so the
+        # boxes (and any marks) sit around the whole piece, never across the artwork.
+        return intersect(normalize(page.die_line_box), visible), "contorno externo da faca"
     width, height = visible[2] - visible[0], visible[3] - visible[1]
     if profile.final_width_mm and profile.final_height_mm:
         w = profile.final_width_mm / profile.file_scale * MM

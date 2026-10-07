@@ -139,3 +139,20 @@ def test_scaled_file_draws_marks_at_file_scale(tmp_path):
     apply_fixes(source, out, [FixRequest(id="add_crop_marks")], profile)
     media = boxes(out)["MediaBox"]
     assert media[2] - media[0] == pytest.approx((20 + 2 * 0.9) * MM, abs=0.05)
+
+
+def test_page_boxes_follow_the_die_line_of_a_die_cut_piece(tmp_path):
+    # Star sticker without TrimBox on a page larger than the piece: the boxes must wrap
+    # the die line (never cross the artwork), not the page or a centred ticket size.
+    from tests.integration.test_nesting import star_pdf
+
+    source = star_pdf(tmp_path / "star.pdf")
+    profile = ProductionProfile(id="p", minimumBleedMm=3, finalWidthMm=100, finalHeightMm=100)
+    out = tmp_path / "out.pdf"
+    applied = apply_fixes(source, out, [FixRequest(id="set_page_boxes")], profile)
+
+    trim = boxes(out)["TrimBox"]
+    assert "contorno externo da faca" in applied[0].details[0]
+    # 5-point star, outer radius 50 mm: about 95 x 90 mm, smaller than the 110 mm page.
+    assert 90 * MM < trim[2] - trim[0] < 100 * MM
+    assert trim[0] > 2 * MM

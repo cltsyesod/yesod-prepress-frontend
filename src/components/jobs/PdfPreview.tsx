@@ -94,6 +94,9 @@ export function PdfPreview({ url, page, onPageChange, safetyPt }: PdfPreviewProp
     return () => observer.disconnect()
   }, [])
 
+  // Peça com faca: a margem de segurança segue o contorno, não um retângulo; não desenhamos.
+  const dieCut = layers.some((layer) => /cut|corte|faca|contour|kiss/i.test(layer.name))
+
   const pageCount = doc?.numPages ?? 0
   const current = Math.min(Math.max(page, 1), pageCount || 1)
 
@@ -130,7 +133,7 @@ export function PdfPreview({ url, page, onPageChange, safetyPt }: PdfPreviewProp
       }
       const info = boxes[current - 1] ?? { trim: null, bleed: null }
       const safety =
-        info.trim && safetyPt > 0
+        info.trim && safetyPt > 0 && !dieCut
           ? ([
               info.trim[0] + safetyPt,
               info.trim[1] + safetyPt,
@@ -150,7 +153,7 @@ export function PdfPreview({ url, page, onPageChange, safetyPt }: PdfPreviewProp
       cancelled = true
       task?.cancel()
     }
-  }, [doc, current, width, zoom, boxes, safetyPt, layers])
+  }, [doc, current, width, zoom, boxes, safetyPt, layers, dieCut])
 
   const info = boxes[current - 1]
   const missing = doc && info && !info.trim
@@ -187,7 +190,7 @@ export function PdfPreview({ url, page, onPageChange, safetyPt }: PdfPreviewProp
         </label>
         {showGuides && (
           <div className="flex flex-wrap items-center gap-3 text-xs">
-            {Object.entries(GUIDES).map(([key, guide]) => (
+            {Object.entries(GUIDES).filter(([key]) => !(dieCut && key === 'safety')).map(([key, guide]) => (
               <span key={key} className="flex items-center gap-1">
                 <svg width="18" height="6" aria-hidden>
                   <line x1="0" y1="3" x2="18" y2="3" stroke={guide.color} strokeWidth="2" strokeDasharray={guide.dash} />

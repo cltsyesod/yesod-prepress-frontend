@@ -16,6 +16,8 @@ class PageInfo:
     bleed_box: tuple[float, float, float, float] | None = None
     art_box: tuple[float, float, float, float] | None = None
     rotation: int = 0
+    die_line_box: tuple[float, float, float, float] | None = None
+    """Bounds of the die line (cut separation paths), when the page has one."""
 
 
 @dataclass(slots=True)

@@ -83,7 +83,7 @@ def _set_page_boxes(pdf: pikepdf.Pdf, profile: ProductionProfile, params: dict) 
     details: list[str] = []
     scale = profile.file_scale
     bleed_pt = profile.minimum_bleed_mm / scale * MM
-    for info, page in zip(inspect_pages(pdf), pdf.pages, strict=True):
+    for info, page in zip(inspect_pages(pdf, profile.cut_layer_names), pdf.pages, strict=True):
         trim, how = target_trim(info, profile)
         changes: list[str] = []
         if info.trim_box is None:
@@ -121,7 +121,7 @@ def _add_cut_contour(pdf: pikepdf.Pdf, profile: ProductionProfile, params: dict)
 
     details: list[str] = []
     registered = False
-    for info, page in zip(inspect_pages(pdf), pdf.pages, strict=True):
+    for info, page in zip(inspect_pages(pdf, profile.cut_layer_names), pdf.pages, strict=True):
         if _already_applied(page, "add_cut_contour"):
             details.append(f"Página {info.number}: já tinha faca inserida pelo sistema")
             continue
@@ -174,7 +174,7 @@ def _add_crop_marks(pdf: pikepdf.Pdf, profile: ProductionProfile, params: dict) 
     registration = _separation(pdf, "All", [1, 1, 1, 1])
 
     details: list[str] = []
-    for info, page in zip(inspect_pages(pdf), pdf.pages, strict=True):
+    for info, page in zip(inspect_pages(pdf, profile.cut_layer_names), pdf.pages, strict=True):
         if _already_applied(page, "add_crop_marks"):
             details.append(f"Página {info.number}: já tinha marcas de corte do sistema")
             continue
