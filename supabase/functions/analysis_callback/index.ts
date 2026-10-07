@@ -59,6 +59,9 @@ Deno.serve(async (req: Request) => {
     }
 
     const body = JSON.parse(raw)
+    if (body.kind === 'nesting') {
+      return await handleNesting(createClient(supabaseUrl, serviceRoleKey), body)
+    }
     const jobId = body.analysisId
     const event = String(body.event || '')
     const sequence = Number(body.sequence) || 0
@@ -147,6 +150,45 @@ Deno.serve(async (req: Request) => {
     return json(500, { error: err?.message || 'Internal server error' })
   }
 })
+
+// Montagem (nesting): progresso, resultado (aproveitamento, comprimento) ou falha.
+const NESTING_STATUSES = ['queued', 'running', 'completed', 'failed', 'cancelled']
+async function handleNesting(db: any, body: any) {
+  if (!body.nestingId || !body.event_id) {
+    return json(400, { error: 'nestingId e event_id são obrigatórios' })
+  }
+  const { data: run } = await db
+    .from('nesting_runs')
+    .select('id, status, last_sequence')
+    .eq('id', body.nestingId)
+    .maybeSingle()
+  if (!run) return json(404, { error: 'Montagem não encontrada' })
+
+  const sequence = Number(body.sequence) || 0
+  // Eventos repetidos ou antigos não voltam o estado; montagem encerrada não muda.
+  if (sequence <= (run.last_sequence ?? 0) || ['completed', 'failed', 'cancelled'].includes(run.status)) {
+    return json(200, { ignored: true })
+  }
+  const status = NESTING_STATUSES.includes(body.status) ? body.status : run.status
+  const patch: Record<string, unknown> = {
+    status,
+    last_sequence: sequence,
+    progress: Math.max(0, Math.min(100, Number(body.progress) || 0)),
+    current_step: String(body.currentStep || ''),
+    updated: new Date().toISOString(),
+  }
+  if (body.event === 'completed') {
+    patch.result = body.summary && typeof body.summary === 'object' ? body.summary : {}
+    patch.completed_at = new Date().toISOString()
+  }
+  if (body.event === 'failed') {
+    patch.error_message = String(body.errorMessage || 'Falha na montagem')
+    patch.completed_at = new Date().toISOString()
+  }
+  const { error } = await db.from('nesting_runs').update(patch).eq('id', run.id)
+  if (error) return json(500, { error: error.message })
+  return json(200, { success: true })
+}
 
 // Correção automática: a análise roda sobre a cópia corrigida (status "pending" até aqui).
 // Concluída, a cópia vira o arquivo principal; falhou, ela é descartada e o original segue.

@@ -5,8 +5,8 @@ import json
 import time
 
 import httpx
+from pydantic import BaseModel
 
-from app.contracts.callback import CallbackPayload
 from app.core.config import Settings
 from app.core.exceptions import CallbackError
 from app.core.security import signature_for, validate_outbound_url
@@ -17,7 +17,7 @@ class CallbackClient:
         self.settings = settings
         self.transport = transport
 
-    async def send(self, url: str, payload: CallbackPayload) -> None:
+    async def send(self, url: str, payload: BaseModel) -> None:
         validate_outbound_url(
             url,
             self.settings.allowed_callback_hosts,

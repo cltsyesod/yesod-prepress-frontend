@@ -4,12 +4,12 @@ from app.core.config import get_settings
 
 settings = get_settings()
 
-# include: autodiscover_tasks só procura módulos "tasks"; a tarefa vive em analysis_task.
+# include: autodiscover_tasks só procura módulos "tasks"; as tarefas vivem em *_task.
 celery_app = Celery(
     "yesod_prepress",
     broker=settings.valkey_url,
     backend=settings.valkey_url,
-    include=["app.workers.analysis_task"],
+    include=["app.workers.analysis_task", "app.workers.nesting_task"],
 )
 celery_app.conf.update(
     task_default_queue=settings.celery_queue,

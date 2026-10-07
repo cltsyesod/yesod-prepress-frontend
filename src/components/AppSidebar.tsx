@@ -1,6 +1,7 @@
 import { NavLink } from 'react-router-dom'
 import {
   Inbox,
+  LayoutGrid,
   Settings2,
   Cog,
   LogOut,
@@ -19,6 +20,7 @@ interface AppSidebarProps {
 
 const NAV_ITEMS = [
   { label: 'Fila de trabalho', icon: Inbox, to: '/trabalhos' },
+  { label: 'Montagem', icon: LayoutGrid, to: '/montagem' },
   { label: 'Perfis de produção', icon: Settings2, to: '/perfis' },
   { label: 'Configurações', icon: Cog, to: '/configuracoes' },
 ]
