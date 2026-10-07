@@ -93,7 +93,8 @@ export default function NestingPage() {
     setParams((p) => ({ ...p, material: { ...p.material, ...patch } }))
 
   const chosen = useMemo(() => jobs.filter((job) => selected[job.id]), [jobs, selected])
-  const canSubmit = chosen.length > 0 && params.material.widthMm > 0 && (!isSheet || !!params.material.lengthMm)
+  const problem = materialProblem(params, isSheet)
+  const canSubmit = chosen.length > 0 && !problem
 
   const submit = async () => {
     setSubmitting(true)
@@ -297,6 +298,9 @@ export default function NestingPage() {
             />
           )}
 
+          {problem && params.material.widthMm > 0 && (
+            <p className="text-sm text-amber-700 dark:text-amber-400">{problem}</p>
+          )}
           <Button className="w-full" disabled={!canSubmit || submitting} onClick={submit}>
             {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <LayoutGrid className="h-4 w-4" />}
             Montar {chosen.length > 0 && `(${chosen.reduce((sum, job) => sum + selected[job.id], 0)} peças)`}
@@ -348,6 +352,27 @@ export default function NestingPage() {
       </div>
     </div>
   )
+}
+
+// Limite do formato PDF por lado (200 polegadas); rolos maiores são divididos em páginas.
+const PDF_MAX_MM = 5080
+
+/** Confere o material antes de enviar; devolve o problema em linguagem de pré-impressor. */
+function materialProblem(params: NestingParams, isSheet: boolean): string {
+  const { widthMm, lengthMm, marginMm, gapMm } = params.material
+  if (!(widthMm > 0)) return 'Informe a largura útil do material.'
+  if (widthMm > PDF_MAX_MM) {
+    return `Largura de ${widthMm.toLocaleString('pt-BR')} mm passa do limite do PDF (${PDF_MAX_MM.toLocaleString('pt-BR')} mm). Confira se não sobrou um dígito (ex.: 1220).`
+  }
+  if (isSheet) {
+    if (!(lengthMm && lengthMm > 0)) return 'Informe o comprimento da folha/chapa.'
+    if (lengthMm > PDF_MAX_MM) {
+      return `Comprimento de ${lengthMm.toLocaleString('pt-BR')} mm passa do limite do PDF (${PDF_MAX_MM.toLocaleString('pt-BR')} mm).`
+    }
+  }
+  if (marginMm * 2 >= widthMm) return 'A margem da borda ocupa toda a largura do material.'
+  if (marginMm < 0 || gapMm < 0) return 'Margem e espaço entre peças não podem ser negativos.'
+  return ''
 }
 
 function runLabel(run: NestingRun) {
