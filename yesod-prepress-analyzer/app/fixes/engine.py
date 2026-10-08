@@ -1,9 +1,10 @@
 """Automatic corrections applied to a copy of the client PDF.
 
-Every fix is conservative: it never resamples images, converts colours or moves
-artwork. It only writes page boxes and adds new, clearly separated objects (die
-line, crop marks). The original file is kept by the caller; the corrected copy is
-analysed again so the operator sees the result measured, not assumed.
+Every fix is conservative: it never converts colours or moves artwork. It writes
+page boxes and adds new, clearly separated objects (die line, crop marks). The one
+exception that touches pixels is upscaling, which the operator requests explicitly.
+The original file is kept by the caller; the corrected copy is analysed again so
+the operator sees the result measured, not assumed.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from app.fixes.contour import artwork_silhouette, contour_die_line
 from app.fixes.geometry import MM, Box, describe_mm, expand, intersect, target_trim, visible_box
 from app.fixes.magenta import convert_magenta_strokes
 from app.fixes.paths import circle, pdf_path
+from app.fixes.upscale import upscale_images
 
 # Order matters: boxes first, because the die line and the marks use the TrimBox; a
 # magenta die line converted to the cut separation counts as the die line afterwards.
@@ -262,6 +264,21 @@ def _convert_magenta(pdf: pikepdf.Pdf, profile: ProductionProfile, params: dict)
     )
 
 
+def _upscale(pdf: pikepdf.Pdf, profile: ProductionProfile, params: dict) -> AppliedFix:
+    target = _param(params, "targetPpi", float(profile.minimum_resolution_dpi))
+    max_factor = _param(params, "maxFactor", 4.0) or 4.0
+    done, skipped = upscale_images(pdf, target, profile.file_scale, max_factor)
+    details = [
+        f"Pág. {item.page} {item.name}: {item.before[0]}×{item.before[1]} → "
+        f"{item.after[0]}×{item.after[1]} px, {item.ppi_before:.0f} → {item.ppi_after:.0f} ppi "
+        "no tamanho final"
+        + (" (limite de ampliação atingido)" if item.ppi_after + 0.5 < target else "")
+        for item in done
+    ]
+    details += [f"Não ampliada: {reason}" for reason in skipped]
+    return AppliedFix(id="upscale_images", label="Imagens ampliadas (Lanczos)", details=details)
+
+
 def _register_layer(pdf: pikepdf.Pdf, layer: pikepdf.Object) -> None:
     root = pdf.Root
     if "/OCProperties" not in root:
@@ -379,6 +396,7 @@ def _slug(
 
 
 _FIXES = {
+    "upscale_images": _upscale,
     "set_page_boxes": _set_page_boxes,
     "convert_magenta_die_line": _convert_magenta,
     "add_cut_contour": _add_cut_contour,

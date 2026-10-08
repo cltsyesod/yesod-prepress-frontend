@@ -58,6 +58,18 @@ class ImageResolutionRule(Rule):
                         "Substitua a imagem, reduza sua escala ou use upscaling. Se a distância "
                         "de observação justificar, aceite como exceção registrada."
                     ),
+                    can_auto_correct=True,
+                    fix={
+                        "id": "upscale_images",
+                        "target": "pdf",
+                        "label": "Ampliar imagens (upscaling)",
+                        "preview": (
+                            f"Imagens abaixo de {minimum} ppi ampliadas com Lanczos até {minimum} "
+                            "ppi no tamanho final (no máximo 4×), em uma cópia; cores e "
+                            "transparência preservadas"
+                        ),
+                        "params": {"targetPpi": minimum},
+                    },
                 )
             )
         return issues
