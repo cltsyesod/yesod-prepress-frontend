@@ -5,7 +5,16 @@ from pathlib import Path
 
 import pikepdf
 
-from app.nesting.engine import Material, NestItem, NestResult, efficiency, nest, rotation_steps
+from app.nesting.engine import (
+    Material,
+    NestItem,
+    NestResult,
+    efficiency,
+    nest,
+    rotation_steps,
+    spare_sets,
+    used_efficiency,
+)
 from app.nesting.imposition import CutLines, SourcePiece, build_layout
 from app.nesting.shapes import contour_pieces, page_pieces, scaled
 
@@ -106,23 +115,54 @@ def plan(items: list[PlanItem], options: PlanOptions, output: Path) -> dict:
         result = nest(nest_items, material)
         layout = build_layout(result, material, sources, options.cut_lines)
         layout.save(output)
-        return summarize(result, material, sources)
+        summary = summarize(result, material, sources)
+        summary["fill"] = spare_room(result, material, nest_items, items)
+        return summary
     finally:
         for pdf in opened:
             pdf.close()
 
 
+def spare_room(
+    result: NestResult, material: Material, nest_items: list[NestItem], items: list[PlanItem]
+) -> list[dict]:
+    """Extra copies of each job that still fit on the last sheet (sheet material only).
+
+    Each figure is for that job alone: the operator picks which one completes the sheet.
+    """
+
+    used = [sheet for sheet in result.sheets if sheet.placements]
+    if material.length is None or result.unplaced or not used:
+        return []
+    fill = []
+    for item in items:
+        pieces = [n for n in nest_items if n.key.split("#")[0] == item.key]
+        if pieces:
+            extra = spare_sets(used[-1], pieces, material)
+            fill.append({"key": item.key, "label": item.label, "extra": extra})
+    return fill
+
+
 def summarize(result: NestResult, material: Material, sources: dict[str, SourcePiece]) -> dict:
-    sheets = [
-        {
+    sheets = []
+    for sheet in result.sheets:
+        if not sheet.placements:
+            continue
+        used_mm = (sheet.used_length + material.margin) / MM
+        entry = {
             "index": sheet.index + 1,
             "pieces": len(sheet.placements),
             "lengthMm": round((material.length or sheet.used_length + material.margin) / MM, 1),
             "efficiency": round(efficiency(sheet, material), 4),
+            # Up to the top of the last piece: shows how well that part is packed.
+            "usedLengthMm": round(used_mm, 1),
+            "usedEfficiency": round(used_efficiency(sheet, material), 4),
         }
-        for sheet in result.sheets
-        if sheet.placements
-    ]
+        if material.length is not None:
+            # Where the sheet can be cut so the rest goes back to stock as an offcut.
+            leftover = material.length / MM - used_mm
+            entry["offcutMm"] = [round(material.width / MM, 1), round(max(0.0, leftover), 1)]
+        sheets.append(entry)
     return {
         "widthMm": round(material.width / MM, 1),
         "sheets": sheets,

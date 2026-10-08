@@ -136,6 +136,25 @@ export default function NestingPage() {
     setSubmitting(false)
   }
 
+  // Completa a folha: monta de novo com as cópias que o sistema calculou que ainda cabem.
+  const complete = async (run: NestingRun, fileId: string, extra: number) => {
+    setSubmitting(true)
+    try {
+      const items = run.items.map((item) =>
+        item.fileId === fileId ? { ...item, quantity: item.quantity + extra } : item,
+      )
+      const changed = items.find((item) => item.fileId === fileId)
+      if (changed) setSelected((s) => ({ ...s, [changed.projectId]: changed.quantity }))
+      const id = await nestingService.create(run.name, run.params, items)
+      setCurrentId(id)
+      await loadRuns()
+    } catch (err) {
+      toast({ title: 'Não foi possível montar', description: getErrorMessage(err), variant: 'destructive' })
+      await loadRuns()
+    }
+    setSubmitting(false)
+  }
+
   const remove = async (run: NestingRun) => {
     await nestingService.remove(run.id).catch(() => null)
     if (currentId === run.id) setCurrentId(null)
@@ -342,7 +361,14 @@ export default function NestingPage() {
               Escolha os trabalhos, informe o material e clique em Montar.
             </p>
           ) : (
-            <RunDetail run={current} outputUrl={outputUrl} page={page} onPageChange={setPage} />
+            <RunDetail
+              run={current}
+              outputUrl={outputUrl}
+              page={page}
+              onPageChange={setPage}
+              onComplete={complete}
+              busy={submitting}
+            />
           )}
 
           {runs.length > 0 && (
@@ -416,15 +442,24 @@ function RunDetail({
   outputUrl,
   page,
   onPageChange,
+  onComplete,
+  busy,
 }: {
   run: NestingRun
   outputUrl: string
   page: number
   onPageChange: (page: number) => void
+  onComplete: (run: NestingRun, fileId: string, extra: number) => void
+  busy: boolean
 }) {
   const result = run.result ?? {}
   const sheets = result.sheets ?? []
   const width = run.params?.material?.widthMm
+  const last = sheets[sheets.length - 1]
+  const offcut = last?.offcutMm
+  const fill = (result.fill ?? []).filter((f) => f.extra > 0)
+  const mm = (value: number) => Math.round(value).toLocaleString('pt-BR')
+  const pct = (value: number) => `${Math.round(value * 100)}%`
 
   if (NESTING_ACTIVE.includes(run.status)) {
     return (
@@ -459,10 +494,16 @@ function RunDetail({
         {sheets.map((sheet) => (
           <Stat
             key={sheet.index}
-            label={sheets.length > 1 ? `Página ${sheet.index}` : 'Aproveitamento'}
-            value={`${Math.round(sheet.efficiency * 100)}%${sheets.length > 1 ? ` · ${sheet.pieces} peças` : ''}`}
+            label={sheets.length > 1 ? `Página ${sheet.index}` : 'Aproveitamento da chapa'}
+            value={`${pct(sheet.efficiency)}${sheets.length > 1 ? ` · ${sheet.pieces} peças` : ''}`}
           />
         ))}
+        {last?.usedEfficiency != null && last.usedLengthMm != null && offcut && (
+          <Stat
+            label={`Na área usada (até ${mm(last.usedLengthMm)} mm)`}
+            value={pct(last.usedEfficiency)}
+          />
+        )}
         {outputUrl && (
           <Button size="sm" variant="outline" className="ml-auto" asChild>
             <a href={outputUrl} target="_blank" rel="noreferrer">
@@ -477,6 +518,34 @@ function RunDetail({
         <p className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm text-amber-700 dark:text-amber-400">
           Não couberam: {result.unplaced.map((u) => `${u.label} (${u.reason})`).join('; ')}
         </p>
+      )}
+      {last && offcut && offcut[1] > 0 && (
+        <p className="rounded-lg border border-border bg-card p-3 text-sm text-foreground">
+          Retalho: cortando a chapa{sheets.length > 1 ? ` da página ${last.index}` : ''} em{' '}
+          <strong>{mm(last.usedLengthMm ?? 0)} mm</strong>, sobram{' '}
+          <strong>
+            {mm(offcut[0])} × {mm(offcut[1])} mm
+          </strong>{' '}
+          para voltar ao estoque.
+        </p>
+      )}
+      {fill.length > 0 && (
+        <div className="space-y-2 rounded-lg border border-border bg-card p-3 text-sm">
+          <p className="text-foreground">
+            Ainda cabem na sobra{sheets.length > 1 ? ` da página ${last?.index}` : ''}
+            {fill.length > 1 && <span className="text-muted-foreground"> (cada trabalho sozinho)</span>}:
+          </p>
+          {fill.map((f) => (
+            <div key={f.key} className="flex flex-wrap items-center gap-2">
+              <span className="min-w-0 flex-1 truncate text-foreground">
+                <strong>+{f.extra.toLocaleString('pt-BR')}</strong> {f.label}
+              </span>
+              <Button size="sm" variant="outline" disabled={busy} onClick={() => onComplete(run, f.key, f.extra)}>
+                Completar a chapa
+              </Button>
+            </div>
+          ))}
+        </div>
       )}
       {!!result.dieLines?.length && (
         <p className="text-xs text-muted-foreground">

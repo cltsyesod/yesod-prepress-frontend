@@ -30,7 +30,13 @@ export interface NestingSheet {
   index: number
   pieces: number
   lengthMm: number
+  /** Área das peças ÷ folha inteira (ou comprimento usado, no rolo). */
   efficiency: number
+  /** Até o topo da última peça: mostra se o encaixe está bom na parte ocupada. */
+  usedLengthMm?: number
+  usedEfficiency?: number
+  /** Retalho que sobra ao cortar a folha logo acima das peças: [largura, comprimento]. */
+  offcutMm?: [number, number]
 }
 
 export interface NestingResult {
@@ -40,6 +46,8 @@ export interface NestingResult {
   placed?: number
   unplaced?: { label: string; copy: number; reason: string }[]
   dieLines?: string[]
+  /** Cópias a mais de cada trabalho (sozinho) que ainda cabem na última folha. key = fileId. */
+  fill?: { key: string; label: string; extra: number }[]
 }
 
 export interface NestingRun {

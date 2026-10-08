@@ -232,9 +232,21 @@ def _cost(result: NestResult) -> tuple[int, int, float]:
     return (len(result.unplaced), len(used), used[-1].used_length if used else 0.0)
 
 
-def _nest(items: list[NestItem], material: Material, patterns: bool) -> NestResult:
+def _options(item: NestItem, material: Material) -> list[_Oriented]:
+    """Every allowed rotation of the piece that fits the usable area."""
+
     usable_w = material.width - 2 * material.margin
     usable_h = material.page_length - 2 * material.margin
+    # Collision tests use a slightly simplified outline (never smaller than the real one).
+    outline = item.outline.simplify(0.5).buffer(0.5, join_style="mitre", mitre_limit=2.0)
+    return [
+        entry
+        for entry in ((r, *_oriented(outline, r)) for r in item.rotations)
+        if entry[1].bounds[2] <= usable_w + 1e-6 and entry[1].bounds[3] <= usable_h + 1e-6
+    ]
+
+
+def _nest(items: list[NestItem], material: Material, patterns: bool) -> NestResult:
     # Largest first: big pieces define the layout, small ones fill the gaps.
     ordered = sorted(items, key=lambda item: item.outline.area, reverse=True)
 
@@ -242,13 +254,7 @@ def _nest(items: list[NestItem], material: Material, patterns: bool) -> NestResu
     unplaced: list[tuple[str, int, str]] = []
 
     for item in ordered:
-        # Collision tests use a slightly simplified outline (never smaller than the real one).
-        outline = item.outline.simplify(0.5).buffer(0.5, join_style="mitre", mitre_limit=2.0)
-        options = [
-            entry
-            for entry in ((r, *_oriented(outline, r)) for r in item.rotations)
-            if entry[1].bounds[2] <= usable_w + 1e-6 and entry[1].bounds[3] <= usable_h + 1e-6
-        ]
+        options = _options(item, material)
         copies = list(range(max(0, item.quantity)))
         if not options:
             reason = "maior que a área útil do material"
@@ -516,6 +522,54 @@ def _pattern_spots(pattern: _Pattern, material: Material):
         row += 1
     spots.sort(key=lambda spot: (round(spot[1][1], 1), spot[1][0]))
     return spots
+
+
+_FILL_LIMIT = 2000  # sets counted when measuring the spare room of a sheet
+
+
+def spare_sets(sheet: Sheet, items: list[NestItem], material: Material) -> int:
+    """How many more complete sets of `items` (one copy of each) fit in the free part of `sheet`.
+
+    Used to tell the operator how many copies would fill the sheet. The extra copies
+    follow the tiling of each piece, so the count is conservative (never overstated).
+    """
+
+    layout = _Layout(material, sheet.index)
+    for placement in sheet.placements:
+        layout._obstacles.append(_grow(placement.footprint, material.gap))
+    layout._tree = STRtree(layout._obstacles) if layout._obstacles else None
+    layout.sheet.used_length = sheet.used_length
+
+    pieces = []
+    for item in items:
+        options = _options(item, material)
+        pattern = _best_pattern(options, material, _FILL_LIMIT) if options else None
+        if pattern is None:
+            return 0
+        pieces.append([_pattern_spots(pattern, material), 0])
+
+    sets = 0
+    while sets < _FILL_LIMIT:
+        for piece in pieces:
+            spots, cursor = piece
+            while cursor < len(spots) and not layout.free(spots[cursor][0][1], *spots[cursor][1]):
+                cursor += 1
+            if cursor == len(spots):
+                return sets
+            (rotation, shape, shift), spot = spots[cursor]
+            _put(layout, "spare", sets, rotation, shape, shift, spot)
+            piece[1] = cursor + 1
+        sets += 1
+    return sets
+
+
+def used_efficiency(sheet: Sheet, material: Material) -> float:
+    """Share of the material taken by pieces up to the top of the last piece."""
+
+    if not sheet.placements or sheet.used_length <= 0:
+        return 0.0
+    area = sum(p.footprint.area for p in sheet.placements)
+    return area / (material.width * (sheet.used_length + material.margin))
 
 
 def rotation_steps(step_degrees: float, allow_rotation: bool = True) -> tuple[float, ...]:

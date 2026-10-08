@@ -5,7 +5,15 @@ import pikepdf
 import pytest
 from shapely.geometry import Point, Polygon, box
 
-from app.nesting.engine import Material, NestItem, efficiency, nest, rotation_steps
+from app.nesting.engine import (
+    Material,
+    NestItem,
+    efficiency,
+    nest,
+    rotation_steps,
+    spare_sets,
+    used_efficiency,
+)
 from app.nesting.imposition import CutLines
 from app.nesting.planner import PlanItem, PlanOptions, plan
 from app.nesting.shapes import die_line
@@ -114,6 +122,14 @@ def test_sheet_efficiency_counts_the_whole_sheet():
     assert efficiency(sheet, material) == pytest.approx(1 / 8, rel=0.02)
 
 
+def test_spare_room_counts_copies_that_still_fit():
+    square = NestItem("sq", box(0, 0, 100 * MM, 100 * MM), 1, (0.0,))
+    material = Material(width=220 * MM, length=220 * MM, margin=5 * MM, gap=5 * MM)
+    sheet = nest([square], material).sheets[0]
+    assert spare_sets(sheet, [square], material) == 3
+    assert used_efficiency(sheet, material) > efficiency(sheet, material)
+
+
 def test_rotation_steps():
     assert rotation_steps(22.5) == tuple(i * 22.5 for i in range(16))
     assert rotation_steps(90, allow_rotation=False) == (0.0,)
@@ -152,6 +168,18 @@ def test_plan_builds_layout_pdf(tmp_path):
         assert len(page.Resources.XObject) == 2
         layers = {str(group.Name) for group in pdf.Root.OCProperties.OCGs}
         assert "CutContour" in layers
+
+
+def test_sheet_plan_reports_offcut_and_spare_copies(tmp_path):
+    items = [PlanItem("card", card_pdf(tmp_path / "card.pdf"), "Cartão", 2)]
+    options = PlanOptions(width_mm=400, length_mm=600, margin_mm=10, gap_mm=4)
+    summary = plan(items, options, tmp_path / "layout.pdf")
+
+    sheet = summary["sheets"][0]
+    assert sheet["usedEfficiency"] > sheet["efficiency"]
+    assert sheet["offcutMm"] == [400.0, pytest.approx(600 - sheet["usedLengthMm"], abs=0.2)]
+    [fill] = summary["fill"]
+    assert fill["key"] == "card" and fill["extra"] > 0
 
 
 def test_scaled_file_is_nested_at_final_size(tmp_path):
