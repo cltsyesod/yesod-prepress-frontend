@@ -278,17 +278,25 @@ def build_guide(
             )
         )
 
-    if tile_pages:
+    # Installation order: by the order given by the screen, else by panel number.
+    ordered = sorted(tiles, key=lambda t: (t.install or 10**6, t.number))
+    regions = list(dict.fromkeys(t.region for t in ordered))
+    # A single area would just repeat the overview.
+    named = any(regions) and len(regions) > 1
+    if tile_pages or named:
         document = pypdfium2.PdfDocument(str(path))
+        ctx = _TileContext(path, page_index, frame, document, title, revision, tiles, sides)
         try:
-            for tile in tiles:
-                _tile_page(
-                    pdf,
-                    (font, bold),
-                    _TileContext(path, page_index, frame, document, title, revision, tiles, sides),
-                    tile,
-                    printed,
-                )
+            # One sheet per installation area (only when the operator named areas).
+            if named:
+                for region in regions:
+                    group = [t for t in ordered if t.region == region]
+                    _area_page(
+                        pdf, (font, bold), ctx, region, group, printed, background, background_image
+                    )
+            if tile_pages:
+                for tile in ordered:
+                    _tile_page(pdf, (font, bold), ctx, tile, printed)
         finally:
             document.close()
     return pdf
@@ -333,6 +341,175 @@ def overlap_edges(tile: TilingTile, printed: Rect, around: dict[str, int]) -> di
 
 
 _OPPOSITE = {"left": "right", "right": "left", "top": "bottom", "bottom": "top"}
+
+
+def covers(
+    tile: TilingTile,
+    printed: dict[int, Rect],
+    sides: dict[int, dict[str, int]],
+    by_number: dict[int, TilingTile],
+) -> list[int]:
+    """Neighbours this panel prints over (they go up first). Half-and-half overlaps don't count."""
+
+    around = sides.get(tile.number, {})
+    mine = overlap_edges(tile, printed[tile.number], around)
+    result = []
+    for side, number in around.items():
+        other = by_number.get(number)
+        if other is None or mine[side] <= 0.5:
+            continue
+        theirs = overlap_edges(other, printed[number], sides.get(number, {}))[_OPPOSITE[side]]
+        if theirs <= 0.5:
+            result.append(number)
+    return result
+
+
+def _area_page(
+    pdf,
+    fonts,
+    ctx: _TileContext,
+    region: str,
+    group: list[TilingTile],
+    printed: dict[int, Rect],
+    background: TilingBackground | None,
+    background_image: Image.Image | None,
+) -> None:
+    """An installation area: its panels on the artwork with the order to put them up."""
+
+    font, bold = fonts
+    width, height = PAGE
+    pdf.add_blank_page(page_size=PAGE)
+    page = pdf.pages[-1]
+    f = page.add_resource(font, pikepdf.Name.Font, prefix="F")
+    fb = page.add_resource(bold, pikepdf.Name.Font, prefix="B")
+    ops: list[str] = []
+    by_number = {t.number: t for t in ctx.tiles}
+
+    rects = [printed[t.number] for t in group]
+    x0 = min(r.x for r in rects)
+    y0 = min(r.y for r in rects)
+    x1 = max(r.x + r.w for r in rects)
+    y1 = max(r.y + r.h for r in rects)
+    pad = max(x1 - x0, y1 - y0) * 0.03
+    x0, y0, x1, y1 = x0 - pad, y0 - pad, x1 + pad, y1 + pad
+    box_x, box_y = _EDGE, _EDGE + 14 * MM
+    box_w, box_h = width * 0.6 - _EDGE, height - box_y - _EDGE - 14 * MM
+    g = min(box_w / (x1 - x0), box_h / (y1 - y0))
+    ox = box_x + (box_w - (x1 - x0) * g) / 2 - x0 * g
+    oy = box_y + (box_h - (y1 - y0) * g) / 2 - y0 * g
+
+    def at(x: float, y: float) -> tuple[float, float]:
+        return ox + x * g, oy + y * g
+
+    cx0, cy0 = at(x0, y0)
+    clip = f"{_num(cx0)} {_num(cy0)} {_num((x1 - x0) * g)} {_num((y1 - y0) * g)} re W n"
+    a = ctx.frame.available
+    art_area = (max(x0, a[0]), max(y0, a[1]), min(x1, a[2]), min(y1, a[3]))
+    art = _render_art(ctx.path, ctx.page_index, ctx.frame, art_area, 1800, ctx.document)
+    if art is not None:
+        name = page.add_resource(_image(pdf, art), pikepdf.Name.XObject, prefix="Art")
+        x, y = at(art_area[0], art_area[1])
+        w, h = (art_area[2] - art_area[0]) * g, (art_area[3] - art_area[1]) * g
+        ops.append(f"q {_num(w)} 0 0 {_num(h)} {_num(x)} {_num(y)} cm {name} Do Q")
+    if background is not None and background_image is not None:
+        bw = background.width_mm
+        bh = bw * background_image.height / max(1, background_image.width)
+        name = page.add_resource(_image(pdf, background_image), pikepdf.Name.XObject, prefix="Bg")
+        gs = page.add_resource(
+            pikepdf.Dictionary(Type=pikepdf.Name.ExtGState, ca=background.opacity),
+            pikepdf.Name.ExtGState,
+            prefix="GS",
+        )
+        x, y = at(background.x_mm, background.y_mm)
+        ops.append(
+            f"q {clip} {gs} gs {_num(bw * g)} 0 0 {_num(bh * g)} {_num(x)} {_num(y)} cm {name} Do Q"
+        )
+
+    # Panels of the area: outline, number and, in the corner, the order to install.
+    size = max(6.0, min(16.0, min(min(t.visible.w, t.visible.h) * g * 0.3 for t in group)))
+    for position, tile in enumerate(group, start=1):
+        v = tile.visible
+        x, y = at(v.x, v.y)
+        ops.append(f"q {_BLUE} RG 1 w {_num(x)} {_num(y)} {_num(v.w * g)} {_num(v.h * g)} re S Q")
+        cx, cy = at(v.x + v.w / 2, v.y + v.h / 2)
+        label = f"{tile.number:02d}"
+        tw = size * 0.556 * len(label)
+        ops.append(
+            f"q 1 1 1 rg {_BLUE} RG 0.8 w {_num(cx - tw / 2 - 3)} {_num(cy - size * 0.35 - 3)} "
+            f"{_num(tw + 6)} {_num(size + 4)} re B Q "
+            f"BT {fb} {_num(size)} Tf {_BLUE} rg {_num(cx - tw / 2)} {_num(cy - size * 0.35)} Td "
+            f"({label}) Tj ET"
+        )
+        # The same order printed on the panel labels (it runs on from one area to the next).
+        order = f"{tile.install or position}º"
+        small = max(5.0, size * 0.6)
+        ow = small * 0.6 * len(order) + 6
+        ox0, oy1 = x + 3, y + v.h * g - 3
+        badge = f"{_num(ox0)} {_num(oy1 - small - 4)} {_num(ow)} {_num(small + 4)}"
+        ops.append(
+            f"q {_ORANGE} rg {badge} re f Q "
+            f"BT {fb} {_num(small)} Tf 1 1 1 rg {_num(ox0 + 3)} {_num(oy1 - small - 1)} Td "
+            f"({_text(order)}) Tj ET"
+        )
+
+    head = f"Área: {region}" if region else "Painéis sem área"
+    ops.append(
+        f"BT {fb} 16 Tf 0 0 0 rg {_num(_EDGE)} {_num(height - _EDGE - 12)} Td ({_text(head)}) Tj ET"
+    )
+    sub = " · ".join(
+        part
+        for part in (
+            ctx.title,
+            f"R{ctx.revision}",
+            f"{len(group)} painéis",
+            "instalar na ordem indicada (laranja)",
+        )
+        if part
+    )
+    ops.append(
+        f"BT {f} 9 Tf 0.3 0.3 0.3 rg {_num(_EDGE)} {_num(height - _EDGE - 26)} Td "
+        f"({_text(sub)}) Tj ET"
+    )
+
+    # Order table.
+    tx = width * 0.6 + 6 * MM
+    widths = [30, 26, 150, 40, 90]
+    rows = [["Ordem", "Nº", "Arquivo", "Pos.", "Depois de"]]
+    for position, tile in enumerate(group, start=1):
+        after = covers(tile, printed, ctx.sides, by_number)
+        rows.append(
+            [
+                f"{tile.install or position}º",
+                f"{tile.number:02d}",
+                tile.name,
+                tile.id,
+                ", ".join(f"{n:02d}" for n in sorted(after)) or "—",
+            ]
+        )
+    y = height - _EDGE - 40
+    for i, row in enumerate(rows[: 1 + 52]):
+        cx = tx
+        face = fb if i == 0 else f
+        for cell, w in zip(row, widths, strict=True):
+            limit = max(2, int(w / 3.6))
+            text = cell if len(cell) <= limit else cell[: limit - 1] + "…"
+            ops.append(f"BT {face} 7 Tf 0 0 0 rg {_num(cx)} {_num(y)} Td ({_text(text)}) Tj ET")
+            cx += w
+        if i == 0:
+            line_end = _num(tx + sum(widths))
+            ops.append(f"q 0.6 G 0.5 w {_num(tx)} {_num(y - 3)} m {line_end} {_num(y - 3)} l S Q")
+            y -= 2
+        y -= 11
+    if len(rows) > 53:
+        ops.append(
+            f"BT {f} 7 Tf 0.35 0.35 0.35 rg {_num(tx)} {_num(y)} Td "
+            f"({_text(f'… e mais {len(rows) - 53} painéis: veja as folhas de cada painel.')}) Tj ET"
+        )
+    note = "Depois de: painéis que ficam por baixo deste e precisam estar instalados antes."
+    ops.append(
+        f"BT {f} 6.5 Tf 0.35 0.35 0.35 rg {_num(tx)} {_num(_EDGE)} Td ({_text(note)}) Tj ET"
+    )
+    page.contents_add("\n".join(ops).encode("cp1252", "replace"))
 
 
 def _tile_page(pdf, fonts, ctx: _TileContext, tile: TilingTile, printed: dict[int, Rect]) -> None:
@@ -480,7 +657,9 @@ def _tile_page(pdf, fonts, ctx: _TileContext, tile: TilingTile, printed: dict[in
             if other
             else 0.0
         )
-        if mine[side] > 0.5:
+        if mine[side] > 0.5 and theirs > 0.5:
+            note = f"painel {number:02d} · metade de cada ({mine[side] + theirs:.0f} mm)"
+        elif mine[side] > 0.5:
             note = f"painel {number:02d} · este fica por cima ({mine[side]:.0f} mm)"
         elif theirs > 0.5:
             note = f"painel {number:02d} · este fica por baixo ({theirs:.0f} mm)"
@@ -488,9 +667,11 @@ def _tile_page(pdf, fonts, ctx: _TileContext, tile: TilingTile, printed: dict[in
         else:
             note = f"painel {number:02d} · topo a topo"
         rows.append((_SIDE_LONG[side], note))
+    if tile.install:
+        rows.insert(3, ("Instalação", f"{tile.install}º de {len(ctx.tiles)}"))
     if under:
         rows.append(("Instalar antes de", ", ".join(f"{n:02d}" for n in sorted(under))))
-    covered = [around[s] for s in around if mine[s] > 0.5]
+    covered = covers(tile, printed, ctx.sides, by_number)
     if covered:
         rows.append(("Instalar depois de", ", ".join(f"{n:02d}" for n in sorted(covered))))
 

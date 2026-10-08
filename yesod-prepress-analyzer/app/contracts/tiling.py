@@ -43,7 +43,7 @@ class TilingTile(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     """File name chosen by the operator (without extension)."""
     region: str = Field(default="", max_length=120, validation_alias=AliasChoices("region", "zone"))
-    """Where it goes (e.g. "Lateral esquerda", "Fachada - térreo")."""
+    """Installation area, free name (e.g. "Térreo", "Parede A", "Vitrine 2")."""
     column: int = Field(default=1, ge=1)
     row: int = Field(default=1, ge=1)
     visible: Rect = Field(validation_alias=AliasChoices("visible", "logical"))
@@ -52,6 +52,8 @@ class TilingTile(BaseModel):
     """Print window: the logical part plus overlaps and the outer bleed."""
     white: Edges = Field(default_factory=Edges)
     """Unprinted glue/weld area added outside the print window, per edge."""
+    install: int = Field(default=0, ge=0, le=10_000)
+    """Position in the installation order (1 = first; 0 = not given)."""
     rotation: Literal[0, 90, 180, 270] = 0
     """How the panel goes on the media (clockwise): 90 = lying, +180 for flip-flop."""
     label_top: str | None = Field(

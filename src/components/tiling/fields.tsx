@@ -156,16 +156,20 @@ export function TextField({
   onCommit,
   placeholder,
   className,
+  list,
 }: {
   value: string
   onCommit: (value: string) => void
   placeholder?: string
   className?: string
+  /** Id de um <datalist> com sugestões. */
+  list?: string
 }) {
   const [draft, setDraft] = useState(value)
   useEffect(() => setDraft(value), [value])
   return (
     <Input
+      list={list}
       className={cn('h-7 px-2 text-xs', className)}
       value={draft}
       placeholder={placeholder}

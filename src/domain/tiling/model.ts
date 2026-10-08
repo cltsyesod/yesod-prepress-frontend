@@ -123,6 +123,15 @@ export interface TilingProjectModel {
   constraint: PrintConstraint
   /** Modelo do nome do arquivo: {projeto} {cliente} {lin} {col} {n} {nn} {zona}. */
   nameTemplate: string
+  /**
+   * Áreas da instalação na ordem em que são instaladas (nomes livres: "Térreo", "Parede A",
+   * "Vitrine 2"…). O painel entra numa área pelo campo `zone`.
+   */
+  areas?: string[]
+  /** Ordem de instalação definida à mão (chaves dos painéis); sem ela, a sugerida pelo motor. */
+  sequence?: string[]
+  /** Numeração dos painéis: pela grade (leitura) ou pela ordem de instalação. */
+  numbering?: 'reading' | 'install'
 }
 
 /** Resultado do motor para um painel. */
@@ -149,6 +158,16 @@ export interface TileGeometry {
   neighbours: Partial<Record<Edge, string>>
   /** Giro do painel na mídia (graus, sentido horário): 90 = deitado, +180 no flip-flop. */
   rotation: 0 | 90 | 180 | 270
+  /** Posição na ordem de instalação (1 = o primeiro; 0 = não imprime). */
+  install: number
+}
+
+/** Uma área da instalação com os painéis na ordem em que são instalados. */
+export interface AreaGeometry {
+  /** Nome da área ("" = painéis sem área). */
+  name: string
+  /** Ids dos painéis (L1C2) em ordem de instalação. */
+  tiles: string[]
 }
 
 /** Onde cada painel cai na mídia: x na largura (a partir da margem), y no comprimento. */
@@ -207,4 +226,6 @@ export interface ProjectGeometry {
   mediaUsage: number
   /** Painéis distribuídos na mídia (null sem largura imprimível). */
   media: MediaLayout | null
+  /** Áreas na ordem de instalação, cada uma com seus painéis em ordem. */
+  areas: AreaGeometry[]
 }

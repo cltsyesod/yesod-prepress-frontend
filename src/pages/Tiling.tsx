@@ -44,6 +44,7 @@ import { PanelTable } from '@/components/tiling/PanelTable'
 import { SeamInspector } from '@/components/tiling/SeamInspector'
 import { TileInspector } from '@/components/tiling/TileInspector'
 import { TilingCanvas } from '@/components/tiling/TilingCanvas'
+import { InstallPanel, areaColor } from '@/components/tiling/InstallPanel'
 import { Field, NumberField, Readout, Section, Segmented, TextField, fmt, fmtM, fmtMoney, fmtSize } from '@/components/tiling/fields'
 import {
   addLine,
@@ -60,6 +61,7 @@ import {
   hasErrors,
   hasManualEdits,
   mergeTiles,
+  moveInSequence,
   moveLine,
   newProject,
   setConstraint,
@@ -111,7 +113,7 @@ function parseScale(value: unknown): number {
 type Unit = 'mm' | 'cm' | 'm'
 const UNIT_FACTOR: Record<Unit, number> = { mm: 1, cm: 10, m: 1000 }
 
-type LeftTab = 'arte' | 'midia' | 'grade' | 'bordas' | 'saida'
+type LeftTab = 'arte' | 'midia' | 'grade' | 'bordas' | 'instalacao' | 'saida'
 type BottomTab = 'paineis' | 'problemas' | 'midia' | 'exportacao'
 
 interface Prefs {
@@ -189,7 +191,8 @@ const NAME_TOKENS: [string, string][] = [
   ['{lin}', 'Linha (1 = de cima)'],
   ['{col}', 'Coluna (1 = esquerda)'],
   ['{nn}', 'Número com 2 dígitos'],
-  ['{zona}', 'Região do painel'],
+  ['{area}', 'Área da instalação'],
+  ['{ordem}', 'Ordem de instalação'],
   ['{rev}', 'Revisão (R1, R2…)'],
 ]
 
@@ -603,6 +606,19 @@ export default function TilingPage() {
     setSelectedSeam(null)
     setSelected(geometry.tiles.filter(match).map((t) => t.key))
   }
+  const moveOrder = (key: string, delta: -1 | 1) => {
+    if (project && geometry) commit(moveInSequence(project, geometry, key, delta))
+  }
+  // Na aba Instalação, cada área ganha uma cor na prancheta.
+  const areaFills = useMemo(() => {
+    if (!project || !geometry) return {}
+    const fills: Record<string, string> = {}
+    for (const t of geometry.tiles) {
+      const color = t.zone ? areaColor(project, t.zone) : undefined
+      if (color) fills[t.key] = color
+    }
+    return fills
+  }, [project, geometry])
   const selectById = (id: string) => {
     const t = geometry?.tiles.find((x) => x.id === id)
     if (t) selectTile(t.key, false)
@@ -649,6 +665,7 @@ export default function TilingPage() {
     { id: 'midia', label: 'Mídia' },
     { id: 'grade', label: 'Grade' },
     { id: 'bordas', label: 'Bordas' },
+    { id: 'instalacao', label: 'Instalação' },
     { id: 'saida', label: 'Saída' },
   ]
 
@@ -778,7 +795,7 @@ export default function TilingPage() {
                 disabled={tab.id !== 'arte' && !project}
                 onClick={() => setLeftTab(tab.id)}
                 className={cn(
-                  '-mb-px flex-1 border-b-2 px-1 py-2 text-xs transition-colors disabled:opacity-40',
+                  '-mb-px flex-1 border-b-2 px-0.5 py-2 text-[11px] transition-colors disabled:opacity-40',
                   leftTab === tab.id ? 'border-primary font-medium text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground',
                 )}
               >
@@ -1091,6 +1108,17 @@ export default function TilingPage() {
               </>
             )}
 
+            {leftTab === 'instalacao' && project && geometry && (
+              <InstallPanel
+                project={project}
+                geometry={geometry}
+                selected={selected}
+                onChange={commit}
+                onSelect={(key) => selectTile(key, false)}
+                onMoveOrder={moveOrder}
+              />
+            )}
+
             {leftTab === 'saida' && project && (
               <>
                 <Section title="Nome dos arquivos">
@@ -1272,6 +1300,8 @@ export default function TilingPage() {
                     selected={selected}
                     selectedSeam={selectedSeam}
                     flagged={flagged}
+                    fills={leftTab === 'instalacao' ? areaFills : undefined}
+                    showOrder={leftTab === 'instalacao'}
                     onSelectTile={selectTile}
                     onSelectSeam={(id) => {
                       setSelectedSeam(id)
@@ -1349,7 +1379,7 @@ export default function TilingPage() {
         {project && geometry && (
           <aside className="w-full shrink-0 overflow-y-auto border-t border-border bg-card lg:w-[280px] lg:border-l lg:border-t-0">
             {selectedTiles.length > 0 ? (
-              <TileInspector project={project} tiles={selectedTiles} onChange={commit} />
+              <TileInspector project={project} tiles={selectedTiles} onChange={commit} onMoveOrder={moveOrder} />
             ) : seam ? (
               <SeamInspector project={project} seam={seam} onChange={commit} onRemoved={() => setSelectedSeam(null)} />
             ) : (
@@ -1719,7 +1749,7 @@ function ExportPanel({
             <tr>
               <th className="px-2 py-1 font-medium">Nº</th>
               <th className="px-2 py-1 font-medium">Arquivo gerado</th>
-              <th className="px-2 py-1 font-medium">Região</th>
+              <th className="px-2 py-1 font-medium">Área</th>
               <th className="px-2 py-1 text-right font-medium">Físico (mm)</th>
               <th className="px-2 py-1 font-medium">Na mídia</th>
             </tr>

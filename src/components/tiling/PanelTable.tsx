@@ -20,8 +20,8 @@ export function PanelTable({
     <table className="w-full border-separate border-spacing-0 text-xs">
       <thead className="sticky top-0 z-10 bg-muted text-left text-[11px] font-medium text-muted-foreground">
         <tr>
-          {['Nº', 'Posição', 'Arquivo', 'Região', 'Cobre (mm)', 'Impresso (mm)', 'Físico (mm)', 'Na mídia', 'Situação'].map((h, i) => (
-            <th key={h} className={cn('whitespace-nowrap border-b border-border px-2 py-1.5 font-medium', i >= 4 && i <= 6 && 'text-right')}>
+          {['Nº', 'Posição', 'Arquivo', 'Área', 'Instalação', 'Cobre (mm)', 'Impresso (mm)', 'Físico (mm)', 'Na mídia', 'Situação'].map((h, i) => (
+            <th key={h} className={cn('whitespace-nowrap border-b border-border px-2 py-1.5 font-medium', i >= 5 && i <= 7 && 'text-right')}>
               {h}
             </th>
           ))}
@@ -49,6 +49,7 @@ export function PanelTable({
                 {t.enabled ? t.name : ''}
               </td>
               <td className="max-w-[140px] truncate border-b border-border px-2 py-1">{t.zone || ''}</td>
+              <td className="border-b border-border px-2 py-1">{t.install ? `${t.install}º` : ''}</td>
               <td className="border-b border-border px-2 py-1 text-right">{fmtSize(t.logical)}</td>
               <td className="border-b border-border px-2 py-1 text-right">{t.enabled ? fmtSize(t.print) : ''}</td>
               <td className="border-b border-border px-2 py-1 text-right font-medium">{t.enabled ? fmtSize(t.physical) : ''}</td>

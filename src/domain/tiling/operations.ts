@@ -5,12 +5,14 @@
  */
 
 import { cellGroups, cellKey, parseCell } from './engine'
+import { areaNames } from './install'
 import { printableWidthOf } from './media'
 import {
   type Edge,
   type Edges,
   type GapSetting,
   type MediaSettings,
+  type ProjectGeometry,
   type Poster,
   type PrintConstraint,
   type TileSettings,
@@ -411,6 +413,75 @@ export function setGap(project: TilingProjectModel, seamId: string, gap: GapSett
   else delete gaps[seamId]
   return { ...custom(project), gaps }
 }
+
+// ---- Instalação: áreas e ordem ------------------------------------------------------------
+
+/** Coloca os painéis numa área (nome livre); área nova entra no fim da lista. Vazio tira da área. */
+export function setArea(project: TilingProjectModel, keys: string[], name: string | undefined): TilingProjectModel {
+  const area = name?.trim() || undefined
+  const next = patchTiles(project, keys, (t) => ({ ...t, zone: area }))
+  const areas = areaNames(project)
+  return area && !areas.includes(area) ? { ...next, areas: [...areas, area] } : { ...next, areas }
+}
+
+export function addArea(project: TilingProjectModel, name: string): TilingProjectModel {
+  const area = name.trim()
+  const areas = areaNames(project)
+  return !area || areas.includes(area) ? project : { ...project, areas: [...areas, area] }
+}
+
+export function renameArea(project: TilingProjectModel, from: string, to: string): TilingProjectModel {
+  const name = to.trim()
+  const areas = areaNames(project)
+  if (!name || name === from || areas.includes(name)) return project
+  const tiles: Record<string, TileSettings> = {}
+  for (const [key, value] of Object.entries(project.tiles)) tiles[key] = value.zone === from ? { ...value, zone: name } : value
+  return { ...project, tiles, areas: areas.map((a) => (a === from ? name : a)) }
+}
+
+/** Apaga a área: os painéis dela ficam sem área. */
+export function removeArea(project: TilingProjectModel, name: string): TilingProjectModel {
+  const tiles: Record<string, TileSettings> = {}
+  for (const [key, value] of Object.entries(project.tiles)) tiles[key] = value.zone === name ? { ...value, zone: undefined } : value
+  return { ...project, tiles, areas: areaNames(project).filter((a) => a !== name) }
+}
+
+/** Muda a área de lugar na ordem de instalação. */
+export function moveArea(project: TilingProjectModel, name: string, delta: -1 | 1): TilingProjectModel {
+  const areas = areaNames(project)
+  const i = areas.indexOf(name)
+  const j = i + delta
+  if (i < 0 || j < 0 || j >= areas.length) return project
+  ;[areas[i], areas[j]] = [areas[j], areas[i]]
+  return { ...project, areas }
+}
+
+/**
+ * Antecipa ou adia um painel na ordem de instalação, dentro da área dele. A partir daí a
+ * ordem passa a ser manual (a ordem atual inteira fica gravada).
+ */
+export function moveInSequence(project: TilingProjectModel, geometry: ProjectGeometry, key: string, delta: -1 | 1): TilingProjectModel {
+  const keyOf = new Map(geometry.tiles.map((t) => [t.id, t.key]))
+  const id = geometry.tiles.find((t) => t.key === key)?.id
+  const area = geometry.areas.find((a) => id && a.tiles.includes(id))
+  if (!area || !id) return project
+  const i = area.tiles.indexOf(id)
+  const j = i + delta
+  if (j < 0 || j >= area.tiles.length) return project
+  const order = geometry.areas.flatMap((a) => a.tiles.map((t) => keyOf.get(t)!))
+  const a = order.indexOf(key)
+  const b = order.indexOf(keyOf.get(area.tiles[j])!)
+  ;[order[a], order[b]] = [order[b], order[a]]
+  return { ...project, sequence: order }
+}
+
+/** Volta à ordem sugerida pelas sobreposições. */
+export const resetSequence = (project: TilingProjectModel): TilingProjectModel => ({ ...project, sequence: undefined })
+
+export const setNumbering = (project: TilingProjectModel, numbering: 'reading' | 'install'): TilingProjectModel => ({
+  ...project,
+  numbering,
+})
 
 /** A grade foi editada à mão: recalcular pelos parâmetros globais pede confirmação. */
 export const hasManualEdits = (project: TilingProjectModel) => project.grid.mode === 'custom'

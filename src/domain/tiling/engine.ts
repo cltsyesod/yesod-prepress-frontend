@@ -15,6 +15,7 @@ import {
   type TilingProjectModel,
   zeroEdges,
 } from './model'
+import { installIssues, installOrder } from './install'
 import { layoutMedia, onMedia, orientationOf, rotationOf } from './media'
 import { validateProject } from './validate'
 
@@ -71,11 +72,22 @@ function gapShare(gap: GapSetting | undefined, side: 'before' | 'after'): number
 
 export function fillName(
   template: string,
-  values: { number: number; row: number; column: number; zone: string; project?: string; client?: string; revision?: number },
+  values: {
+    number: number
+    row: number
+    column: number
+    zone: string
+    install?: number
+    project?: string
+    client?: string
+    revision?: number
+  },
 ): string {
   const nn = String(values.number).padStart(2, '0')
   const text = (template || '{projeto}_L{lin}C{col}')
     .replaceAll('{rev}', `R${Math.max(1, Math.round(values.revision ?? 1))}`)
+    .replaceAll('{ordem}', String(values.install ?? values.number).padStart(2, '0'))
+    .replaceAll('{area}', values.zone)
     .replaceAll('{nn}', nn)
     .replaceAll('{n}', String(values.number))
     .replaceAll('{lin}', String(values.row))
@@ -119,7 +131,7 @@ export function calculateProject(
 
   const idOf = (g: CellGroup) => `L${rows - g.r1 + 1}C${g.c0 + 1}`
   let counter = 0
-  const tiles: TileGeometry[] = groups.map((g) => {
+  const drafts: TileGeometry[] = groups.map((g) => {
     const s = settingsOf(g.key)
     const on = s.enabled !== false
     const outer: Record<Edge, boolean> = {
@@ -166,7 +178,7 @@ export function calculateProject(
     const number = s.number ?? (on ? counter : 0)
     const row = rows - g.r1 + 1
     const column = g.c0 + 1
-    const zone = s.zone ?? ''
+    const zone = s.zone?.trim() ?? ''
     const rotation = rotationOf(orientationOf(physical.w, physical.h, project.constraint), { row, column }, project.constraint.flipFlop)
     return {
       key: g.key,
@@ -175,7 +187,8 @@ export function calculateProject(
       number,
       row,
       column,
-      name: s.name || fillName(project.nameTemplate, { number, row, column, zone, ...context }),
+      // Preenchido depois da ordem de instalação (o nome pode usar {ordem}).
+      name: '',
       zone,
       enabled: on,
       logical,
@@ -186,7 +199,22 @@ export function calculateProject(
       bleed,
       neighbours,
       rotation,
+      install: 0,
     }
+  })
+
+  // Ordem de instalação (áreas e sequência); a numeração pode segui-la.
+  const areas = installOrder(project, drafts.filter((t) => t.enabled))
+  const installAt = new Map(areas.flatMap((a) => a.tiles).map((id, i) => [id, i + 1]))
+  const byInstall = project.numbering === 'install'
+  const tiles: TileGeometry[] = drafts.map((t) => {
+    const s = settingsOf(t.key)
+    const install = installAt.get(t.id) ?? 0
+    const number = byInstall && t.enabled ? (s.number ?? install) : t.number
+    const name =
+      s.name ||
+      fillName(project.nameTemplate, { number, install, row: t.row, column: t.column, zone: t.zone, ...context })
+    return { ...t, install, number, name }
   })
 
   const seams: SeamGeometry[] = []
@@ -232,8 +260,9 @@ export function calculateProject(
     tiles: [...tiles].sort((a, b) => (a.enabled === b.enabled ? a.number - b.number : a.enabled ? -1 : 1)),
     seams,
     overlaps,
-    issues: validateProject(project, tiles, { marksMargin: context.marksMargin }),
+    issues: [...validateProject(project, tiles, { marksMargin: context.marksMargin }), ...installIssues(active, areas)],
     mediaUsage,
     media: layoutMedia(active, project.constraint, context.marksMargin ?? 0),
+    areas,
   }
 }

@@ -191,6 +191,7 @@ export function exportPayload(
       print: t.print,
       white: t.white,
       rotation: t.rotation,
+      install: t.install,
     }))
   const seams = geometry.seams.map((s) => ({
     orientation: s.orientation,

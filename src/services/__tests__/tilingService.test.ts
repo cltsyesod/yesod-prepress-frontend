@@ -39,7 +39,8 @@ describe('etiqueta no envio', () => {
     const context = { project: 'Loja', revision: 1 }
     const [first] = exportPayload(geometry, { marks, context }).tiles
     expect(first.labelTop).toContain('painel 01/2')
-    expect(first.labelBottom).toBe('Vizinhos: dir. 02')
+    expect(first.labelBottom).toBe('Instalação: 1º · Vizinhos: dir. 02')
+    expect(first.install).toBe(1)
     const off = exportPayload(geometry, { marks: { ...marks, label: false }, context }).tiles[0]
     expect([off.labelTop, off.labelBottom]).toEqual(['', ''])
   })

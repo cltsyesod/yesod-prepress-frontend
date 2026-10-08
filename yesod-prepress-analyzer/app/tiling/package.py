@@ -106,6 +106,7 @@ def build_package(
                             round(printed.h + white.top + white.bottom, 1),
                         ],
                         "rotation": tile.rotation,
+                        "install": tile.install,
                         "neighbours": sides.get(tile.number, {}),
                     }
                 )
@@ -152,7 +153,8 @@ def manifest_csv(files: list[dict], title: str, revision: int) -> str:
             "Nº",
             "Posição",
             "Arquivo",
-            "Região",
+            "Área",
+            "Ordem de instalação",
             "Cobre L (mm)",
             "Cobre A (mm)",
             "Impresso L (mm)",
@@ -174,6 +176,7 @@ def manifest_csv(files: list[dict], title: str, revision: int) -> str:
                 f.get("id", ""),
                 f["file"],
                 f["region"],
+                f"{f['install']}º" if f.get("install") else "",
                 *(mm(v) for v in (*f["visibleMm"], *f["printedMm"], *f["physicalMm"])),
                 _ROTATION.get(f["rotation"], ""),
                 near,

@@ -144,6 +144,28 @@ def test_panels_guide_and_package(tmp_path):
     assert out.summary["revision"] == 1
 
 
+def test_guide_has_one_sheet_per_area_in_installation_order(tmp_path):
+    source = banner_pdf(tmp_path / "banner.pdf")
+    req = request(tmp_path)
+    # Later panels print over earlier ones: install 1, 2, 3; two areas.
+    areas = ("Térreo", "Térreo", "Loja")
+    for tile, region, install in zip(req.tiles, areas, (1, 2, 3), strict=True):
+        tile.region = region
+        tile.install = install
+    out = build_package(req, source, tmp_path)
+    with pikepdf.open(out.guide) as guide:
+        # Overview + 2 areas + 3 panels.
+        assert len(guide.pages) == 6
+        terreo = _page_text(guide.pages[1])
+        assert "(Área: Térreo) Tj" in terreo
+        assert "(1º) Tj" in terreo and "(2º) Tj" in terreo
+        assert "(Área: Loja) Tj" in _page_text(guide.pages[2])
+        assert "1º de 3" in _page_text(guide.pages[3])
+    with zipfile.ZipFile(out.zip) as archive:
+        manifest = archive.read("manifesto.csv").decode("utf-8-sig").splitlines()
+        assert manifest[1].split(";")[5:7] == ["Térreo", "1º"]
+
+
 def _page_text(page) -> str:
     contents = page.obj.Contents
     streams = contents if isinstance(contents, pikepdf.Array) else [contents]

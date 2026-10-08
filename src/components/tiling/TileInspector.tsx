@@ -5,7 +5,9 @@ import { Field, NumberField, Readout, Section, TextField, fmtSize } from '@/comp
 import {
   EDGES,
   applyToGrid,
+  areaNames,
   resetTileEdges,
+  setArea,
   setEnabled,
   setTileEdges,
   setTileInfo,
@@ -31,13 +33,18 @@ export function TileInspector({
   project,
   tiles,
   onChange,
+  onMoveOrder,
 }: {
   project: TilingProjectModel
   tiles: TileGeometry[]
   onChange: (next: TilingProjectModel) => void
+  /** Antecipa (-1) ou adia (+1) o painel na ordem de instalação. */
+  onMoveOrder?: (key: string, delta: -1 | 1) => void
 }) {
   const keys = tiles.map((t) => t.key)
   const single = tiles.length === 1 ? tiles[0] : null
+  // Área comum aos painéis escolhidos (undefined se forem de áreas diferentes).
+  const sameArea = tiles.every((t) => t.zone === tiles[0].zone) ? tiles[0].zone : undefined
   const allOff = tiles.every((t) => !t.enabled)
   const effective = (field: 'overlap' | 'white'): Edges =>
     single ? single[field] : { ...project.rules[field], ...common(project, keys, field) }
@@ -75,14 +82,35 @@ export function TileInspector({
                 onCommit={(name) => onChange(setTileInfo(project, single.key, { name: name || undefined }))}
               />
             </Field>
-            <Field label="Região" wide>
-              <TextField
-                value={project.tiles[single.key]?.zone ?? ''}
-                placeholder="ex.: Lateral esquerda"
-                onCommit={(zone) => onChange(setTileInfo(project, single.key, { zone: zone || undefined }))}
-              />
-            </Field>
           </>
+        )}
+        <Field label="Área" wide>
+          <div>
+            <TextField
+              list="tiling-areas"
+              value={sameArea ?? ''}
+              placeholder={sameArea === undefined ? 'várias' : 'sem área'}
+              onCommit={(area) => onChange(setArea(project, keys, area))}
+            />
+            <datalist id="tiling-areas">
+              {areaNames(project).map((name) => (
+                <option key={name} value={name} />
+              ))}
+            </datalist>
+          </div>
+        </Field>
+        {single && single.enabled && onMoveOrder && (
+          <Field label="Instalação" wide>
+            <div className="flex items-center gap-1">
+              <span className="flex-1 text-xs font-medium tabular-nums">{single.install}º</span>
+              <Button size="sm" variant="outline" className="h-6 px-2 text-[11px]" title="Instalar antes" onClick={() => onMoveOrder(single.key, -1)}>
+                Antes
+              </Button>
+              <Button size="sm" variant="outline" className="h-6 px-2 text-[11px]" title="Instalar depois" onClick={() => onMoveOrder(single.key, 1)}>
+                Depois
+              </Button>
+            </div>
+          </Field>
         )}
       </Section>
 

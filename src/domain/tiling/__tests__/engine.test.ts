@@ -9,10 +9,17 @@ import {
   hasErrors,
   mergeTiles,
   migrateLegacy,
+  moveArea,
+  moveInSequence,
   moveLine,
   newProject,
+  removeArea,
   removeLine,
+  renameArea,
+  resetSequence,
+  setArea,
   setConstraint,
+  setNumbering,
   setEnabled,
   setGap,
   setMedia,
@@ -301,6 +308,47 @@ describe('etiqueta, revisão e nomes', () => {
   it('{rev} no nome do arquivo acompanha a revisão', () => {
     const p = { ...project(2000, 1000, 2, 1), nameTemplate: '{projeto}_{nn}_{rev}' }
     expect(calculateProject(p, { project: 'Van', revision: 3 }).tiles[0].name).toBe('Van_01_R3')
+  })
+})
+
+describe('áreas e ordem de instalação', () => {
+  const order = (p: TilingProjectModel) => calculateProject(p).areas.map((a) => [a.name, a.tiles])
+
+  it('quem fica por cima é instalado depois de quem fica por baixo', () => {
+    // Esquerda/baixo cobre: cada painel imprime sobre o da direita, então a direita vai antes.
+    const p = project(3000, 1000, 3, 1, { overlap: edges({ right: 20 }) })
+    expect(order(p)).toEqual([['', ['L1C3', 'L1C2', 'L1C1']]])
+    // Metade de cada: ninguém fica por cima, vale a ordem de leitura.
+    const split = project(3000, 1000, 3, 1, { overlap: edges({ left: 10, right: 10 }) })
+    expect(order(split)).toEqual([['', ['L1C1', 'L1C2', 'L1C3']]])
+  })
+
+  it('áreas com nome livre, na ordem definida; sem área por último', () => {
+    let p = project(3000, 2000, 3, 2)
+    const key = (id: string) => tile(p, id).key
+    p = setArea(p, [key('L2C1'), key('L2C2')], 'Térreo')
+    p = setArea(p, [key('L1C1')], 'Primeiro andar')
+    expect(order(p).map(([name]) => name)).toEqual(['Térreo', 'Primeiro andar', ''])
+    p = moveArea(p, 'Primeiro andar', -1)
+    expect(order(p)[0]).toEqual(['Primeiro andar', ['L1C1']])
+    p = renameArea(p, 'Térreo', 'Loja')
+    expect(tile(p, 'L2C2').zone).toBe('Loja')
+    p = removeArea(p, 'Loja')
+    expect(tile(p, 'L2C2').zone).toBe('')
+  })
+
+  it('ordem manual, aviso de conflito e numeração pela instalação', () => {
+    let p = project(3000, 1000, 3, 1, { overlap: edges({ left: 20 }) })
+    // Direita cobre a esquerda: L1C1, L1C2, L1C3.
+    expect(order(p)[0][1]).toEqual(['L1C1', 'L1C2', 'L1C3'])
+    p = moveInSequence(p, calculateProject(p), tile(p, 'L1C2').key, -1)
+    expect(order(p)[0][1]).toEqual(['L1C2', 'L1C1', 'L1C3'])
+    expect(calculateProject(p).issues.filter((i) => i.code === 'INSTALL_ORDER').map((i) => i.tile)).toEqual(['L1C2'])
+    p = setNumbering(p, 'install')
+    expect(tile(p, 'L1C2').number).toBe(1)
+    expect(tile(p, 'L1C1').number).toBe(2)
+    p = resetSequence(p)
+    expect(tile(p, 'L1C2').number).toBe(2)
   })
 })
 

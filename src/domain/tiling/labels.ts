@@ -24,7 +24,8 @@ export const LABEL_TOKENS: [string, string][] = [
   ['{nn}', 'Número do painel (2 dígitos)'],
   ['{total}', 'Total de painéis'],
   ['{pos}', 'Posição na grade (L1C2)'],
-  ['{zona}', 'Região do painel'],
+  ['{area}', 'Área da instalação'],
+  ['{ordem}', 'Ordem de instalação'],
   ['{cobre}', 'Medida que cobre da arte'],
   ['{impresso}', 'Medida impressa'],
   ['{fisico}', 'Medida do painel físico'],
@@ -34,8 +35,8 @@ export const LABEL_TOKENS: [string, string][] = [
   ['{data}', 'Data da exportação'],
 ]
 
-export const DEFAULT_LABEL_TOP = '{projeto} · {arquivo} · painel {nn}/{total} · {pos} · {zona} · impresso {impresso} mm · {rev}'
-export const DEFAULT_LABEL_BOTTOM = 'Vizinhos: {vizinhos}'
+export const DEFAULT_LABEL_TOP = '{projeto} · {arquivo} · painel {nn}/{total} · {pos} · {area} · impresso {impresso} mm · {rev}'
+export const DEFAULT_LABEL_BOTTOM = 'Instalação: {ordem} · Vizinhos: {vizinhos}'
 
 const SIDES: [Edge, string][] = [
   ['left', 'esq.'],
@@ -69,6 +70,8 @@ export function fillLabel(template: string, tile: TileGeometry, ctx: LabelContex
     '{col}': String(tile.column),
     '{zona}': tile.zone,
     '{regiao}': tile.zone,
+    '{area}': tile.zone,
+    '{ordem}': tile.install ? `${tile.install}º` : '',
     '{cobre}': size(tile.logical),
     '{impresso}': size(tile.print),
     '{fisico}': size(tile.physical),

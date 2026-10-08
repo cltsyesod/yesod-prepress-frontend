@@ -17,6 +17,10 @@ interface TilingCanvasProps {
   selectedSeam: string | null
   /** Painéis com erro de produção (contorno vermelho). */
   flagged: Set<string>
+  /** Cor de fundo por painel (ex.: a cor da área de instalação). */
+  fills?: Record<string, string>
+  /** Mostra a ordem de instalação em cada painel. */
+  showOrder?: boolean
   onSelectTile: (key: string, additive: boolean) => void
   onSelectSeam: (id: string | null) => void
   onMoveSeam: (id: string, position: number) => void
@@ -35,6 +39,8 @@ export function TilingCanvas({
   selected,
   selectedSeam,
   flagged,
+  fills,
+  showOrder,
   onSelectTile,
   onSelectSeam,
   onMoveSeam,
@@ -193,8 +199,8 @@ export function TilingCanvas({
               y={t.logical.y}
               width={t.logical.w}
               height={t.logical.h}
-              fill={isSelected ? '#2563eb' : 'transparent'}
-              fillOpacity={isSelected ? 0.15 : 0}
+              fill={isSelected ? '#2563eb' : (fills?.[t.key] ?? 'transparent')}
+              fillOpacity={isSelected ? 0.15 : fills?.[t.key] ? 0.22 : 0}
               stroke={flagged.has(t.id) ? '#dc2626' : '#2563eb'}
               strokeWidth={isSelected ? 3 : 1.5}
               vectorEffect="non-scaling-stroke"
@@ -245,6 +251,7 @@ export function TilingCanvas({
             {text(cx, cy + size * 0.35, t.enabled ? String(t.number).padStart(2, '0') : 'não imprime', t.enabled ? size : size * 0.4, color, 700)}
             {text(cx, cy - size * 0.55, t.id, size * 0.38, color, 600)}
             {t.zone && text(cx, cy - size * 1.05, t.zone, size * 0.34, '#1e3a8a', 500)}
+            {showOrder && t.install > 0 && text(cx, cy + size * 1.05, `${t.install}º a instalar`, size * 0.34, '#c2410c', 700)}
           </g>
         )
       })}
