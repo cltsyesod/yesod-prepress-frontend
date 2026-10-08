@@ -16,6 +16,30 @@ export interface RegisterFileParams {
 const PRIMARY_BUCKET = 'pdfs'
 const FALLBACK_BUCKET = 'project-files'
 
+/** Limite por arquivo do plano gratuito da Supabase (os buckets usam o mesmo valor). */
+export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+
+/** Formatos aceitos: PDF direto; TIFF, JPEG e PNG são convertidos em PDF pelo analisador. */
+const ARTWORK_TYPES: Record<string, { mime: string; extension: string }> = {
+  pdf: { mime: 'application/pdf', extension: 'PDF' },
+  tif: { mime: 'image/tiff', extension: 'TIFF' },
+  tiff: { mime: 'image/tiff', extension: 'TIFF' },
+  jpg: { mime: 'image/jpeg', extension: 'JPG' },
+  jpeg: { mime: 'image/jpeg', extension: 'JPG' },
+  png: { mime: 'image/png', extension: 'PNG' },
+}
+
+export const ARTWORK_ACCEPT = 'application/pdf,image/tiff,image/jpeg,image/png,.pdf,.tif,.tiff,.jpg,.jpeg,.png'
+
+/** Tipo da arte pelo nome do arquivo (o analisador confere o conteúdo de verdade). */
+export function artworkType(name: string): { mime: string; extension: string } | null {
+  const ext = name.split('.').pop()?.toLowerCase() ?? ''
+  return ARTWORK_TYPES[ext] ?? null
+}
+
+export const isImageFile = (record: { mime_type?: string } | null | undefined) =>
+  !!record?.mime_type && record.mime_type !== 'application/pdf'
+
 async function calculateSHA256(file: File): Promise<string> {
   try {
     const buffer = await file.arrayBuffer()
@@ -38,7 +62,7 @@ function toRecord(row: Record<string, unknown>): ProjectFile {
 
 export const projectFilesService = {
   /**
-   * Upload direto de PDF para o bucket `pdfs` e registro na tabela `project_files`.
+   * Envio da arte (PDF, TIFF, JPEG ou PNG) para o bucket `pdfs` e registro em `project_files`.
    */
   async uploadPDF(file: File, projectId: string): Promise<ProjectFile> {
     const { data: auth, error: authErr } = await supabase.auth.getUser()
@@ -46,6 +70,9 @@ export const projectFilesService = {
     if (authErr || !userId) {
       throw new Error('Autenticação necessária')
     }
+    const type = artworkType(file.name)
+    if (!type) throw new Error('Formato não aceito: envie PDF, TIFF, JPG ou PNG.')
+    if (file.size > MAX_UPLOAD_BYTES) throw new Error('O arquivo passa de 50 MB, o limite do armazenamento atual.')
 
     const sha256Hash = await calculateSHA256(file)
     const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
@@ -55,12 +82,12 @@ export const projectFilesService = {
     let uploadError: unknown = null
     const { error: upErr1 } = await supabase.storage
       .from(PRIMARY_BUCKET)
-      .upload(storagePath, file, { contentType: 'application/pdf', upsert: true })
+      .upload(storagePath, file, { contentType: type.mime, upsert: true })
 
     if (upErr1) {
       const { error: upErr2 } = await supabase.storage
         .from(FALLBACK_BUCKET)
-        .upload(storagePath, file, { contentType: 'application/pdf', upsert: true })
+        .upload(storagePath, file, { contentType: type.mime, upsert: true })
       uploadError = upErr2
     }
 
@@ -75,8 +102,8 @@ export const projectFilesService = {
         project: projectId,
         original_name: file.name,
         safe_name: safeName,
-        extension: 'PDF',
-        mime_type: 'application/pdf',
+        extension: type.extension,
+        mime_type: type.mime,
         size_bytes: file.size,
         sha256: sha256Hash,
         user_id: userId,

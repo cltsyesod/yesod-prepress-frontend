@@ -53,10 +53,13 @@ Deno.serve(async (req: Request) => {
 
     const { data: file } = await db
       .from('project_files')
-      .select('id, user_id, storage_path, sha256, size_bytes')
+      .select('id, user_id, storage_path, sha256, size_bytes, mime_type')
       .eq('id', tiling.file_id)
       .maybeSingle()
     if (!file || file.user_id !== user.id) return fail('Arquivo da arte não encontrado')
+    if (file.mime_type && file.mime_type !== 'application/pdf') {
+      return fail('A arte ainda é a imagem original: aguarde a conversão em PDF no trabalho e abra de novo.')
+    }
     let sourceUrl = ''
     for (const bucket of ['pdfs', 'project-files']) {
       const { data } = await db.storage.from(bucket).createSignedUrl(file.storage_path, 3600)
@@ -91,8 +94,10 @@ Deno.serve(async (req: Request) => {
       if (!data?.signedUrl) return fail('Falha ao preparar o envio dos arquivos')
       outputs[key] = data.signedUrl
     }
-    // Cada painel também vai sozinho, para baixar um painel sem o resto.
-    const numbers = [...new Set(tiling.tiles.map((t: any) => Number(t?.number)))].filter(
+    // Cada painel também vai sozinho (para baixar um sem o resto), só quando pedido:
+    // ocupa o mesmo espaço do .zip de novo no armazenamento.
+    const separate = tiling.config?.separatePanels === true
+    const numbers = (separate ? [...new Set(tiling.tiles.map((t: any) => Number(t?.number)))] : []).filter(
       (n): n is number => Number.isInteger(n) && n > 0,
     )
     const panelUrls: Record<string, string> = {}
@@ -110,6 +115,12 @@ Deno.serve(async (req: Request) => {
       )
     }
     outputs.panels = panelUrls
+    // Painéis separados de exportações anteriores que esta não vai regravar: liberam espaço.
+    const { data: previous } = await db.storage.from('tiling').list(`${folder}/paineis`, { limit: 1000 })
+    const stale = (previous ?? [])
+      .map((item: any) => `${folder}/paineis/${item.name}`)
+      .filter((path: string) => !Object.values(panelPaths).includes(path))
+    if (stale.length) await db.storage.from('tiling').remove(stale)
 
     const config = tiling.config ?? {}
     const payload = JSON.stringify({

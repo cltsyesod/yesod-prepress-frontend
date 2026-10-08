@@ -34,6 +34,20 @@ export interface AnalysisJob {
   retry_count: number
   created: string
   updated: string
+  /** Desempenho medido pelo analisador (vazio até a análise terminar). */
+  metrics?: JobMetrics
+}
+
+/** Tempo por etapa, tamanhos e memória de um processamento no analisador. */
+export interface JobMetrics {
+  /** Segundos por etapa: download, corrections, upload, analysis, build… */
+  seconds?: Record<string, number>
+  totalSeconds?: number
+  /** Pico de memória do processo do analisador (um teto para este trabalho), em MB. */
+  peakMemoryMb?: number
+  sourceBytes?: number
+  outputBytes?: number
+  panels?: number
 }
 
 export type AnalysisJobStatusResponse = AnalysisJob
@@ -109,7 +123,19 @@ export const analysisJobsService = {
   async startAnalysis(
     fileId: string,
     profileOrParams: string | StartAnalysisParams,
+    /** O registro do arquivo, quando já se tem (evita uma consulta). */
+    known?: { mime_type?: string },
   ): Promise<AnalysisJob> {
+    // Imagem (TIFF, JPEG, PNG): a análise começa pela conversão em PDF, que roda como
+    // correção (cópia derivada); o banco só aceita iniciar análise de PDF.
+    const mime =
+      known?.mime_type ??
+      (await supabase.from('project_files').select('mime_type').eq('id', fileId).maybeSingle()).data?.mime_type
+    if (mime && mime !== 'application/pdf') {
+      const profile = typeof profileOrParams === 'string' ? profileOrParams : 'default'
+      const jobId = await this.startCorrection(fileId, profile, [{ id: 'image_to_pdf', params: {} }])
+      return this.getAnalysisStatus(jobId)
+    }
     let profileId = ''
     let version: string | undefined = undefined
 

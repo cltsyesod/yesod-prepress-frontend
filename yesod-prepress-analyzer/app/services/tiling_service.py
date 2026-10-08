@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
+from pathlib import Path
 from uuid import uuid4
 
 import httpx
@@ -12,6 +13,7 @@ from PIL import Image
 from app.contracts.tiling import TilingCallback, TilingRequest
 from app.core.config import Settings
 from app.core.exceptions import AnalyzerError
+from app.core.metrics import Stopwatch
 from app.core.security import validate_outbound_url
 from app.services.callback_client import CallbackClient
 from app.services.file_downloader import FileDownloader
@@ -88,37 +90,46 @@ class TilingService:
             )
 
         try:
+            clock = Stopwatch()
             with job_workspace(f"tile-{request.tiling_id}", self.settings.temp_root) as workspace:
                 await notify("progress", "running", 5, "Baixando a arte")
                 source = workspace / "arte.pdf"
-                await self.downloader.download(request.source, source)
+                source_bytes, _ = await self.downloader.download(request.source, source)
                 background = None
                 if request.background is not None:
                     await notify("progress", "running", 15, "Baixando a imagem de referência")
                     background = await self._reference(str(request.background.url))
+                clock.lap("download")
 
                 await notify("progress", "running", 30, "Gerando os painéis e o guia")
                 output = await asyncio.to_thread(
                     build_package, request, source, workspace, background
                 )
+                clock.lap("build")
 
                 await notify("progress", "running", 80, "Salvando os arquivos")
                 outputs = request.outputs
-                pdf_size, _ = await self.uploader.upload(str(outputs.pdf), output.pdf)
-                guide_size, _ = await self.uploader.upload(str(outputs.guide), output.guide)
-                warnings = []
-                try:
-                    zip_size, _ = await self.uploader.upload(
-                        str(outputs.zip), output.zip, content_type="application/zip"
-                    )
-                except UploadError:
-                    # Every panel file carries the whole artwork; with very large art the
-                    # package can pass the storage limit. The single PDF still has all panels.
-                    zip_size = 0
-                    warnings.append(
-                        "O pacote .zip ficou grande demais para o armazenamento; use o PDF "
-                        "com todos os painéis (uma página por painel)."
-                    )
+                warnings: list[str] = []
+
+                async def save(url, path: Path, what: str, content_type="application/pdf") -> int:
+                    """A file the storage refuses (e.g. over its size limit) becomes a warning."""
+
+                    try:
+                        size, _ = await self.uploader.upload(str(url), path, content_type)
+                        return size
+                    except UploadError:
+                        mb = path.stat().st_size / 1_048_576
+                        warnings.append(
+                            f"{what} ({mb:.0f} MB) não pôde ser salvo: o armazenamento recusou "
+                            "(limite por arquivo do plano)."
+                        )
+                        return 0
+
+                pdf_size = await save(outputs.pdf, output.pdf, "O PDF com todos os painéis")
+                guide_size = await save(outputs.guide, output.guide, "O guia de instalação")
+                zip_size = await save(
+                    outputs.zip, output.zip, "O pacote .zip", content_type="application/zip"
+                )
                 # Each panel on its own, so one panel can be downloaded without the rest.
                 uploaded: list[int] = []
                 targets = [(n, url) for n, url in outputs.panels.items() if n in output.panels]
@@ -140,11 +151,21 @@ class TilingService:
                         "Alguns painéis não puderam ser salvos separadamente; "
                         "eles estão no PDF com todos e no .zip."
                     )
+                clock.lap("upload")
+                if not (pdf_size or zip_size or uploaded):
+                    raise UploadError(
+                        "nenhum arquivo de painéis pôde ser salvo: " + " ".join(warnings)
+                    )
                 summary = {
                     **output.summary,
                     "sizes": {"pdf": pdf_size, "guide": guide_size, "zip": zip_size},
                     "panelFiles": sorted(uploaded),
                     "warnings": warnings,
+                    "metrics": clock.report(
+                        sourceBytes=source_bytes,
+                        outputBytes=pdf_size + guide_size + zip_size,
+                        panels=len(request.tiles),
+                    ),
                 }
                 await notify("completed", "completed", 100, "Painéis prontos", summary=summary)
         except Exception as exc:

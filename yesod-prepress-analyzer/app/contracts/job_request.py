@@ -15,6 +15,8 @@ from pydantic import (
 from app.contracts.fix import FixRequest
 from app.contracts.production_profile import ProductionProfile
 
+SUPPORTED_MIME_TYPES = ("application/pdf", "image/tiff", "image/jpeg", "image/png")
+
 
 class DownloadSource(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
@@ -43,11 +45,17 @@ class DownloadSource(BaseModel):
 
     @field_validator("expected_mime_type")
     @classmethod
-    def require_pdf_mime(cls, value: str) -> str:
+    def require_supported_mime(cls, value: str) -> str:
         normalized = value.split(";", 1)[0].strip().lower()
-        if normalized != "application/pdf":
-            raise ValueError("expectedMimeType must be application/pdf")
+        if normalized == "image/jpg":
+            normalized = "image/jpeg"
+        if normalized not in SUPPORTED_MIME_TYPES:
+            raise ValueError("expectedMimeType must be a PDF, TIFF, JPEG or PNG")
         return normalized
+
+    @property
+    def is_image(self) -> bool:
+        return self.expected_mime_type != "application/pdf"
 
     @model_validator(mode="after")
     def require_unexpired_access(self) -> DownloadSource:
@@ -154,6 +162,9 @@ class JobRequest(BaseModel):
             self.callback_url = self.callback.url
         if self.callback_url is None:
             raise ValueError("callback.url or callbackUrl is required")
+        # An image is only accepted to be converted into a PDF first.
+        if self.file.is_image and not any(fix.id == "image_to_pdf" for fix in self.fixes):
+            raise ValueError("an image file requires the image_to_pdf fix")
         return self
 
 

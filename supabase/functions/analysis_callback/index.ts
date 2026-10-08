@@ -137,6 +137,10 @@ Deno.serve(async (req: Request) => {
         error_message: String(body.errorMessage || ''),
       }
       if (FINAL_STATUSES.includes(status)) patch.completed_at = new Date().toISOString()
+      // Desempenho da análise (tempo por etapa, tamanhos, memória), para acompanhar o sistema.
+      if (event === 'completed' && body.summary?.metrics && typeof body.summary.metrics === 'object') {
+        patch.metrics = body.summary.metrics
+      }
 
       // Arquivos e resumo antes do status: a tela recarrega quando o job chega ao fim.
       await settleCorrectedFile(db, job, event, body.summary?.correctedFile)

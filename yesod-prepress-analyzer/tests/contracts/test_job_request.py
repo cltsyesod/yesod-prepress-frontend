@@ -90,8 +90,12 @@ def test_rejects_invalid_expected_mime():
     payload = dict(BASE)
     payload.pop("downloadUrl")
     payload["fileAccess"] = {
-        "downloadUrl": "https://files.example.com/private.pdf",
-        "expectedMimeType": "image/png",
+        "downloadUrl": "https://files.example.com/private.gif",
+        "expectedMimeType": "image/gif",
     }
-    with pytest.raises(ValidationError, match="application/pdf"):
+    with pytest.raises(ValidationError, match="PDF, TIFF, JPEG or PNG"):
+        JobRequest.model_validate(payload)
+    # An accepted image type still needs the conversion into PDF.
+    payload["fileAccess"]["expectedMimeType"] = "image/png"
+    with pytest.raises(ValidationError, match="image_to_pdf"):
         JobRequest.model_validate(payload)

@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 # Fixes that change the PDF. "set_scale" is offered on issues too, but it only
 # changes the job ticket, so the frontend handles it and it never reaches here.
 FixId = Literal[
+    "image_to_pdf",
     "upscale_images",
     "set_page_boxes",
     "convert_magenta_die_line",

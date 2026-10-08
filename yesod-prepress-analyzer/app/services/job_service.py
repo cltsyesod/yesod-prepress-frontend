@@ -13,6 +13,7 @@ from app.contracts.issue import AnalysisIssue
 from app.contracts.job_request import JobRequest
 from app.core.config import Settings
 from app.core.exceptions import AnalyzerError, JobCancelled
+from app.core.metrics import Stopwatch
 from app.fixes.engine import apply_fixes
 from app.services.callback_client import CallbackClient
 from app.services.file_downloader import FileDownloader
@@ -96,25 +97,35 @@ class JobService:
             await notify("progress", "preparing", 2, "Preparando análise")
             if self._cancelled(request.analysis_id):
                 raise JobCancelled("job cancelled before download")
+            clock = Stopwatch()
             with job_workspace(request.analysis_id, self.settings.temp_root) as workspace:
-                pdf_path = workspace / "input.pdf"
-                await notify("progress", "downloading", 8, "Baixando PDF privado")
                 if request.file is None:  # Defensive guard; the request validator requires it.
                     raise AnalyzerError("validated job has no download source")
-                await self.downloader.download(request.file, pdf_path)
+                image = request.file.is_image
+                pdf_path = workspace / ("input.bin" if image else "input.pdf")
+                await notify("progress", "downloading", 8, "Baixando o arquivo")
+                source_bytes, _ = await self.downloader.download(request.file, pdf_path)
+                clock.lap("download")
                 if self._cancelled(request.analysis_id):
                     raise JobCancelled("job cancelled after download")
                 corrected: dict[str, object] = {}
                 if request.fixes:
-                    await notify("progress", "analyzing", 14, "Aplicando correções")
+                    await notify(
+                        "progress",
+                        "analyzing",
+                        14,
+                        "Convertendo a imagem em PDF" if image else "Aplicando correções",
+                    )
                     fixed_path = workspace / "corrected.pdf"
                     applied = apply_fixes(
                         pdf_path, fixed_path, request.fixes, request.production_profile
                     )
-                    await notify("progress", "analyzing", 18, "Salvando o PDF corrigido")
+                    clock.lap("corrections")
+                    await notify("progress", "analyzing", 18, "Salvando o PDF")
                     size, sha256 = await self.uploader.upload(
                         str(request.output_upload_url), fixed_path
                     )
+                    clock.lap("upload")
                     corrected = {
                         "sizeBytes": size,
                         "sha256": sha256,
@@ -124,6 +135,7 @@ class JobService:
                 await notify("progress", "validating", 20, "Validando estrutura PDF")
                 await notify("progress", "extracting", 35, "Inspecionando objetos técnicos")
                 result = self.engine.analyze(pdf_path, request.production_profile)
+                clock.lap("analysis")
                 if self._cancelled(request.analysis_id):
                     raise JobCancelled("job cancelled during analysis")
                 await notify("progress", "analyzing", 70, "Aplicando regras de pré-impressão")
@@ -138,11 +150,14 @@ class JobService:
                     result.final_status,
                     100,
                     "Análise concluída",
-                    summary=(
-                        {**result.summary, "correctedFile": corrected}
-                        if corrected
-                        else result.summary
-                    ),
+                    summary={
+                        **result.summary,
+                        **({"correctedFile": corrected} if corrected else {}),
+                        "metrics": clock.report(
+                            sourceBytes=source_bytes,
+                            outputBytes=corrected.get("sizeBytes") if corrected else None,
+                        ),
+                    },
                 )
         except JobCancelled as exc:
             await notify("cancelled", "cancelled", 100, "Análise cancelada", error_message=str(exc))

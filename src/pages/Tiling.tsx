@@ -47,6 +47,7 @@ import { TilingCanvas } from '@/components/tiling/TilingCanvas'
 import { InstallPanel, areaColor } from '@/components/tiling/InstallPanel'
 import { PanelFilesView } from '@/components/tiling/PanelFilesView'
 import { artOutline } from '@/components/tiling/silhouette'
+import { JobMetricsLine } from '@/components/jobs/JobMetricsLine'
 import { Field, NumberField, Readout, Section, Segmented, TextField, fmt, fmtM, fmtMoney, fmtSize } from '@/components/tiling/fields'
 import {
   addLine,
@@ -88,7 +89,7 @@ import { getErrorMessage } from '@/lib/supabase/errors'
 import { cn } from '@/lib/utils'
 import { jobsService, type Job } from '@/services/jobsService'
 import { profileService } from '@/services/profileService'
-import { projectFilesService } from '@/services/projectFilesService'
+import { isImageFile, projectFilesService } from '@/services/projectFilesService'
 import {
   contentHash,
   isOutdated,
@@ -128,6 +129,7 @@ interface Prefs {
   request: GridRequest
   marks: TilingMarksConfig
   cut: TilingCutConfig
+  separatePanels: boolean
 }
 
 // Valores iniciais da tela; o operador ajusta a cada trabalho e o último uso é lembrado.
@@ -146,6 +148,8 @@ const DEFAULT_PREFS: Prefs = {
     labelBottom: DEFAULT_LABEL_BOTTOM,
   },
   cut: DEFAULT_CUT,
+  // Desligado: no plano gratuito cada painel separado ocupa de novo o espaço do .zip.
+  separatePanels: false,
 }
 
 function loadPrefs(): Prefs {
@@ -158,6 +162,7 @@ function loadPrefs(): Prefs {
       constraint: { ...DEFAULT_PREFS.constraint, ...saved.constraint },
       marks: { ...DEFAULT_PREFS.marks, ...saved.marks },
       cut: { ...DEFAULT_CUT, ...saved.cut },
+      separatePanels: !!saved.separatePanels,
       request: { mode: saved.request?.mode ?? 'equal' },
     }
   } catch {
@@ -338,6 +343,9 @@ export default function TilingPage() {
     try {
       const { primary } = await jobsService.getFiles(id)
       if (!primary) throw new Error('O trabalho não tem arquivo.')
+      if (isImageFile(primary)) {
+        throw new Error('A arte deste trabalho ainda é a imagem original: aguarde a conversão em PDF na tela do trabalho.')
+      }
       setFileId(keep?.fileId || primary.id)
       setPdfUrl(await projectFilesService.getDownloadUrl(primary.storage_path))
       const profile = profiles.find((p) => p.id === chosen?.profileId)
@@ -369,6 +377,7 @@ export default function TilingPage() {
         request: pending.request,
         marks: { ...DEFAULT_PREFS.marks, ...pending.marks },
         cut: { ...DEFAULT_CUT, ...pending.cut },
+        separatePanels: !!pending.separatePanels,
       }))
       setPending(null)
     } else {
@@ -531,6 +540,7 @@ export default function TilingPage() {
           request: prefs.request,
           marks: prefs.marks,
           cut: prefs.cut,
+          separatePanels: prefs.separatePanels,
           revision: extra.revision ?? revision,
           exportedHash: extra.exportedHash ?? exportedHash,
         }
@@ -1359,6 +1369,20 @@ export default function TilingPage() {
                     <p className="text-[11px] text-muted-foreground">Sem etiqueta nos painéis.</p>
                   )}
                 </Section>
+                <Section title="Arquivos gerados">
+                  <CheckRow
+                    checked={prefs.separatePanels}
+                    onChange={(separatePanels) => setPrefs((p) => ({ ...p, separatePanels }))}
+                  >
+                    <span title="Além do PDF com todos e do .zip, salva cada painel sozinho para baixar um a um. Ocupa o mesmo espaço do .zip de novo no armazenamento.">
+                      Salvar cada painel separado (baixar um a um)
+                    </span>
+                  </CheckRow>
+                  <p className="text-[11px] text-muted-foreground">
+                    Sempre gerados: PDF com todos os painéis, .zip (um PDF por painel, manifesto e guia) e o guia de
+                    instalação. Cada exportação substitui a anterior.
+                  </p>
+                </Section>
                 <Section title="Modelos">
                   {templates.length > 0 && (
                     <Select
@@ -1930,6 +1954,7 @@ function ExportPanel({
         )}
       </div>
       <p className="text-[11px] text-muted-foreground">O ZIP traz também o manifesto (planilha CSV) e a configuração.</p>
+      <JobMetricsLine metrics={current.result.metrics} />
     </div>
     {files.length > 0 && (
       <div className="min-w-0 flex-1 overflow-auto rounded border border-border">

@@ -20,6 +20,7 @@ from app.contracts.production_profile import ProductionProfile
 from app.core.exceptions import AnalyzerError
 from app.fixes.contour import artwork_silhouette, contour_die_line
 from app.fixes.geometry import MM, Box, describe_mm, expand, intersect, target_trim, visible_box
+from app.fixes.image_pdf import image_to_pdf
 from app.fixes.magenta import convert_magenta_strokes
 from app.fixes.paths import circle, pdf_path
 from app.fixes.upscale import upscale_images
@@ -409,6 +410,11 @@ def apply_fixes(
 ) -> list[AppliedFix]:
     requested = {fix.id: fix for fix in fixes}
     applied: list[AppliedFix] = []
+    if "image_to_pdf" in requested:
+        # A client image becomes a PDF first; the other fixes then work on that PDF.
+        converted = destination.with_name(f"{destination.stem}_imagem.pdf")
+        applied.append(image_to_pdf(source, converted))
+        source = converted
     try:
         with pikepdf.open(source) as pdf:
             for fix_id in _ORDER:

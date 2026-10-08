@@ -4,6 +4,7 @@ import { signRequest, toAnalyzerProfile } from '../_shared/analyzer.ts'
 
 // Correções que alteram o PDF (as da ficha, como a escala, são tratadas no frontend).
 const FIX_IDS = [
+  'image_to_pdf',
   'upscale_images',
   'set_page_boxes',
   'convert_magenta_die_line',
@@ -97,8 +98,10 @@ Deno.serve(async (req: Request) => {
       if (!analyzerUrl) {
         return json(400, { error: 'Correções automáticas exigem o analisador (ANALYZER_URL)' })
       }
-      const base = String(source.original_name || 'arquivo.pdf').replace(/\.pdf$/i, '')
-      const name = `${base.replace(/_corrigido$/, '')}_corrigido.pdf`
+      const base = String(source.original_name || 'arquivo.pdf').replace(/\.(pdf|tiff?|jpe?g|png)$/i, '')
+      // Imagem só convertida: o PDF leva o nome do arquivo do cliente.
+      const onlyConversion = fixes.every((fix: any) => fix.id === 'image_to_pdf')
+      const name = onlyConversion ? `${base}.pdf` : `${base.replace(/_corrigido$/, '')}_corrigido.pdf`
       const safeName = name.replace(/[^a-zA-Z0-9._-]/g, '_')
       const { data: copy, error: copyErr } = await adminDb
         .from('project_files')
@@ -219,9 +222,13 @@ Deno.serve(async (req: Request) => {
         fileId: file.id,
         versionId: String(job?.version || file.version || ''),
         productionProfile: toAnalyzerProfile(profileId, profileSettings, project?.job_ticket ?? {}),
-        downloadUrl: signedUrl,
-        fileSha256: /^[0-9a-f]{64}$/i.test(source.sha256 || '') ? source.sha256 : undefined,
-        fileSizeBytes: source.size_bytes || undefined,
+        // O analisador confere se o conteúdo é mesmo deste tipo (PDF, TIFF, JPEG ou PNG).
+        file: {
+          url: signedUrl,
+          sha256: /^[0-9a-f]{64}$/i.test(source.sha256 || '') ? source.sha256 : undefined,
+          sizeBytes: source.size_bytes || undefined,
+          expectedMimeType: String(source.mime_type || 'application/pdf').toLowerCase(),
+        },
         callbackUrl: `${supabaseUrl}/functions/v1/analysis_callback`,
         ...(fixes.length
           ? {

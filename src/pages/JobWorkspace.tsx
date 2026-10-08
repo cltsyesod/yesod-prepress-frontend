@@ -25,6 +25,7 @@ import { JobStateBadge } from '@/components/jobs/JobStateBadge'
 import { JobTicketFields } from '@/components/jobs/JobTicketFields'
 import { ContourCutDialog, type ContourCutOptions } from '@/components/jobs/ContourCutDialog'
 import { CropMarksDialog } from '@/components/jobs/CropMarksDialog'
+import { JobMetricsLine } from '@/components/jobs/JobMetricsLine'
 import { PdfPreview } from '@/components/jobs/PdfPreview'
 import { useAnalysisJob } from '@/hooks/use-analysis-job'
 import { toast } from '@/hooks/use-toast'
@@ -37,7 +38,7 @@ import {
   type FixRequest,
 } from '@/services/analysisJobsService'
 import { profileService } from '@/services/profileService'
-import { projectFilesService } from '@/services/projectFilesService'
+import { isImageFile, projectFilesService } from '@/services/projectFilesService'
 import type { ProjectFile } from '@/types'
 
 const ACTIVE = ['queued', 'preparing', 'downloading', 'validating', 'extracting', 'analyzing', 'generating_preview']
@@ -402,7 +403,9 @@ export default function JobWorkspacePage() {
           <div className="space-y-1">
             <p className="flex items-center gap-2 font-medium text-foreground">
               <Wand2 className="h-4 w-4 text-primary" />
-              Versão corrigida automaticamente
+              {appliedFixes.every((fix) => fix.id === 'image_to_pdf')
+                ? 'Imagem do cliente convertida em PDF'
+                : 'Versão corrigida automaticamente'}
             </p>
             <ul className="text-muted-foreground">
               {appliedFixes.map((fix, index) => (
@@ -413,7 +416,8 @@ export default function JobWorkspacePage() {
               ))}
             </ul>
           </div>
-          {file.derived_from && (
+          {/* Original em imagem: voltar a ele não serve (tudo trabalha sobre o PDF). */}
+          {file.derived_from && appliedFixes[0]?.id !== 'image_to_pdf' && (
             <Button size="sm" variant="ghost" className="shrink-0" onClick={restoreOriginal} disabled={running}>
               <Undo2 className="h-4 w-4" />
               Voltar ao original
@@ -440,6 +444,8 @@ export default function JobWorkspacePage() {
         </div>
       )}
 
+      {!running && analysis.job?.metrics && <JobMetricsLine metrics={analysis.job.metrics} />}
+
       {analysis.error && (
         <p className="rounded-lg border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
           {analysis.error}
@@ -460,7 +466,10 @@ export default function JobWorkspacePage() {
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,440px)]">
         <div className="h-[60vh] overflow-hidden rounded-lg border border-border bg-muted lg:sticky lg:top-[72px] lg:h-[calc(100vh-120px)]">
-          {pdfUrl ? (
+          {pdfUrl && isImageFile(file) ? (
+            // Imagem do cliente ainda não convertida: mostra a própria imagem.
+            <img src={pdfUrl} alt={file?.original_name ?? ''} className="h-full w-full object-contain" />
+          ) : pdfUrl ? (
             <PdfPreview url={pdfUrl} page={page} onPageChange={setPage} />
           ) : (
             <div className="flex h-full items-center justify-center text-sm text-muted-foreground">

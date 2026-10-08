@@ -1,4 +1,5 @@
 import supabase from '@/lib/supabase/client'
+import type { JobMetrics } from '@/services/analysisJobsService'
 import { getErrorMessage } from '@/lib/supabase/errors'
 import {
   DEFAULT_LABEL_BOTTOM,
@@ -65,6 +66,8 @@ export const DEFAULT_CUT: TilingCutConfig = {
 /** O que fica salvo: o projeto do motor + o que é só desta tela. */
 export interface TilingConfig {
   cut?: TilingCutConfig
+  /** Salvar também cada painel sozinho (baixar um a um); ocupa o espaço do .zip de novo. */
+  separatePanels?: boolean
   version: 2
   page: number
   project: TilingProjectModel
@@ -143,6 +146,8 @@ export interface TilingResult {
   finishing?: { labelsShortened: string[]; noRoomForMarks: boolean }
   /** Painéis salvos também sozinhos (para baixar um só). */
   panelFiles?: number[]
+  /** Desempenho da exportação no analisador. */
+  metrics?: JobMetrics
   sizes?: { pdf: number; guide: number; zip: number }
   warnings?: string[]
 }

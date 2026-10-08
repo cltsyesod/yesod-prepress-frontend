@@ -10,10 +10,9 @@ import { getErrorMessage } from '@/lib/supabase/errors'
 import { JobTicketFields } from '@/components/jobs/JobTicketFields'
 import { jobsService, type JobTicket } from '@/services/jobsService'
 import { profileService } from '@/services/profileService'
+import { ARTWORK_ACCEPT, MAX_UPLOAD_BYTES, artworkType } from '@/services/projectFilesService'
 
-const MAX_BYTES = 100 * 1024 * 1024
-
-/** Soltar o PDF do cliente, ajustar a ficha (opcional) e analisar. */
+/** Soltar a arte do cliente (PDF ou imagem), ajustar a ficha (opcional) e analisar. */
 export function NewJobPanel() {
   const navigate = useNavigate()
   const inputRef = useRef<HTMLInputElement>(null)
@@ -30,12 +29,16 @@ export function NewJobPanel() {
 
   const pick = (candidate: File | undefined) => {
     if (!candidate) return
-    if (!/\.pdf$/i.test(candidate.name)) {
-      toast({ title: 'Envie um arquivo PDF', variant: 'destructive' })
+    if (!artworkType(candidate.name)) {
+      toast({ title: 'Formato não aceito', description: 'Envie PDF, TIFF, JPG ou PNG.', variant: 'destructive' })
       return
     }
-    if (candidate.size > MAX_BYTES) {
-      toast({ title: 'O arquivo passa de 100 MB', variant: 'destructive' })
+    if (candidate.size > MAX_UPLOAD_BYTES) {
+      toast({
+        title: 'O arquivo passa de 50 MB',
+        description: 'É o limite por arquivo do armazenamento atual.',
+        variant: 'destructive',
+      })
       return
     }
     setFile(candidate)
@@ -107,14 +110,16 @@ export function NewJobPanel() {
           </div>
         ) : (
           <>
-            <p className="font-medium text-foreground">Solte aqui o PDF do cliente</p>
-            <p className="text-sm text-muted-foreground">ou clique para escolher (até 100 MB)</p>
+            <p className="font-medium text-foreground">Solte aqui a arte do cliente</p>
+            <p className="text-sm text-muted-foreground">
+              PDF, TIFF, JPG ou PNG, até 50 MB. Imagens são convertidas em PDF sem perder qualidade.
+            </p>
           </>
         )}
         <input
           ref={inputRef}
           type="file"
-          accept="application/pdf,.pdf"
+          accept={ARTWORK_ACCEPT}
           className="hidden"
           onChange={(e) => pick(e.target.files?.[0])}
         />

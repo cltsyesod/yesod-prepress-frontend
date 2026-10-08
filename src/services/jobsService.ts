@@ -1,6 +1,6 @@
 import supabase from '@/lib/supabase/client'
 import { analysisJobsService, type AnalysisJob, type AnalysisIssue } from '@/services/analysisJobsService'
-import { projectFilesService } from '@/services/projectFilesService'
+import { artworkType, projectFilesService } from '@/services/projectFilesService'
 import type { ProjectFile } from '@/types'
 
 /**
@@ -105,7 +105,11 @@ export const jobsService = {
     return toJob(data, latest.get(id) ?? null)
   },
 
-  /** Cria o trabalho, envia o PDF e já dispara a análise. Retorna o id do trabalho. */
+  /**
+   * Cria o trabalho, envia a arte e já dispara a análise. Retorna o id do trabalho.
+   * Imagem (TIFF, JPEG, PNG): o analisador primeiro a converte em PDF (sem reamostrar); o
+   * PDF vira o arquivo principal e a imagem do cliente fica guardada como original.
+   */
   async createFromFile(
     file: File,
     params: { clientName: string; profileId: string; profileName: string; ticket: JobTicket },
@@ -117,13 +121,13 @@ export const jobsService = {
       .from('projects')
       .insert({
         user_id: auth.user.id,
-        name: file.name.replace(/\.pdf$/i, ''),
+        name: file.name.replace(/\.(pdf|tiff?|jpe?g|png)$/i, ''),
         client_name: params.clientName,
         profile_id: params.profileId,
         production_profile: params.profileName,
         job_ticket: params.ticket,
         filename: file.name,
-        file_type: 'PDF',
+        file_type: artworkType(file.name)?.extension ?? 'PDF',
         file_size: file.size,
         status: 'analyzing',
       })
@@ -132,7 +136,7 @@ export const jobsService = {
     if (error) throw error
 
     const uploaded = await projectFilesService.uploadPDF(file, project.id)
-    await analysisJobsService.startAnalysis(uploaded.id, params.profileId || 'default')
+    await analysisJobsService.startAnalysis(uploaded.id, params.profileId || 'default', uploaded)
     return project.id
   },
 
