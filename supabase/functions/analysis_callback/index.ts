@@ -60,7 +60,10 @@ Deno.serve(async (req: Request) => {
 
     const body = JSON.parse(raw)
     if (body.kind === 'nesting') {
-      return await handleNesting(createClient(supabaseUrl, serviceRoleKey), body)
+      return await handleRun(createClient(supabaseUrl, serviceRoleKey), body, 'nesting_runs', body.nestingId)
+    }
+    if (body.kind === 'tiling') {
+      return await handleRun(createClient(supabaseUrl, serviceRoleKey), body, 'tiling_projects', body.tilingId)
     }
     const jobId = body.analysisId
     const event = String(body.event || '')
@@ -151,25 +154,21 @@ Deno.serve(async (req: Request) => {
   }
 })
 
-// Montagem (nesting): progresso, resultado (aproveitamento, comprimento) ou falha.
-const NESTING_STATUSES = ['queued', 'running', 'completed', 'failed', 'cancelled']
-async function handleNesting(db: any, body: any) {
-  if (!body.nestingId || !body.event_id) {
-    return json(400, { error: 'nestingId e event_id são obrigatórios' })
+// Montagem (nesting_runs) e painelamento (tiling_projects): progresso, resultado ou falha.
+const RUN_STATUSES = ['queued', 'running', 'completed', 'failed', 'cancelled']
+async function handleRun(db: any, body: any, table: string, id: string) {
+  if (!id || !body.event_id) {
+    return json(400, { error: 'id e event_id são obrigatórios' })
   }
-  const { data: run } = await db
-    .from('nesting_runs')
-    .select('id, status, last_sequence')
-    .eq('id', body.nestingId)
-    .maybeSingle()
-  if (!run) return json(404, { error: 'Montagem não encontrada' })
+  const { data: run } = await db.from(table).select('id, status, last_sequence').eq('id', id).maybeSingle()
+  if (!run) return json(404, { error: 'Registro não encontrado' })
 
   const sequence = Number(body.sequence) || 0
   // Eventos repetidos ou antigos não voltam o estado; montagem encerrada não muda.
   if (sequence <= (run.last_sequence ?? 0) || ['completed', 'failed', 'cancelled'].includes(run.status)) {
     return json(200, { ignored: true })
   }
-  const status = NESTING_STATUSES.includes(body.status) ? body.status : run.status
+  const status = RUN_STATUSES.includes(body.status) ? body.status : run.status
   const patch: Record<string, unknown> = {
     status,
     last_sequence: sequence,
@@ -182,10 +181,10 @@ async function handleNesting(db: any, body: any) {
     patch.completed_at = new Date().toISOString()
   }
   if (body.event === 'failed') {
-    patch.error_message = String(body.errorMessage || 'Falha na montagem')
+    patch.error_message = String(body.errorMessage || 'Falha no processamento')
     patch.completed_at = new Date().toISOString()
   }
-  const { error } = await db.from('nesting_runs').update(patch).eq('id', run.id)
+  const { error } = await db.from(table).update(patch).eq('id', run.id)
   if (error) return json(500, { error: error.message })
   return json(200, { success: true })
 }

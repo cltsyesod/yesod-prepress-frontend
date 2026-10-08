@@ -15,7 +15,7 @@ from app.core.exceptions import AnalyzerError
 from app.core.security import validate_outbound_url
 from app.services.callback_client import CallbackClient
 from app.services.file_downloader import FileDownloader
-from app.services.file_uploader import FileUploader
+from app.services.file_uploader import FileUploader, UploadError
 from app.services.temp_files import job_workspace
 from app.tiling.package import build_package
 
@@ -106,12 +106,23 @@ class TilingService:
                 outputs = request.outputs
                 pdf_size, _ = await self.uploader.upload(str(outputs.pdf), output.pdf)
                 guide_size, _ = await self.uploader.upload(str(outputs.guide), output.guide)
-                zip_size, _ = await self.uploader.upload(
-                    str(outputs.zip), output.zip, content_type="application/zip"
-                )
+                warnings = []
+                try:
+                    zip_size, _ = await self.uploader.upload(
+                        str(outputs.zip), output.zip, content_type="application/zip"
+                    )
+                except UploadError:
+                    # Every panel file carries the whole artwork; with very large art the
+                    # package can pass the storage limit. The single PDF still has all panels.
+                    zip_size = 0
+                    warnings.append(
+                        "O pacote .zip ficou grande demais para o armazenamento; use o PDF "
+                        "com todos os painéis (uma página por painel)."
+                    )
                 summary = {
                     **output.summary,
                     "sizes": {"pdf": pdf_size, "guide": guide_size, "zip": zip_size},
+                    "warnings": warnings,
                 }
                 await notify("completed", "completed", 100, "Painéis prontos", summary=summary)
         except Exception as exc:
