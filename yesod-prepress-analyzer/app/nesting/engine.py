@@ -23,6 +23,7 @@ _TOLERANCE = 0.25  # pt (~0.09 mm): final precision of the drop/slide search
 _COARSE = 14.0  # pt (~5 mm): candidate grid over every rotation and column
 _REFINE = 4  # best coarse candidates refined at full precision
 _MAX_COLUMNS = 24
+_TOUCH = 0.05  # pt: with no gap, pieces may touch (shared cut line) but never overlap
 
 
 @dataclass(slots=True)
@@ -85,6 +86,9 @@ class _Layout:
         self.sheet = Sheet(index=index)
         self._obstacles: list[BaseGeometry] = []
         self._tree: STRtree | None = None
+        # Lowest free y found for a (shape, column): obstacles only accumulate, so
+        # nothing below it can become free again and the next search starts there.
+        self._floors: dict[tuple[int, float], float] = {}
 
     def free(self, shape: BaseGeometry, x: float, y: float) -> bool:
         """Whether `shape` (touching the axes at the origin) fits when moved to (x, y)."""
@@ -110,8 +114,7 @@ class _Layout:
     def add(self, placement: Placement) -> None:
         self.sheet.placements.append(placement)
         # Obstacles are grown by the gap, so a free candidate is always gap-clear.
-        grown = placement.footprint.buffer(self.material.gap, join_style="mitre", mitre_limit=2.0)
-        self._obstacles.append(grown)
+        self._obstacles.append(_grow(placement.footprint, self.material.gap))
         self._tree = STRtree(self._obstacles)
         self.sheet.used_length = max(self.sheet.used_length, placement.footprint.bounds[3])
 
@@ -139,8 +142,14 @@ class _Layout:
         top = min(max(m.margin, self.sheet.used_length + m.gap + 1.0), m.page_length - m.margin - h)
         if top < m.margin - 1e-6:
             return []
-        ys = np.append(np.arange(m.margin, top, step), top)
-        grid_x, grid_y = (axis.ravel() for axis in np.meshgrid(xs, ys))
+        key = id(shape)
+        columns_x, columns_y = [], []
+        for x in xs:
+            floor = self._floors.get((key, round(float(x), 2)), m.margin)
+            ys = np.append(np.arange(min(floor, top), top, step), top)
+            columns_x.append(np.full(len(ys), x))
+            columns_y.append(ys)
+        grid_x, grid_y = np.concatenate(columns_x), np.concatenate(columns_y)
         if self._tree is None:
             free = np.ones(len(grid_x), dtype=bool)
         else:
@@ -156,7 +165,10 @@ class _Layout:
         for x in xs:
             column = free & (grid_x == x)
             if column.any():
-                spots.append((float(x), float(grid_y[column].min())))
+                y = float(grid_y[column].min())
+                spots.append((float(x), y))
+                # Grid points below were blocked; keep one step of margin for rounding.
+                self._floors[(key, round(float(x), 2))] = max(m.margin, y - step)
         return spots
 
     def drop(
@@ -222,6 +234,8 @@ def nest(items: list[NestItem], material: Material) -> NestResult:
     patterned = _nest(items, material, patterns=True)
     if all(item.quantity >= _PATTERN_MIN for item in items) and not patterned.unplaced:
         return patterned  # only repeated pieces: the tiling is the layout
+    if sum(item.quantity for item in items) > _GREEDY_COMPARE_MAX:
+        return patterned  # the free layout of that many pieces would take minutes
     return min(_nest(items, material, patterns=False), patterned, key=_cost)
 
 
@@ -237,8 +251,12 @@ def _options(item: NestItem, material: Material) -> list[_Oriented]:
 
     usable_w = material.width - 2 * material.margin
     usable_h = material.page_length - 2 * material.margin
-    # Collision tests use a slightly simplified outline (never smaller than the real one).
-    outline = item.outline.simplify(0.5).buffer(0.5, join_style="mitre", mitre_limit=2.0)
+    outline = item.outline
+    envelope = outline.minimum_rotated_rectangle.area
+    if abs(outline.area - envelope) > 1e-4 * envelope:
+        # Collision tests use a slightly simplified outline (never smaller than the real
+        # one). Rectangles stay exact so they can share cut lines.
+        outline = outline.simplify(0.5).buffer(0.5, join_style="mitre", mitre_limit=2.0)
     return [
         entry
         for entry in ((r, *_oriented(outline, r)) for r in item.rotations)
@@ -261,6 +279,9 @@ def _nest(items: list[NestItem], material: Material, patterns: bool) -> NestResu
             unplaced.extend((item.key, copy, reason) for copy in copies)
             continue
         if patterns and len(copies) >= _PATTERN_MIN:
+            # Smaller pieces first go into the holes the bigger ones left, then the
+            # rest is tiled above.
+            copies = _fill_holes(layouts, item.key, copies, options)
             copies = _place_pattern(layouts, material, item.key, copies, options)
         for copy in copies:
             if not _place_greedy(layouts, material, item.key, copy, options):
@@ -273,19 +294,9 @@ def _place_greedy(
     layouts: list[_Layout], material: Material, key: str, copy: int, options: list[_Oriented]
 ) -> bool:
     for layout in layouts:
-        coarse = []
-        for rotation, shape, shift in options:
-            for spot in layout.lowest_spots(shape, _COARSE):
-                coarse.append((_score(shape, spot), rotation, shape, shift, spot))
-        coarse.sort(key=lambda entry: entry[0])
-        best = None
-        for _, rotation, shape, shift, spot in coarse[:_REFINE]:
-            spot = layout.settle(shape, spot)
-            score = _score(shape, spot)
-            if best is None or score < best[0]:
-                best = (score, rotation, shape, shift, spot)
+        best = _best_spot(layout, options)
         if best is not None:
-            _, rotation, shape, shift, spot = best
+            rotation, shape, shift, spot = best
             _put(layout, key, copy, rotation, shape, shift, spot)
             return True
 
@@ -297,6 +308,43 @@ def _place_greedy(
         return False
     _put(layout, key, copy, rotation, shape, shift, spot)
     return True
+
+
+def _fill_holes(
+    layouts: list[_Layout], key: str, copies: list[int], options: list[_Oriented]
+) -> list[int]:
+    """Places copies in free space below the top of each page; returns the copies left."""
+
+    remaining = list(copies)
+    for layout in layouts:
+        ceiling = layout.sheet.used_length
+        if not layout.sheet.placements:
+            continue
+        while remaining:
+            best = _best_spot(layout, options, ceiling)
+            if best is None:
+                break
+            rotation, shape, shift, spot = best
+            _put(layout, key, remaining.pop(0), rotation, shape, shift, spot)
+    return remaining
+
+
+def _best_spot(layout: _Layout, options: list[_Oriented], ceiling: float | None = None):
+    """(rotation, shape, shift, spot) of the lowest placement, optionally under `ceiling`."""
+
+    coarse = []
+    for rotation, shape, shift in options:
+        for spot in layout.lowest_spots(shape, _COARSE):
+            if ceiling is None or spot[1] + shape.bounds[3] <= ceiling:
+                coarse.append((_score(shape, spot), rotation, shape, shift, spot))
+    coarse.sort(key=lambda entry: entry[0])
+    best = None
+    for _, rotation, shape, shift, spot in coarse[:_REFINE]:
+        spot = layout.settle(shape, spot)
+        score = _score(shape, spot)
+        if best is None or score < best[0]:
+            best = (score, rotation, shape, shift, spot)
+    return best[1:] if best is not None else None
 
 
 def _put(
@@ -330,6 +378,7 @@ def _put(
 # and leftovers keep using the greedy placement.
 
 _PATTERN_MIN = 4  # copies of one piece before tiling it
+_GREEDY_COMPARE_MAX = 80  # pieces up to which the free layout is also tried
 _ROW_SHIFTS = 8  # sideways shifts tried between rows
 _PAIR_OFFSETS = 12  # vertical offsets tried when pairing a piece with its 180-degree turn
 
@@ -363,6 +412,10 @@ def _tightest(predicate, low: float, high: float) -> float:
 
 
 def _grow(shape: BaseGeometry, gap: float) -> BaseGeometry:
+    """Area another piece must keep out of. With no gap, pieces may touch (common line)."""
+
+    if gap <= 0:
+        return shape.buffer(-_TOUCH, join_style="mitre")
     return shape.buffer(gap, join_style="mitre", mitre_limit=2.0)
 
 

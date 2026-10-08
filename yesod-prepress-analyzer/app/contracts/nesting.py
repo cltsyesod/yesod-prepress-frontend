@@ -85,6 +85,10 @@ class NestingCutLines(BaseModel):
     merge_mm: float = Field(
         default=3.0, ge=0, le=500, validation_alias=AliasChoices("mergeMm", "merge_mm")
     )
+    cut_holes: bool = Field(default=False, validation_alias=AliasChoices("cutHoles", "cut_holes"))
+    white_background: Literal["ignore", "keep"] = Field(
+        default="ignore", validation_alias=AliasChoices("whiteBackground", "white_background")
+    )
 
 
 class NestingRequest(BaseModel):

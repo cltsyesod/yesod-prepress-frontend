@@ -14,7 +14,7 @@ from app.nesting.engine import (
     spare_sets,
     used_efficiency,
 )
-from app.nesting.imposition import CutLines
+from app.nesting.imposition import CutLines, _common_lines
 from app.nesting.planner import PlanItem, PlanOptions, plan
 from app.nesting.shapes import die_line
 
@@ -128,6 +128,22 @@ def test_spare_room_counts_copies_that_still_fit():
     sheet = nest([square], material).sheets[0]
     assert spare_sets(sheet, [square], material) == 3
     assert used_efficiency(sheet, material) > efficiency(sheet, material)
+
+
+def test_touching_rectangles_share_one_cut_line():
+    # Two 100 mm squares side by side, a placement tolerance apart.
+    a = box(0, 0, 100 * MM, 100 * MM)
+    b = box(100 * MM + 0.3, 0, 200 * MM + 0.3, 100 * MM)
+    ops = _common_lines([a, b]).split()
+    length, last = 0.0, None
+    for i, op in enumerate(ops):
+        if op in ("m", "l"):
+            point = (float(ops[i - 2]), float(ops[i - 1]))
+            if op == "l":
+                length += math.dist(last, point)
+            last = point
+    # Outer outline (600 mm) plus the shared edge once (100 mm), not twice.
+    assert length / MM == pytest.approx(700, abs=1)
 
 
 def test_rotation_steps():

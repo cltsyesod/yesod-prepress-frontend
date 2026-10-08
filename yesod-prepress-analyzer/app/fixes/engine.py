@@ -19,9 +19,20 @@ from app.contracts.production_profile import ProductionProfile
 from app.core.exceptions import AnalyzerError
 from app.fixes.contour import artwork_silhouette, contour_die_line
 from app.fixes.geometry import MM, Box, describe_mm, expand, intersect, target_trim, visible_box
+from app.fixes.magenta import convert_magenta_strokes
+from app.fixes.paths import pdf_path
 
-# Order matters: boxes first, because the die line and the marks use the TrimBox.
-_ORDER = ("set_page_boxes", "add_contour_cut", "add_cut_contour", "add_crop_marks")
+# Order matters: boxes first, because the die line and the marks use the TrimBox; a
+# magenta die line converted to the cut separation counts as the die line afterwards.
+_ORDER = (
+    "upscale_images",
+    "set_page_boxes",
+    "convert_magenta_die_line",
+    "add_contour_cut",
+    "add_cut_contour",
+    "add_crop_marks",
+)
+_PATH_TOLERANCE_MM = 0.03  # die-line simplification at final size, before curve fitting
 
 
 class FixError(AnalyzerError):
@@ -166,6 +177,9 @@ def _add_contour_cut(
         offset_mm = 0.0
     offset_pt = offset_mm / scale * MM
     width_pt = _param(params, "lineWidthPt", 0.25) / scale
+    cut_holes = bool(params.get("cutHoles", False))
+    # Paper-white background is not artwork unless the operator says otherwise.
+    white_is_background = params.get("whiteBackground", "ignore") != "keep"
     color = _separation(pdf, name, [0, 1, 0, 0])
     layer = pdf.make_indirect(pikepdf.Dictionary(Type=pikepdf.Name.OCG, Name=name))
     overprint = pdf.make_indirect(
@@ -181,20 +195,21 @@ def _add_contour_cut(
             continue
         visible = visible_box(info)
         region = intersect(info.bleed_box, visible) if info.bleed_box else visible
-        silhouette = artwork_silhouette(source, index, region, origin=(visible[0], visible[1]))
+        silhouette = artwork_silhouette(
+            source,
+            index,
+            region,
+            origin=(visible[0], visible[1]),
+            file_scale=scale,
+            white_is_background=white_is_background,
+        )
         if silhouette is None or silhouette.is_empty:
             details.append(f"Página {info.number}: nenhuma arte encontrada para contornar")
             continue
-        die = contour_die_line(silhouette, offset_pt)
+        die = contour_die_line(silhouette, offset_pt, cut_holes=cut_holes)
         polygons = die.geoms if isinstance(die, MultiPolygon) else [die]
-        paths = []
-        for polygon in polygons:
-            coords = list(polygon.exterior.coords)[:-1]
-            paths.append(
-                f"{_num(coords[0][0])} {_num(coords[0][1])} m "
-                + " ".join(f"{_num(x)} {_num(y)} l" for x, y in coords[1:])
-                + " h S"
-            )
+        holes = sum(len(polygon.interiors) for polygon in polygons)
+        paths = [pdf_path(die, smooth=True, tolerance=_PATH_TOLERANCE_MM / scale * MM) + " S"]
         if not registered:
             _register_layer(pdf, layer)
             registered = True
@@ -221,12 +236,29 @@ def _add_contour_cut(
             if not offset_mm
             else f"{abs(offset_mm):g} mm {'para fora' if offset_mm > 0 else 'para dentro'} da arte"
         )
+        inner = f", {holes} furo(s) interno(s) cortado(s)" if holes else ""
         details.append(
-            f"Página {info.number}: {len(polygons)} contorno(s) {where}, "
+            f"Página {info.number}: {len(polygons)} contorno(s) {where}{inner}, "
             f"formato {describe_mm(bounds, scale)}"
         )
     return AppliedFix(
         id="add_contour_cut", label=f"Faca pelo contorno da arte ({name})", details=details
+    )
+
+
+def _convert_magenta(pdf: pikepdf.Pdf, profile: ProductionProfile, params: dict) -> AppliedFix:
+    """Plain-magenta strokes become the cut separation: the RIP cuts them instead of printing."""
+
+    name = str(params.get("name") or (profile.cut_layer_names or ["CutContour"])[0]).strip()
+    color = _separation(pdf, name, [0, 1, 0, 0])
+    details: list[str] = []
+    for info, page in zip(inspect_pages(pdf, profile.cut_layer_names), pdf.pages, strict=True):
+        if info.die_line_box is not None or not info.magenta_strokes:
+            continue
+        count = convert_magenta_strokes(pdf, page, color)
+        details.append(f"Página {info.number}: {count} linha(s) magenta convertida(s) em {name}")
+    return AppliedFix(
+        id="convert_magenta_die_line", label=f"Faca magenta convertida em {name}", details=details
     )
 
 
@@ -300,6 +332,7 @@ def _add_crop_marks(pdf: pikepdf.Pdf, profile: ProductionProfile, params: dict) 
 
 _FIXES = {
     "set_page_boxes": _set_page_boxes,
+    "convert_magenta_die_line": _convert_magenta,
     "add_cut_contour": _add_cut_contour,
     "add_crop_marks": _add_crop_marks,
 }

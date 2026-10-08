@@ -85,6 +85,8 @@ class NestingService:
                         name=request.cut_lines.name,
                         offset_mm=request.cut_lines.offset_mm,
                         merge_mm=request.cut_lines.merge_mm,
+                        cut_holes=request.cut_lines.cut_holes,
+                        white_is_background=request.cut_lines.white_background != "keep",
                     ),
                     max_roll_length_mm=material.max_roll_length_mm,
                 )

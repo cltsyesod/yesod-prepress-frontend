@@ -11,7 +11,7 @@ from app.rules.color_rules import (
     SpotInventoryRule,
 )
 from app.rules.file_rules import PdfSyntaxRule, PdfVersionRule, PdfXRule, PdfiumRenderRule
-from app.rules.finishing_rules import CutLayerRule
+from app.rules.finishing_rules import CutLayerRule, MagentaDieLineRule
 from app.rules.font_rules import EmbeddedFontsRule, FontProgramRule
 from app.rules.image_rules import ImageResolutionRule, ImageRgbRule, ImageTransparencyRule
 from app.rules.page_rules import BleedRule, DimensionRule, PageBoxRule, PageSizeConsistencyRule
@@ -37,6 +37,7 @@ DEFAULT_RULES: tuple[Rule, ...] = (
     SpotDuplicateRule(),
     SpotInventoryRule(),
     CutLayerRule(),
+    MagentaDieLineRule(),
 )
 
 

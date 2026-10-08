@@ -89,6 +89,9 @@ def plan(items: list[PlanItem], options: PlanOptions, output: Path) -> dict:
                         number - 1,
                         offset_pt=options.cut_lines.offset_mm / item.file_scale * MM,
                         merge_pt=options.cut_lines.merge_mm / item.file_scale * MM,
+                        file_scale=item.file_scale,
+                        white_is_background=options.cut_lines.white_is_background,
+                        cut_holes=options.cut_lines.cut_holes,
                     )
                     shapes = traced or shapes
                 for index, shape in enumerate(shapes, start=1):

@@ -18,6 +18,8 @@ class PageInfo:
     rotation: int = 0
     die_line_box: tuple[float, float, float, float] | None = None
     """Bounds of the die line (cut separation paths), when the page has one."""
+    magenta_strokes: int = 0
+    """Stroke-only paths in plain 100% magenta: probably a die line without a spot colour."""
 
 
 @dataclass(slots=True)

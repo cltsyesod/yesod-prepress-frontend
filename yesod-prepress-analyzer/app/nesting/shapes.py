@@ -254,13 +254,18 @@ def contour_pieces(
     page_index: int,
     offset_pt: float,
     merge_pt: float,
+    *,
+    file_scale: float = 1.0,
+    white_is_background: bool = True,
+    cut_holes: bool = False,
 ) -> list[PieceShape]:
     """Pieces of a page without die line: the system creates the die line itself.
 
     Everything printed is traced; art closer than `merge_pt` belongs to the same
     piece (letters of a word, a logo and its text), separate shapes become separate
     pieces. Each die line runs `offset_pt` outside the artwork, so nothing printed
-    is ever cut off.
+    is ever cut off. With `cut_holes`, unprinted areas enclosed by the art are cut
+    out too, and smaller pieces may be nested inside them.
     """
 
     from app.fixes.contour import artwork_silhouette  # pdfium only needed here
@@ -270,19 +275,41 @@ def contour_pieces(
     visible = box(*crop).intersection(box(*media))
     bleed_box = _page_box(page, "/BleedBox")
     region = box(*bleed_box).intersection(visible) if bleed_box else visible
-    silhouette = artwork_silhouette(pdf_path, page_index, region.bounds, origin=crop[:2])
+    silhouette = artwork_silhouette(
+        pdf_path,
+        page_index,
+        region.bounds,
+        origin=crop[:2],
+        file_scale=file_scale,
+        white_is_background=white_is_background,
+    )
     if silhouette is None or silhouette.is_empty:
         return []
 
     reach = max(merge_pt, offset_pt, 0.0)
     grouped = silhouette.buffer(reach, join_style="round", quad_segs=8)
     die = grouped.buffer(offset_pt - reach, join_style="round", quad_segs=8) if reach else grouped
+    inner: list[Polygon] = []
+    if cut_holes:
+        # Holes of the art itself, shrunk by the offset (grouping must not close them).
+        holes = silhouette.buffer(offset_pt, join_style="round", quad_segs=8)
+        inner = [
+            Polygon(ring)
+            for part in (holes.geoms if isinstance(holes, MultiPolygon) else [holes])
+            if isinstance(part, Polygon)
+            for ring in part.interiors
+        ]
     parts = die.geoms if isinstance(die, MultiPolygon) else [die]
-    pieces = [
-        PieceShape(cut=Polygon(part.exterior), bleed=Polygon(part.exterior), from_die_line=False)
-        for part in parts
-        if isinstance(part, Polygon) and not part.is_empty
-    ]
+    pieces = []
+    for part in parts:
+        if not isinstance(part, Polygon) or part.is_empty:
+            continue
+        shape = Polygon(part.exterior)
+        if cut_holes:
+            cutouts = [hole for hole in inner if shape.contains(hole)]
+            if cutouts:
+                shape = shape.difference(unary_union(cutouts))
+        pieces.append(PieceShape(cut=shape, bleed=shape, from_die_line=False))
     pieces.sort(key=lambda p: (-round(p.cut.bounds[3]), p.cut.bounds[0]))
     return pieces
 
