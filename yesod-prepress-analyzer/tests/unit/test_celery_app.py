@@ -7,6 +7,11 @@ def test_worker_registers_analysis_task():
     assert "app.workers.analysis_task.analyze_job" in celery_app.tasks
 
 
+def test_worker_registers_tiling_task():
+    celery_app.loader.import_default_modules()
+    assert "app.workers.tiling_task.tile_job" in celery_app.tasks
+
+
 def test_worker_registers_nesting_task():
     celery_app.loader.import_default_modules()
     assert "app.workers.nesting_task.nest_job" in celery_app.tasks

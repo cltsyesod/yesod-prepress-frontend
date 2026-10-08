@@ -9,7 +9,7 @@ celery_app = Celery(
     "yesod_prepress",
     broker=settings.valkey_url,
     backend=settings.valkey_url,
-    include=["app.workers.analysis_task", "app.workers.nesting_task"],
+    include=["app.workers.analysis_task", "app.workers.nesting_task", "app.workers.tiling_task"],
 )
 celery_app.conf.update(
     task_default_queue=settings.celery_queue,

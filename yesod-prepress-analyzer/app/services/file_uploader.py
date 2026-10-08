@@ -23,7 +23,9 @@ class FileUploader:
         self.settings = settings
         self.transport = transport
 
-    async def upload(self, url: str, source: Path) -> tuple[int, str]:
+    async def upload(
+        self, url: str, source: Path, content_type: str = "application/pdf"
+    ) -> tuple[int, str]:
         # Same storage as the downloads, so the same allowlist applies.
         validate_outbound_url(
             url,
@@ -33,7 +35,7 @@ class FileUploader:
         data = source.read_bytes()
         headers = {
             "User-Agent": self.settings.user_agent,
-            "Content-Type": "application/pdf",
+            "Content-Type": content_type,
             "x-upsert": "true",
         }
         try:
