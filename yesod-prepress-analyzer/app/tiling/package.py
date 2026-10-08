@@ -15,6 +15,7 @@ from app.tiling.export import (
     TilingError,
     art_frame,
     build_panels,
+    check_constraint,
     neighbours,
     printed_area,
     safe_file_name,
@@ -48,6 +49,8 @@ def build_package(
             raise TilingError(f"o arquivo tem {len(pdf.pages)} página(s)")
         index = request.page - 1
         frame = art_frame(pdf.pages[index], request.file_scale)
+        # The screen validates too; no file leaves here from a layout that cannot be printed.
+        check_constraint(tiles, frame, request.constraint)
 
         # All panels in one PDF: the artwork is stored once (ideal to send to the RIP).
         build_panels(pdf, index, frame, tiles, request.marks, request.title, total, sides).save(

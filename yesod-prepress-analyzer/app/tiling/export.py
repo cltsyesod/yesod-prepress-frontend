@@ -169,41 +169,68 @@ def build_panels(
 
     for tile in tiles:
         printed = printed_area(tile, frame)
-        width, height = printed.w * MM + 2 * margin, printed.h * MM + 2 * margin
-        if max(width, height) > PDF_MAX_PT:
+        white = tile.white
+        # Physical panel = print window + unprinted glue area; marks go in the margin around it.
+        phys_w = (printed.w + white.left + white.right) * MM
+        phys_h = (printed.h + white.bottom + white.top) * MM
+        width, height = phys_w + 2 * margin, phys_h + 2 * margin
+        if max(phys_w, phys_h) > PDF_MAX_PT:
             raise TilingError(
-                f"o painel {tile.number} ({printed.w:.0f} × {printed.h:.0f} mm) passa do limite "
-                "de 5080 mm do PDF"
+                f"o painel {tile.number} ({phys_w / MM:.0f} × {phys_h / MM:.0f} mm) "
+                "passa do limite de 5080 mm do PDF"
             )
         out.add_blank_page(page_size=(width, height))
         page = out.pages[-1]
         name = page.add_resource(art, pikepdf.Name.XObject, prefix="Art")
+        px, py = margin + white.left * MM, margin + white.bottom * MM
         pw, ph = printed.w * MM, printed.h * MM
-        e = margin - printed.x * MM - frame.origin[0] * s
-        f = margin - printed.y * MM - frame.origin[1] * s
+        e = px - printed.x * MM - frame.origin[0] * s
+        f = py - printed.y * MM - frame.origin[1] * s
         content = [
-            f"q {_num(margin)} {_num(margin)} {_num(pw)} {_num(ph)} re W n "
+            f"q {_num(px)} {_num(py)} {_num(pw)} {_num(ph)} re W n "
             f"{_num(s)} 0 0 {_num(s)} {_num(e)} {_num(f)} cm {name} Do Q"
         ]
-        trim = [margin, margin, margin + pw, margin + ph]
-        page.obj.TrimBox = pikepdf.Array([round(v, 4) for v in trim])
-        page.obj.BleedBox = pikepdf.Array([round(v, 4) for v in trim])
+        # TrimBox = the logical tile, BleedBox = the print window (logical + overlaps + bleed):
+        # later steps (RIP, crop, marks) can tell the overlap from the tile itself.
+        v = tile.visible
+        logical = (
+            px + (v.x - printed.x) * MM,
+            py + (v.y - printed.y) * MM,
+            px + (v.x - printed.x + v.w) * MM,
+            py + (v.y - printed.y + v.h) * MM,
+        )
+        page.obj.TrimBox = pikepdf.Array([round(c, 4) for c in logical])
+        page.obj.BleedBox = pikepdf.Array([round(c, 4) for c in (px, py, px + pw, py + ph)])
+        geometry = _PageGeometry(
+            physical=(margin, margin, margin + phys_w, margin + phys_h),
+            printed=(px, py, px + pw, py + ph),
+            logical=logical,
+        )
         if margin >= 2 * MM:
-            content.append(_panel_marks(tile, printed, margin, marks, sides.get(tile.number, {})))
+            content.append(_panel_marks(geometry, marks, sides.get(tile.number, {})))
             if marks.label:
                 font_name = page.add_resource(font, pikepdf.Name.Font, prefix="F")
-                content.append(_panel_label(tile, printed, margin, font_name, title, total, sides))
+                content.append(
+                    _panel_label(tile, printed, geometry, margin, font_name, title, total, sides)
+                )
         page.contents_add("\n".join(c for c in content if c).encode("cp1252", "replace"))
     return out
 
 
-def _panel_marks(
-    tile: TilingTile, printed: Rect, margin: float, marks: TilingMarks, side_of: dict[str, int]
-) -> str:
-    """Crop marks at the printed corners and ticks where the overlap starts, in the margin."""
+@dataclass(slots=True)
+class _PageGeometry:
+    """Rectangles on the panel page (points): x0, y0, x1, y1."""
 
-    x0, y0 = margin, margin
-    x1, y1 = margin + printed.w * MM, margin + printed.h * MM
+    physical: tuple[float, float, float, float]
+    printed: tuple[float, float, float, float]
+    logical: tuple[float, float, float, float]
+
+
+def _panel_marks(geometry: _PageGeometry, marks: TilingMarks, side_of: dict[str, int]) -> str:
+    """Crop marks at the physical corners; dashed ticks where each overlap starts and ends."""
+
+    x0, y0, x1, y1 = geometry.physical
+    margin = x0
     reach = min(5 * MM, margin * 0.6)
     gap = min(1.5 * MM, margin * 0.2)
     lines = []
@@ -214,25 +241,31 @@ def _panel_marks(
         for y in (y0, y1):
             lines.append((x0 - gap, y, x0 - gap - reach, y))
             lines.append((x1 + gap, y, x1 + gap + reach, y))
-    # Where the visible part ends inside the printed area: the overlap with the neighbour.
-    ticks = []
-    v = tile.visible
-    left = (v.x - printed.x) * MM
-    right = (printed.x + printed.w - v.x - v.w) * MM
-    bottom = (v.y - printed.y) * MM
-    top = (printed.y + printed.h - v.y - v.h) * MM
-    if "left" in side_of and left > 0.5:
-        ticks += [(x0 + left, y0 - gap, x0 + left, y0 - gap - reach)]
-        ticks += [(x0 + left, y1 + gap, x0 + left, y1 + gap + reach)]
-    if "right" in side_of and right > 0.5:
-        ticks += [(x1 - right, y0 - gap, x1 - right, y0 - gap - reach)]
-        ticks += [(x1 - right, y1 + gap, x1 - right, y1 + gap + reach)]
-    if "bottom" in side_of and bottom > 0.5:
-        ticks += [(x0 - gap, y0 + bottom, x0 - gap - reach, y0 + bottom)]
-        ticks += [(x1 + gap, y0 + bottom, x1 + gap + reach, y0 + bottom)]
-    if "top" in side_of and top > 0.5:
-        ticks += [(x0 - gap, y1 - top, x0 - gap - reach, y1 - top)]
-        ticks += [(x1 + gap, y1 - top, x1 + gap + reach, y1 - top)]
+
+    # Overlap: from the logical edge (start) to the printed edge (end), on sides with a neighbour.
+    lx0, ly0, lx1, ly1 = geometry.logical
+    px0, py0, px1, py1 = geometry.printed
+
+    def vertical_ticks(x: float) -> list[tuple[float, float, float, float]]:
+        return [(x, y0 - gap, x, y0 - gap - reach), (x, y1 + gap, x, y1 + gap + reach)]
+
+    def horizontal_ticks(y: float) -> list[tuple[float, float, float, float]]:
+        return [(x0 - gap, y, x0 - gap - reach, y), (x1 + gap, y, x1 + gap + reach, y)]
+
+    ticks: list[tuple[float, float, float, float]] = []
+    for side, start, end, make in (
+        ("left", lx0, px0, vertical_ticks),
+        ("right", lx1, px1, vertical_ticks),
+        ("bottom", ly0, py0, horizontal_ticks),
+        ("top", ly1, py1, horizontal_ticks),
+    ):
+        if side not in side_of or abs(start - end) <= 0.5:
+            continue
+        ticks += make(start)
+        # The end of the overlap only needs its own tick when it is not the cut edge.
+        edge = {"left": x0, "right": x1, "bottom": y0, "top": y1}[side]
+        if abs(end - edge) > 0.5:
+            ticks += make(end)
     ops = []
     if lines:
         ops.append(
@@ -256,6 +289,7 @@ _SIDE_NAMES = {"left": "esq.", "right": "dir.", "top": "acima", "bottom": "abaix
 def _panel_label(
     tile: TilingTile,
     printed: Rect,
+    geometry: _PageGeometry,
     margin: float,
     font: str,
     title: str,
@@ -264,15 +298,23 @@ def _panel_label(
 ) -> str:
     size = max(4.0, min(10.0, margin * 0.4))
     v = tile.visible
+    w = tile.white
+    physical = (
+        f" · painel {printed.w + w.left + w.right:.0f} × {printed.h + w.top + w.bottom:.0f} mm "
+        "com área branca"
+        if w.left + w.right + w.top + w.bottom > 0
+        else ""
+    )
     head = " · ".join(
         part
         for part in (
             title,
             tile.name,
             f"painel {tile.number}/{total}",
-            f"coluna {tile.column}, linha {tile.row}",
+            tile.id or f"coluna {tile.column}, linha {tile.row}",
             tile.region,
-            f"impresso {printed.w:.0f} × {printed.h:.0f} mm (visível {v.w:.0f} × {v.h:.0f})",
+            f"impresso {printed.w:.0f} × {printed.h:.0f} mm "
+            f"(lógico {v.w:.0f} × {v.h:.0f}){physical}",
         )
         if part
     )
@@ -283,9 +325,9 @@ def _panel_label(
         if side in around
     )
     lines = [head] + ([f"Vizinhos: {near}"] if near else [])
-    # Top margin, clear of the crop marks at the corners and of the overlap tick.
-    x = margin + max(0.0, (v.x - printed.x) * MM) + min(4 * MM, margin)
-    y = margin + printed.h * MM + (margin - size) / 2
+    # Top margin, clear of the crop marks at the corners and of the overlap ticks.
+    x = geometry.logical[0] + min(4 * MM, margin)
+    y = geometry.physical[3] + (margin - size) / 2
     ops = [f"BT {font} {_num(size)} Tf 0 0 0 1 k {_num(x)} {_num(y)} Td ({_text(lines[0])}) Tj ET"]
     if len(lines) > 1:
         y2 = (margin - size) / 2
@@ -293,6 +335,31 @@ def _panel_label(
             f"BT {font} {_num(size)} Tf 0 0 0 1 k {_num(x)} {_num(y2)} Td ({_text(lines[1])}) Tj ET"
         )
     return "\n".join(ops)
+
+
+def check_constraint(tiles: list[TilingTile], frame: ArtFrame, constraint) -> None:
+    """Refuses to produce panels that do not fit the printable area of the material."""
+
+    if constraint.printable_width_mm <= 0:
+        return
+    standing = constraint.direction == "standing"
+    problems = []
+    for tile in tiles:
+        p = printed_area(tile, frame)
+        w = p.w + tile.white.left + tile.white.right
+        h = p.h + tile.white.top + tile.white.bottom
+        across, along = (w, h) if standing else (h, w)
+        label = tile.id or f"{tile.number}"
+        if across > constraint.printable_width_mm + 0.01:
+            problems.append(
+                f"{label}: {across:.0f} mm > largura imprimível {constraint.printable_width_mm:.0f}"
+            )
+        if constraint.printable_length_mm > 0 and along > constraint.printable_length_mm + 0.01:
+            problems.append(
+                f"{label}: {along:.0f} mm > comprimento {constraint.printable_length_mm:.0f}"
+            )
+    if problems:
+        raise TilingError("painéis não cabem no material: " + "; ".join(problems))
 
 
 def overlap_strips(tiles: list[TilingTile]) -> list[tuple[float, float, float, float]]:

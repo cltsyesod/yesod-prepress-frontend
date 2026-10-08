@@ -102,8 +102,11 @@ def test_panels_guide_and_package(tmp_path):
         sizes = []
         for page in pdf.pages:
             trim = [float(v) for v in page.TrimBox]
-            sizes.append(round((trim[2] - trim[0]) / MM))
-            # Printed area at final size, inside a 10 mm margin for marks and label.
+            bleed = [float(v) for v in page.BleedBox]
+            # TrimBox = the logical tile; BleedBox = the print window with the overlaps.
+            assert round((trim[2] - trim[0]) / MM) == 1000
+            sizes.append(round((bleed[2] - bleed[0]) / MM))
+            # Print window at final size, inside a 10 mm margin for marks and label.
             assert round(float(page.MediaBox[2]) / MM) == sizes[-1] + 20
         assert sizes == [1005, 1025, 1030]
         # The artwork is stored once and shared by every panel.
@@ -133,6 +136,34 @@ def test_neighbours_and_file_names():
     req = request(Path("."))
     assert neighbours(req.tiles)[1] == {"right": 2}
     assert safe_file_name("Fiorino 2024 / lateral (esq.)") == "Fiorino_2024_lateral_esq"
+
+
+def test_white_glue_area_is_blank_and_outside_the_print(tmp_path):
+    source = banner_pdf(tmp_path / "banner.pdf")
+    req = request(tmp_path)
+    req.tiles[0].white.right = 30
+    out = build_package(req, source, tmp_path)
+    with pikepdf.open(out.pdf) as pdf:
+        page = pdf.pages[0]
+        bleed = [float(v) for v in page.BleedBox]
+        media = [float(v) for v in page.MediaBox]
+        # 1005 printed + 30 of glue area + 2 × 10 margin.
+        assert round(media[2] / MM) == 1055
+        assert round((bleed[2] - bleed[0]) / MM) == 1005
+        # The art is clipped to the print window: the glue area gets no ink.
+        contents = page.obj.Contents
+        streams = contents if isinstance(contents, pikepdf.Array) else [contents]
+        text = b"".join(item.read_bytes() for item in streams).decode("cp1252")
+        clip_width = f"{bleed[2] - bleed[0]:.3f}".rstrip("0").rstrip(".")
+        assert f"{clip_width} " in text and "re W n" in text
+
+
+def test_panels_that_do_not_fit_the_material_are_refused(tmp_path):
+    source = banner_pdf(tmp_path / "banner.pdf")
+    req = request(tmp_path)
+    req.constraint.printable_width_mm = 1010
+    with pytest.raises(Exception, match="não cabem no material"):
+        build_package(req, source, tmp_path)
 
 
 def test_panel_outside_the_artwork_is_refused(tmp_path):

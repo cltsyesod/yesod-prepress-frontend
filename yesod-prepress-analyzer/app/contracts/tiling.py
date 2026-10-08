@@ -25,20 +25,47 @@ class Rect(BaseModel):
     h: float = Field(gt=0)
 
 
+class Edges(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    top: float = Field(default=0, ge=0, le=1000)
+    right: float = Field(default=0, ge=0, le=1000)
+    bottom: float = Field(default=0, ge=0, le=1000)
+    left: float = Field(default=0, ge=0, le=1000)
+
+
 class TilingTile(BaseModel):
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
     number: int = Field(ge=1, le=10_000)
+    id: str = Field(default="", max_length=20)
+    """Grid identification, e.g. L1C2 (row from the top, column from the left)."""
     name: str = Field(min_length=1, max_length=200)
     """File name chosen by the operator (without extension)."""
-    region: str = Field(default="", max_length=120)
+    region: str = Field(default="", max_length=120, validation_alias=AliasChoices("region", "zone"))
     """Where it goes (e.g. "Lateral esquerda", "Fachada - térreo")."""
     column: int = Field(default=1, ge=1)
     row: int = Field(default=1, ge=1)
-    visible: Rect
-    """Part of the artwork this panel is responsible for."""
-    printed: Rect
-    """What is printed: the visible part plus overlaps and the outer bleed."""
+    visible: Rect = Field(validation_alias=AliasChoices("visible", "logical"))
+    """Logical tile: the part of the artwork this panel is responsible for."""
+    printed: Rect = Field(validation_alias=AliasChoices("printed", "print"))
+    """Print window: the logical part plus overlaps and the outer bleed."""
+    white: Edges = Field(default_factory=Edges)
+    """Unprinted glue/weld area added outside the print window, per edge."""
+
+
+class TilingConstraint(BaseModel):
+    """Printable area of the material, checked again before any file is made."""
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    printable_width_mm: float = Field(
+        default=0, ge=0, validation_alias=AliasChoices("printableWidth", "printable_width_mm")
+    )
+    printable_length_mm: float = Field(
+        default=0, ge=0, validation_alias=AliasChoices("printableLength", "printable_length_mm")
+    )
+    direction: Literal["standing", "lying"] = "standing"
 
 
 class TilingSeam(BaseModel):
@@ -104,6 +131,7 @@ class TilingRequest(BaseModel):
     seams: list[TilingSeam] = Field(default_factory=list)
     background: TilingBackground | None = None
     marks: TilingMarks = Field(default_factory=TilingMarks)
+    constraint: TilingConstraint = Field(default_factory=TilingConstraint)
     config: dict[str, Any] = Field(default_factory=dict)
     """The screen's configuration, saved next to the panels for reuse."""
 
