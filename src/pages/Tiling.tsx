@@ -49,8 +49,13 @@ import {
   addLine,
   autoGrid,
   calculateProject,
+  DEFAULT_LABEL_BOTTOM,
+  DEFAULT_LABEL_TOP,
   defaultMedia,
   edgesForSide,
+  fillLabel,
+  LABEL_TOKENS,
+  revisionTag,
   fitToPoster,
   hasErrors,
   hasManualEdits,
@@ -80,6 +85,8 @@ import { jobsService, type Job } from '@/services/jobsService'
 import { profileService } from '@/services/profileService'
 import { projectFilesService } from '@/services/projectFilesService'
 import {
+  contentHash,
+  isOutdated,
   readConfig,
   TILING_ACTIVE,
   tilingService,
@@ -119,9 +126,17 @@ interface Prefs {
 const DEFAULT_PREFS: Prefs = {
   constraint: { printableWidth: 0, printableLength: 0, direction: 'standing', media: defaultMedia(0) },
   rules: { overlap: edgesForSide('next', 20), white: zeroEdges(), minimumTile: 50 },
-  nameTemplate: '{projeto}_L{lin}C{col}',
+  nameTemplate: '{projeto}_L{lin}C{col}_{rev}',
   request: { mode: 'equal' },
-  marks: { marginMm: 10, cropMarks: true, label: true },
+  marks: {
+    marginMm: 10,
+    cropMarks: true,
+    overlapMarks: true,
+    centerMarks: false,
+    label: true,
+    labelTop: DEFAULT_LABEL_TOP,
+    labelBottom: DEFAULT_LABEL_BOTTOM,
+  },
 }
 
 function loadPrefs(): Prefs {
@@ -132,6 +147,7 @@ function loadPrefs(): Prefs {
       ...DEFAULT_PREFS,
       ...saved,
       constraint: { ...DEFAULT_PREFS.constraint, ...saved.constraint },
+      marks: { ...DEFAULT_PREFS.marks, ...saved.marks },
       request: { mode: saved.request?.mode ?? 'equal' },
     }
   } catch {
@@ -174,6 +190,7 @@ const NAME_TOKENS: [string, string][] = [
   ['{col}', 'Coluna (1 = esquerda)'],
   ['{nn}', 'Número com 2 dígitos'],
   ['{zona}', 'Região do painel'],
+  ['{rev}', 'Revisão (R1, R2…)'],
 ]
 
 const time = (date: string | Date) =>
@@ -216,6 +233,9 @@ export default function TilingPage() {
   const [downloads, setDownloads] = useState<{ pdf?: string; zip?: string; guide?: string }>({})
   const [savedSignature, setSavedSignature] = useState<string | null>(null)
   const cleanOnLoad = useRef(false)
+  const [revision, setRevision] = useState(1)
+  const [exportedHash, setExportedHash] = useState<string | undefined>()
+  const [labelField, setLabelField] = useState<'labelTop' | 'labelBottom'>('labelTop')
 
   const job = jobs.find((j) => j.id === jobId) ?? null
   const current = saved.find((p) => p.id === tilingId) ?? null
@@ -316,6 +336,8 @@ export default function TilingPage() {
         setPending(null)
         setBackground(null)
         setSavedSignature(null)
+        setRevision(1)
+        setExportedHash(undefined)
       }
     } catch (err) {
       toast({ title: 'Não foi possível abrir a arte', description: getErrorMessage(err), variant: 'destructive' })
@@ -329,7 +351,7 @@ export default function TilingPage() {
     let next: TilingProjectModel
     if (pending) {
       next = fitToPoster(pending.project, poster)
-      setPrefs((p) => ({ ...p, request: pending.request, marks: pending.marks }))
+      setPrefs((p) => ({ ...p, request: pending.request, marks: { ...DEFAULT_PREFS.marks, ...pending.marks } }))
       setPending(null)
     } else {
       next = newProject(
@@ -357,12 +379,16 @@ export default function TilingPage() {
   }
 
   // ---- Geometria ----------------------------------------------------------------------
+  const projectName = name || job?.name || ''
+  const engineContext = (rev: number) => ({
+    project: projectName,
+    client: job?.clientName,
+    marksMargin: prefs.marks.marginMm,
+    revision: rev,
+  })
   const geometry = useMemo(
-    () =>
-      project
-        ? calculateProject(project, { project: name || job?.name, client: job?.clientName, marksMargin: prefs.marks.marginMm })
-        : null,
-    [project, name, job, prefs.marks.marginMm],
+    () => (project ? calculateProject(project, engineContext(revision)) : null),
+    [project, projectName, job, prefs.marks.marginMm, revision], // eslint-disable-line react-hooks/exhaustive-deps
   )
   const issues = useMemo(() => geometry?.issues ?? [], [geometry])
   const errors = useMemo(() => issues.filter((i) => i.severity === 'error'), [issues])
@@ -386,6 +412,23 @@ export default function TilingPage() {
     }
   }, [signature]) // eslint-disable-line react-hooks/exhaustive-deps
   const dirty = !!project && signature !== savedSignature
+  // Exportado e mudado depois: os arquivos baixados já não são deste projeto.
+  const hash = useMemo(
+    () => (project ? contentHash({ project, name: projectName, page: pageNumber, marks: prefs.marks, background }) : ''),
+    [project, projectName, pageNumber, prefs.marks, background],
+  )
+  const outdated = !!current && current.id === tilingId && current.status === 'completed' && !!exportedHash && exportedHash !== hash
+
+  /** Etiqueta de um painel, como vai sair impressa. */
+  const labelOf = (template: string, tile: NonNullable<typeof geometry>['tiles'][number]) =>
+    fillLabel(template, tile, {
+      project: projectName,
+      client: job?.clientName,
+      total: active.length,
+      revision,
+      date: new Date().toLocaleDateString('pt-BR'),
+      numberOf: (id) => numbers[id],
+    })
 
   // ---- Imagem de referência -----------------------------------------------------------
   useEffect(() => {
@@ -413,19 +456,35 @@ export default function TilingPage() {
   }
 
   // ---- Salvar, exportar, modelos ------------------------------------------------------
-  const config = (): TilingConfig | null =>
-    project ? { version: 2, page: pageNumber, project, request: prefs.request, marks: prefs.marks } : null
+  const config = (extra: { revision?: number; exportedHash?: string } = {}): TilingConfig | null =>
+    project
+      ? {
+          version: 2,
+          page: pageNumber,
+          project,
+          request: prefs.request,
+          marks: prefs.marks,
+          revision: extra.revision ?? revision,
+          exportedHash: extra.exportedHash ?? exportedHash,
+        }
+      : null
 
-  const save = async (): Promise<string | null> => {
-    const cfg = config()
-    if (!cfg || !job || !fileId || !geometry) return null
+  const save = async (extra: { revision?: number; exportedHash?: string } = {}): Promise<string | null> => {
+    const cfg = config(extra)
+    if (!cfg || !project || !job || !fileId) return null
+    const rev = cfg.revision ?? 1
     const id = await tilingService.save(tilingId, {
-      name: name || job.name,
+      name: projectName,
       projectId: job.id,
       fileId,
       config: cfg,
-      geometry,
+      // Nomes e etiquetas com a revisão que vai nos arquivos.
+      geometry: calculateProject(project, engineContext(rev)),
       background,
+      labels: {
+        marks: prefs.marks,
+        context: { project: projectName, client: job.clientName, revision: rev, date: new Date().toLocaleDateString('pt-BR') },
+      },
     })
     setTilingId(id)
     setSavedSignature(signature)
@@ -447,7 +506,11 @@ export default function TilingPage() {
     setDownloads({})
     setBottomTab('exportacao')
     try {
-      const id = await save()
+      // Exportar de novo um projeto alterado gera a próxima revisão (R2, R3…).
+      const nextRevision = outdated ? revision + 1 : revision
+      setRevision(nextRevision)
+      setExportedHash(hash)
+      const id = await save({ revision: nextRevision, exportedHash: hash })
       if (id) await tilingService.export(id)
       loadSaved()
     } catch (err) {
@@ -482,6 +545,8 @@ export default function TilingPage() {
     setName(row.name)
     setPageNumber(cfg.page || 1)
     setBackground(row.background)
+    setRevision(cfg.revision ?? 1)
+    setExportedHash(cfg.exportedHash)
     setLeftTab('grade')
     if (row.status !== 'draft') setBottomTab('exportacao')
   }
@@ -653,6 +718,16 @@ export default function TilingPage() {
             <span className={cn('px-2 text-xs', dirty ? 'text-amber-700 dark:text-amber-400' : 'text-muted-foreground')}>
               {dirty ? 'Alterações não salvas' : current ? `Salvo ${time(current.updated)}` : ''}
             </span>
+          )}
+          {outdated && (
+            <button
+              type="button"
+              className="rounded bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-800 hover:bg-amber-500/25 dark:text-amber-300"
+              title="O projeto mudou depois da exportação"
+              onClick={() => setBottomTab('exportacao')}
+            >
+              Exportação desatualizada
+            </button>
           )}
           {saved.length > 0 && (
             <Select
@@ -1044,17 +1119,91 @@ export default function TilingPage() {
                     ))}
                   </div>
                   {active[0] && <Readout label="Exemplo" value={`${active[0].name}.pdf`} />}
+                  <Readout
+                    label="Revisão"
+                    value={revisionTag(revision)}
+                    hint="Sobe sozinha quando um projeto já exportado é alterado e exportado de novo. Use {rev} no nome."
+                    strong
+                  />
                 </Section>
-                <Section title="Marcas e etiqueta">
+                <Section title="Marcas">
                   <Field label="Margem técnica" hint="Faixa em volta de cada painel onde ficam as marcas e a etiqueta. Também gasta mídia.">
                     <NumberField value={prefs.marks.marginMm} onCommit={(v) => setPrefs((p) => ({ ...p, marks: { ...p.marks, marginMm: v ?? 0 } }))} />
                   </Field>
                   <CheckRow checked={prefs.marks.cropMarks} onChange={(cropMarks) => setPrefs((p) => ({ ...p, marks: { ...p.marks, cropMarks } }))}>
-                    Marcas de corte e de sobreposição
+                    <span title="Nos cantos do painel físico, na margem técnica">Corte (cantos)</span>
                   </CheckRow>
-                  <CheckRow checked={prefs.marks.label} onChange={(label) => setPrefs((p) => ({ ...p, marks: { ...p.marks, label } }))}>
-                    Etiqueta (posição, número, medidas, vizinhos)
+                  <CheckRow
+                    checked={prefs.marks.overlapMarks ?? prefs.marks.cropMarks}
+                    onChange={(overlapMarks) => setPrefs((p) => ({ ...p, marks: { ...p.marks, overlapMarks } }))}
+                  >
+                    <span title="Tracejadas, onde a sobreposição começa e termina">Início e fim da sobreposição</span>
                   </CheckRow>
+                  <CheckRow
+                    checked={!!prefs.marks.centerMarks}
+                    onChange={(centerMarks) => setPrefs((p) => ({ ...p, marks: { ...p.marks, centerMarks } }))}
+                  >
+                    <span title="No meio de cada borda do painel, para alinhar com o vizinho na instalação">Centro das bordas (alinhamento)</span>
+                  </CheckRow>
+                  <p className="text-[11px] text-muted-foreground">Todas ficam na margem técnica, nunca sobre a arte.</p>
+                </Section>
+                <Section
+                  title="Etiqueta"
+                  action={
+                    <Checkbox
+                      checked={prefs.marks.label}
+                      title="Imprimir a etiqueta"
+                      onCheckedChange={(v) => setPrefs((p) => ({ ...p, marks: { ...p.marks, label: v === true } }))}
+                    />
+                  }
+                >
+                  {prefs.marks.label ? (
+                    <>
+                      <p className="text-[11px] text-muted-foreground">Linha de cima</p>
+                      <div onFocus={() => setLabelField('labelTop')}>
+                        <TextField
+                          value={prefs.marks.labelTop ?? DEFAULT_LABEL_TOP}
+                          onCommit={(labelTop) => setPrefs((p) => ({ ...p, marks: { ...p.marks, labelTop } }))}
+                        />
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">Linha de baixo</p>
+                      <div onFocus={() => setLabelField('labelBottom')}>
+                        <TextField
+                          value={prefs.marks.labelBottom ?? DEFAULT_LABEL_BOTTOM}
+                          onCommit={(labelBottom) => setPrefs((p) => ({ ...p, marks: { ...p.marks, labelBottom } }))}
+                        />
+                      </div>
+                      <div className="flex flex-wrap gap-1">
+                        {LABEL_TOKENS.map(([token, label]) => (
+                          <button
+                            key={token}
+                            type="button"
+                            title={`${label}: inclui na linha ${labelField === 'labelTop' ? 'de cima' : 'de baixo'}`}
+                            className="rounded border border-border bg-muted/50 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground"
+                            onClick={() =>
+                              setPrefs((p) => {
+                                const fallback = labelField === 'labelTop' ? DEFAULT_LABEL_TOP : DEFAULT_LABEL_BOTTOM
+                                const currentText = p.marks[labelField] ?? fallback
+                                return { ...p, marks: { ...p.marks, [labelField]: currentText ? `${currentText} · ${token}` : token } }
+                              })
+                            }
+                          >
+                            {token}
+                          </button>
+                        ))}
+                      </div>
+                      {(single ?? active[0]) && (
+                        <div className="space-y-0.5 rounded border border-dashed border-border bg-muted/40 px-2 py-1.5 text-[10px] leading-snug text-foreground">
+                          <p className="text-muted-foreground">Prévia ({(single ?? active[0]).id})</p>
+                          <p className="break-words">{labelOf(prefs.marks.labelTop ?? DEFAULT_LABEL_TOP, single ?? active[0])}</p>
+                          <p className="break-words">{labelOf(prefs.marks.labelBottom ?? DEFAULT_LABEL_BOTTOM, single ?? active[0])}</p>
+                        </div>
+                      )}
+                      <p className="text-[11px] text-muted-foreground">Se a linha não couber entre as marcas, ela é encurtada com "…".</p>
+                    </>
+                  ) : (
+                    <p className="text-[11px] text-muted-foreground">Sem etiqueta nos painéis.</p>
+                  )}
                 </Section>
                 <Section title="Modelos">
                   {templates.length > 0 && (
@@ -1184,7 +1333,8 @@ export default function TilingPage() {
                   <ExportPanel
                     current={current && current.id === tilingId ? current : null}
                     running={running}
-                    dirty={dirty}
+                    outdated={outdated}
+                    nextRevision={revisionTag(revision + 1)}
                     errors={errors.length}
                     downloads={downloads}
                     panels={active.length}
@@ -1435,7 +1585,16 @@ function EmptyState({
                         )}
                       >
                         {STATUS_LABEL[row.status]}
+                        {row.status === 'completed' && ` · ${revisionTag(row.result?.revision ?? row.config?.revision ?? 1)}`}
                       </span>
+                      {isOutdated(row) && (
+                        <span
+                          className="ml-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-800 dark:text-amber-300"
+                          title="Alterado depois da exportação: os arquivos não correspondem mais ao projeto"
+                        >
+                          Desatualizado
+                        </span>
+                      )}
                     </td>
                     <td className="px-3 py-1.5 text-right tabular-nums">{Array.isArray(row.tiles) ? row.tiles.length : '—'}</td>
                     <td className="px-3 py-1.5 tabular-nums text-muted-foreground">{time(row.updated)}</td>
@@ -1458,17 +1617,21 @@ function EmptyState({
   )
 }
 
+const ROTATION_SHORT: Record<number, string> = { 0: 'em pé', 90: 'deitado', 180: 'em pé 180°', 270: 'deitado 180°' }
+
 function ExportPanel({
   current,
   running,
-  dirty,
+  outdated,
+  nextRevision,
   errors,
   downloads,
   panels,
 }: {
   current: TilingProject | null
   running: boolean
-  dirty: boolean
+  outdated: boolean
+  nextRevision: string
   errors: number
   downloads: { pdf?: string; zip?: string; guide?: string }
   panels: number
@@ -1499,16 +1662,21 @@ function ExportPanel({
   if (current.status === 'failed') {
     return <p className="px-3 py-3 text-xs text-destructive">A exportação falhou: {current.error_message || 'sem detalhes'}</p>
   }
+  const files = current.result.files ?? []
   return (
-    <div className="space-y-2 px-3 py-3 text-xs">
+    <div className="flex h-full min-h-0 gap-4 px-3 py-3 text-xs">
+    <div className="w-72 shrink-0 space-y-2">
       <p className="flex items-center gap-2 text-foreground">
-        <CircleCheck className="h-4 w-4 text-emerald-600" />
-        {current.result.panels ?? panels} painéis exportados em {current.completed_at ? time(current.completed_at) : time(current.updated)}.
+        <CircleCheck className="h-4 w-4 shrink-0 text-emerald-600" />
+        <span>
+          <b>{revisionTag(current.result.revision ?? current.config?.revision ?? 1)}</b> · {current.result.panels ?? panels} painéis
+          exportados em {current.completed_at ? time(current.completed_at) : time(current.updated)}.
+        </span>
       </p>
-      {dirty && (
-        <p className="flex items-center gap-2 text-amber-700 dark:text-amber-400">
-          <AlertTriangle className="h-3.5 w-3.5" />
-          O projeto mudou depois da exportação: os arquivos abaixo estão desatualizados. Exporte de novo.
+      {outdated && (
+        <p className="flex items-start gap-2 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-amber-800 dark:text-amber-300">
+          <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0" />
+          O projeto mudou depois desta exportação: os arquivos estão desatualizados. Exportar de novo gera a {nextRevision}.
         </p>
       )}
       {current.result.warnings?.map((w) => (
@@ -1542,6 +1710,34 @@ function ExportPanel({
           </Button>
         )}
       </div>
+      <p className="text-[11px] text-muted-foreground">O ZIP traz também o manifesto (planilha CSV) e a configuração.</p>
+    </div>
+    {files.length > 0 && (
+      <div className="min-w-0 flex-1 overflow-auto rounded border border-border">
+        <table className="w-full text-xs">
+          <thead className="sticky top-0 bg-muted text-left text-[11px] text-muted-foreground">
+            <tr>
+              <th className="px-2 py-1 font-medium">Nº</th>
+              <th className="px-2 py-1 font-medium">Arquivo gerado</th>
+              <th className="px-2 py-1 font-medium">Região</th>
+              <th className="px-2 py-1 text-right font-medium">Físico (mm)</th>
+              <th className="px-2 py-1 font-medium">Na mídia</th>
+            </tr>
+          </thead>
+          <tbody>
+            {files.map((f) => (
+              <tr key={f.number} className="border-t border-border tabular-nums">
+                <td className="px-2 py-0.5 font-semibold">{String(f.number).padStart(2, '0')}</td>
+                <td className="px-2 py-0.5 font-mono text-[11px]">{f.file}</td>
+                <td className="px-2 py-0.5">{f.region || ''}</td>
+                <td className="px-2 py-0.5 text-right">{fmtSize({ w: (f.physicalMm ?? f.printedMm)[0], h: (f.physicalMm ?? f.printedMm)[1] })}</td>
+                <td className="px-2 py-0.5">{ROTATION_SHORT[f.rotation ?? 0]}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )}
     </div>
   )
 }

@@ -10,13 +10,14 @@ from __future__ import annotations
 
 import io
 import zlib
+from dataclasses import dataclass
 from pathlib import Path
 
 import pikepdf
 import pypdfium2
 from PIL import Image
 
-from app.contracts.tiling import TilingBackground, TilingSeam, TilingTile
+from app.contracts.tiling import Rect, TilingBackground, TilingSeam, TilingTile
 from app.tiling.export import MM, ArtFrame, overlap_strips, printed_area
 
 PAGE = (420 * MM, 297 * MM)
@@ -58,14 +59,22 @@ def _image(pdf: pikepdf.Pdf, picture: Image.Image) -> pikepdf.Object:
     return image
 
 
-def _render_art(path: Path, page_index: int, frame: ArtFrame, area) -> Image.Image | None:
+def _render_art(
+    path: Path,
+    page_index: int,
+    frame: ArtFrame,
+    area,
+    pixels: int = _THUMB_PX,
+    document: pypdfium2.PdfDocument | None = None,
+) -> Image.Image | None:
     """The artwork inside `area` (art mm), rendered small for the guide."""
 
     x0, y0, x1, y1 = area
     if x1 <= x0 or y1 <= y0:
         return None
     to_pt = MM / frame.scale
-    document = pypdfium2.PdfDocument(str(path))
+    own = document is None
+    document = document or pypdfium2.PdfDocument(str(path))
     try:
         page = document[page_index]
         width_pt, height_pt = page.get_size()
@@ -75,7 +84,7 @@ def _render_art(path: Path, page_index: int, frame: ArtFrame, area) -> Image.Ima
         bottom = frame.origin[1] + y0 * to_pt - crop_box[1]
         right = frame.origin[0] + x1 * to_pt - crop_box[0]
         top = frame.origin[1] + y1 * to_pt - crop_box[1]
-        scale = _THUMB_PX / max(right - left, top - bottom)
+        scale = pixels / max(right - left, top - bottom)
         bitmap = page.render(
             scale=scale,
             crop=(
@@ -88,7 +97,8 @@ def _render_art(path: Path, page_index: int, frame: ArtFrame, area) -> Image.Ima
         )
         return bitmap.to_pil().convert("RGB")
     finally:
-        document.close()
+        if own:
+            document.close()
 
 
 def build_guide(
@@ -102,7 +112,10 @@ def build_guide(
     title: str = "",
     background: TilingBackground | None = None,
     background_image: Image.Image | None = None,
+    revision: int = 1,
+    tile_pages: bool = True,
 ) -> pikepdf.Pdf:
+    """Overview sheet (with the table) and then one sheet per panel."""
     pdf = pikepdf.Pdf.new()
     font = pdf.make_indirect(
         pikepdf.Dictionary(
@@ -227,10 +240,13 @@ def build_guide(
         f"BT {fb} 16 Tf 0 0 0 rg {_num(_EDGE)} {_num(PAGE[1] - _EDGE - 12)} Td "
         f"({_text(head)}) Tj ET"
     )
+    subtitle = (
+        f"Guia de instalação · R{revision} · {len(tiles)} painéis · "
+        "medidas em mm no tamanho final · uma folha por painel a seguir"
+    )
     ops.append(
         f"BT {f} 9 Tf 0.3 0.3 0.3 rg {_num(_EDGE)} {_num(PAGE[1] - _EDGE - 26)} Td "
-        f"({_text(f'Guia de instalação · {len(tiles)} painéis · medidas em mm no tamanho final')}) "
-        "Tj ET"
+        f"({_text(subtitle)}) Tj ET"
     )
     legend_y = _EDGE + 3 * MM
     ops.append(
@@ -261,7 +277,242 @@ def build_guide(
                 "cp1252", "replace"
             )
         )
+
+    if tile_pages:
+        document = pypdfium2.PdfDocument(str(path))
+        try:
+            for tile in tiles:
+                _tile_page(
+                    pdf,
+                    (font, bold),
+                    _TileContext(path, page_index, frame, document, title, revision, tiles, sides),
+                    tile,
+                    printed,
+                )
+        finally:
+            document.close()
     return pdf
+
+
+# ---- One sheet per panel ------------------------------------------------------------------
+
+TILE_PAGE = (297 * MM, 210 * MM)
+_ORANGE = "1 0.55 0"
+_ROTATION = {
+    0: "em pé",
+    90: "deitado (90°)",
+    180: "em pé, girado 180°",
+    270: "deitado, girado 180°",
+}
+_SIDE_LONG = {"left": "Esquerda", "right": "Direita", "top": "Acima", "bottom": "Abaixo"}
+
+
+@dataclass(slots=True)
+class _TileContext:
+    path: Path
+    page_index: int
+    frame: ArtFrame
+    document: pypdfium2.PdfDocument
+    title: str
+    revision: int
+    tiles: list[TilingTile]
+    sides: dict[int, dict[str, int]]
+
+
+def overlap_edges(tile: TilingTile, printed: Rect, around: dict[str, int]) -> dict[str, float]:
+    """How far the panel prints over each neighbour (only on sides that have one)."""
+
+    v = tile.visible
+    reach = {
+        "left": v.x - printed.x,
+        "right": printed.x + printed.w - (v.x + v.w),
+        "bottom": v.y - printed.y,
+        "top": printed.y + printed.h - (v.y + v.h),
+    }
+    return {side: max(0.0, value) if side in around else 0.0 for side, value in reach.items()}
+
+
+_OPPOSITE = {"left": "right", "right": "left", "top": "bottom", "bottom": "top"}
+
+
+def _tile_page(pdf, fonts, ctx: _TileContext, tile: TilingTile, printed: dict[int, Rect]) -> None:
+    font, bold = fonts
+    width, height = TILE_PAGE
+    pdf.add_blank_page(page_size=TILE_PAGE)
+    page = pdf.pages[-1]
+    f = page.add_resource(font, pikepdf.Name.Font, prefix="F")
+    fb = page.add_resource(bold, pikepdf.Name.Font, prefix="B")
+    soft = page.add_resource(
+        pikepdf.Dictionary(Type=pikepdf.Name.ExtGState, ca=0.45),
+        pikepdf.Name.ExtGState,
+        prefix="GS",
+    )
+    ops: list[str] = []
+    p = printed[tile.number]
+    v = tile.visible
+    around = ctx.sides.get(tile.number, {})
+    by_number = {t.number: t for t in ctx.tiles}
+    mine = overlap_edges(tile, p, around)
+
+    def text(x: float, y: float, value: str, size: float = 8, face: str | None = None, gray=0.0):
+        ops.append(
+            f"BT {face or f} {_num(size)} Tf {gray} {gray} {gray} rg {_num(x)} {_num(y)} Td "
+            f"({_text(value)}) Tj ET"
+        )
+
+    # Header.
+    head = f"Painel {tile.number:02d} de {len(ctx.tiles)} · {tile.id}"
+    text(_EDGE, height - _EDGE - 14, head, 16, fb)
+    sub = " · ".join(
+        part for part in (f"{tile.name}.pdf", tile.region, ctx.title, f"R{ctx.revision}") if part
+    )
+    text(_EDGE, height - _EDGE - 28, sub, 9, gray=0.3)
+
+    # The panel's printed area, with what it covers outlined and the overlaps shaded.
+    pad = 18.0
+    box_x, box_y = _EDGE + pad, _EDGE + pad
+    box_w, box_h = width * 0.58 - box_x - pad, height - box_y - _EDGE - 40 - pad
+    g = min(box_w / p.w, box_h / p.h)
+    ox = box_x + (box_w - p.w * g) / 2 - p.x * g
+    oy = box_y + (box_h - p.h * g) / 2 - p.y * g
+
+    def at(x: float, y: float) -> tuple[float, float]:
+        return ox + x * g, oy + y * g
+
+    art = _render_art(
+        ctx.path, ctx.page_index, ctx.frame, (p.x, p.y, p.x + p.w, p.y + p.h), 1400, ctx.document
+    )
+    if art is not None:
+        name = page.add_resource(_image(pdf, art), pikepdf.Name.XObject, prefix="Art")
+        x, y = at(p.x, p.y)
+        ops.append(f"q {_num(p.w * g)} 0 0 {_num(p.h * g)} {_num(x)} {_num(y)} cm {name} Do Q")
+    strips = []
+    if mine["left"]:
+        strips.append((p.x, p.y, mine["left"], p.h))
+    if mine["right"]:
+        strips.append((v.x + v.w, p.y, mine["right"], p.h))
+    if mine["bottom"]:
+        strips.append((p.x, p.y, p.w, mine["bottom"]))
+    if mine["top"]:
+        strips.append((p.x, v.y + v.h, p.w, mine["top"]))
+    if strips:
+        ops.append(
+            f"q {soft} gs {_ORANGE} rg "
+            + " ".join(
+                f"{_num(at(a, b)[0])} {_num(at(a, b)[1])} {_num(w * g)} {_num(h * g)} re"
+                for a, b, w, h in strips
+            )
+            + " f Q"
+        )
+    x, y = at(p.x, p.y)
+    ops.append(
+        f"q 0.5 G 0.5 w [3 2] 0 d {_num(x)} {_num(y)} {_num(p.w * g)} {_num(p.h * g)} re S Q"
+    )
+    x, y = at(v.x, v.y)
+    ops.append(f"q {_BLUE} RG 1.2 w {_num(x)} {_num(y)} {_num(v.w * g)} {_num(v.h * g)} re S Q")
+
+    # Neighbour numbers just outside each side.
+    left, bottom = at(p.x, p.y)
+    right, top = at(p.x + p.w, p.y + p.h)
+    middle = ((left + right) / 2, (bottom + top) / 2)
+    spots = {
+        "left": (left - 10, middle[1]),
+        "right": (right + 10, middle[1]),
+        "top": (middle[0], top + 9),
+        "bottom": (middle[0], bottom - 9),
+    }
+    for side, number in around.items():
+        cx, cy = spots[side]
+        label = f"{number:02d}"
+        ops.append(
+            f"q 1 1 1 rg {_BLUE} RG 0.8 w {_num(cx - 8)} {_num(cy - 5)} 16 11 re B Q "
+            f"BT {fb} 8 Tf {_BLUE} rg {_num(cx - 4.5)} {_num(cy - 2.5)} Td ({label}) Tj ET"
+        )
+
+    # Where it goes: every panel outlined, this one filled.
+    map_x, map_w = width * 0.6, width * 0.4 - _EDGE
+    map_top = height - _EDGE - 44
+    map_h = height * 0.32
+    rects = [(t.visible.x, t.visible.y, t.visible.w, t.visible.h) for t in ctx.tiles]
+    ex0 = min(r[0] for r in rects)
+    ey0 = min(r[1] for r in rects)
+    ex1 = max(r[0] + r[2] for r in rects)
+    ey1 = max(r[1] + r[3] for r in rects)
+    k = min(map_w / (ex1 - ex0), map_h / (ey1 - ey0))
+    mx = map_x + (map_w - (ex1 - ex0) * k) / 2 - ex0 * k
+    my = map_top - map_h + (map_h - (ey1 - ey0) * k) / 2 - ey0 * k
+    for t, (rx, ry, rw, rh) in zip(ctx.tiles, rects, strict=True):
+        fill = f"{_BLUE} rg " if t.number == tile.number else "0.93 0.94 0.96 rg "
+        ops.append(
+            f"q {fill}0.55 G 0.5 w {_num(mx + rx * k)} {_num(my + ry * k)} "
+            f"{_num(rw * k)} {_num(rh * k)} re B Q"
+        )
+
+    # Data.
+    white = tile.white
+    phys = (p.w + white.left + white.right, p.h + white.top + white.bottom)
+    rows = [
+        ("Arquivo", f"{tile.name}.pdf"),
+        ("Posição", f"linha {tile.row}, coluna {tile.column} ({tile.id})"),
+        ("Região", tile.region or "—"),
+        ("Cobre da arte", f"{v.w:.0f} × {v.h:.0f} mm"),
+        ("Impresso", f"{p.w:.0f} × {p.h:.0f} mm"),
+        ("Painel físico", f"{phys[0]:.0f} × {phys[1]:.0f} mm"),
+        ("Na mídia", _ROTATION.get(tile.rotation, "")),
+        (
+            "Área branca",
+            " · ".join(
+                f"{_SIDE_LONG[s][:3].lower()}. {getattr(white, s):.0f}"
+                for s in ("left", "right", "top", "bottom")
+                if getattr(white, s) > 0
+            )
+            or "—",
+        ),
+    ]
+    under: list[int] = []
+    for side in ("left", "right", "top", "bottom"):
+        if side not in around:
+            continue
+        number = around[side]
+        other = by_number.get(number)
+        theirs = (
+            overlap_edges(other, printed[number], ctx.sides.get(number, {}))[_OPPOSITE[side]]
+            if other
+            else 0.0
+        )
+        if mine[side] > 0.5:
+            note = f"painel {number:02d} · este fica por cima ({mine[side]:.0f} mm)"
+        elif theirs > 0.5:
+            note = f"painel {number:02d} · este fica por baixo ({theirs:.0f} mm)"
+            under.append(number)
+        else:
+            note = f"painel {number:02d} · topo a topo"
+        rows.append((_SIDE_LONG[side], note))
+    if under:
+        rows.append(("Instalar antes de", ", ".join(f"{n:02d}" for n in sorted(under))))
+    covered = [around[s] for s in around if mine[s] > 0.5]
+    if covered:
+        rows.append(("Instalar depois de", ", ".join(f"{n:02d}" for n in sorted(covered))))
+
+    y = map_top - map_h - 22
+    for label, value in rows:
+        text(map_x, y, label, 8, gray=0.35)
+        limit = int((map_w - 78) / 4.1)
+        text(map_x + 78, y, value if len(value) <= limit else value[: limit - 1] + "…", 8)
+        y -= 13
+
+    # Legend.
+    ly = _EDGE
+    ops.append(
+        f"q {_BLUE} RG 1.2 w {_num(_EDGE)} {_num(ly)} 14 8 re S Q "
+        f"BT {f} 7.5 Tf 0 0 0 rg {_num(_EDGE + 18)} {_num(ly + 1.5)} Td (Cobre da arte) Tj ET "
+        f"q 0.5 G 0.5 w [3 2] 0 d {_num(_EDGE + 90)} {_num(ly)} 14 8 re S Q "
+        f"BT {f} 7.5 Tf 0 0 0 rg {_num(_EDGE + 108)} {_num(ly + 1.5)} Td (Impresso) Tj ET "
+        f"q {soft} gs {_ORANGE} rg {_num(_EDGE + 160)} {_num(ly)} 14 8 re f Q "
+        f"BT {f} 7.5 Tf 0 0 0 rg {_num(_EDGE + 178)} {_num(ly + 1.5)} Td "
+        f"({_text('Sobreposição (impressa também no vizinho)')}) Tj ET"
+    )
+    page.contents_add("\n".join(ops).encode("cp1252", "replace"))
 
 
 def _row(tile: TilingTile, printed, around: dict[str, int]) -> list[str]:

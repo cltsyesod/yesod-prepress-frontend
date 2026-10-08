@@ -3,4 +3,5 @@ export { calculateProject, cellGroups, cellKey, fillName, parseCell } from './en
 export * from './operations'
 export { hasErrors, PDF_MAX_MM, validateProject } from './validate'
 export { edgesForSide, isLegacy, migrateLegacy } from './migrate'
+export { DEFAULT_LABEL_BOTTOM, DEFAULT_LABEL_TOP, fillLabel, LABEL_TOKENS, revisionTag, type LabelContext } from './labels'
 export { defaultMedia, layoutMedia, onMedia, orientationOf, printableWidthOf, rotationOf } from './media'

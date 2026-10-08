@@ -71,10 +71,11 @@ function gapShare(gap: GapSetting | undefined, side: 'before' | 'after'): number
 
 export function fillName(
   template: string,
-  values: { number: number; row: number; column: number; zone: string; project?: string; client?: string },
+  values: { number: number; row: number; column: number; zone: string; project?: string; client?: string; revision?: number },
 ): string {
   const nn = String(values.number).padStart(2, '0')
   const text = (template || '{projeto}_L{lin}C{col}')
+    .replaceAll('{rev}', `R${Math.max(1, Math.round(values.revision ?? 1))}`)
     .replaceAll('{nn}', nn)
     .replaceAll('{n}', String(values.number))
     .replaceAll('{lin}', String(values.row))
@@ -90,7 +91,7 @@ export function fillName(
 export function calculateProject(
   project: TilingProjectModel,
   /** `marksMargin`: margem técnica das marcas em volta de cada painel (gasta mídia). */
-  context: { project?: string; client?: string; marksMargin?: number } = {},
+  context: { project?: string; client?: string; marksMargin?: number; revision?: number } = {},
 ): ProjectGeometry {
   const { xs, ys } = project.grid
   const columns = xs.length - 1

@@ -54,6 +54,13 @@ class TilingTile(BaseModel):
     """Unprinted glue/weld area added outside the print window, per edge."""
     rotation: Literal[0, 90, 180, 270] = 0
     """How the panel goes on the media (clockwise): 90 = lying, +180 for flip-flop."""
+    label_top: str | None = Field(
+        default=None, max_length=400, validation_alias=AliasChoices("labelTop", "label_top")
+    )
+    """Label line in the top margin, already filled in by the screen (None = built here)."""
+    label_bottom: str | None = Field(
+        default=None, max_length=400, validation_alias=AliasChoices("labelBottom", "label_bottom")
+    )
 
 
 class TilingConstraint(BaseModel):
@@ -105,7 +112,19 @@ class TilingMarks(BaseModel):
     )
     """Blank border around the printed area of each panel, where marks and the label go."""
     crop_marks: bool = Field(default=True, validation_alias=AliasChoices("cropMarks", "crop_marks"))
+    overlap_marks: bool | None = Field(
+        default=None, validation_alias=AliasChoices("overlapMarks", "overlap_marks")
+    )
+    """Dashed ticks where each overlap starts and ends (None = same as the crop marks)."""
+    center_marks: bool = Field(
+        default=False, validation_alias=AliasChoices("centerMarks", "center_marks")
+    )
+    """A tick at the middle of each edge, to line the panels up when installing."""
     label: bool = True
+
+    @property
+    def draw_overlap_marks(self) -> bool:
+        return self.crop_marks if self.overlap_marks is None else self.overlap_marks
 
 
 class TilingOutputs(BaseModel):
@@ -137,6 +156,17 @@ class TilingRequest(BaseModel):
     constraint: TilingConstraint = Field(default_factory=TilingConstraint)
     config: dict[str, Any] = Field(default_factory=dict)
     """The screen's configuration, saved next to the panels for reuse."""
+    revision: int = Field(default=0, ge=0, le=10_000)
+    """File revision (R1, R2…); 0 = take it from the configuration."""
+
+    @property
+    def revision_number(self) -> int:
+        if self.revision:
+            return self.revision
+        try:
+            return max(1, int(self.config.get("revision") or 1))
+        except (TypeError, ValueError):
+            return 1
 
     @field_validator("file_scale", mode="before")
     @classmethod

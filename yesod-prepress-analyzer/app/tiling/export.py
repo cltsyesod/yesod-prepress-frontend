@@ -211,11 +211,14 @@ def build_panels(
             logical=logical,
         )
         if margin >= 2 * MM:
-            content.append(_panel_marks(geometry, marks, sides.get(tile.number, {})))
+            drawn, blocked = _panel_marks(geometry, marks, sides.get(tile.number, {}))
+            content.append(drawn)
             if marks.label:
                 font_name = page.add_resource(font, pikepdf.Name.Font, prefix="F")
                 content.append(
-                    _panel_label(tile, printed, geometry, margin, font_name, title, total, sides)
+                    _panel_label(
+                        tile, printed, geometry, margin, font_name, title, total, sides, blocked
+                    )
                 )
         page.contents_add("\n".join(c for c in content if c).encode("cp1252", "replace"))
     return out
@@ -230,8 +233,12 @@ class _PageGeometry:
     logical: tuple[float, float, float, float]
 
 
-def _panel_marks(geometry: _PageGeometry, marks: TilingMarks, side_of: dict[str, int]) -> str:
-    """Crop marks at the physical corners; dashed ticks where each overlap starts and ends."""
+def _panel_marks(
+    geometry: _PageGeometry, marks: TilingMarks, side_of: dict[str, int]
+) -> tuple[str, list[float]]:
+    """Crop marks at the physical corners, dashed ticks where each overlap starts and ends and
+    ticks at the middle of each edge. Also returns the x of every tick in the top and bottom
+    margins, which the label has to stay clear of."""
 
     x0, y0, x1, y1 = geometry.physical
     margin = x0
@@ -263,28 +270,62 @@ def _panel_marks(geometry: _PageGeometry, marks: TilingMarks, side_of: dict[str,
         ("bottom", ly0, py0, horizontal_ticks),
         ("top", ly1, py1, horizontal_ticks),
     ):
-        if side not in side_of or abs(start - end) <= 0.5:
+        if not marks.draw_overlap_marks or side not in side_of or abs(start - end) <= 0.5:
             continue
         ticks += make(start)
         # The end of the overlap only needs its own tick when it is not the cut edge.
         edge = {"left": x0, "right": x1, "bottom": y0, "top": y1}[side]
         if abs(end - edge) > 0.5:
             ticks += make(end)
+
+    # Middle of each edge of the logical tile: neighbours line up mark to mark.
+    centers: list[tuple[float, float, float, float]] = []
+    if marks.center_marks:
+        centers = vertical_ticks((lx0 + lx1) / 2) + horizontal_ticks((ly0 + ly1) / 2)
+
+    def stroke(style: str, segments: list[tuple[float, float, float, float]]) -> str:
+        return (
+            f"q 0 0 0 1 K {style} "
+            + " ".join(f"{_num(a)} {_num(b)} m {_num(c)} {_num(d)} l" for a, b, c, d in segments)
+            + " S Q"
+        )
+
     ops = []
     if lines:
-        ops.append(
-            "q 0 0 0 1 K 0.3 w "
-            + " ".join(f"{_num(a)} {_num(b)} m {_num(c)} {_num(d)} l" for a, b, c, d in lines)
-            + " S Q"
-        )
+        ops.append(stroke("0.3 w", lines))
     if ticks:
         # Overlap ticks dashed, so they are not mistaken for the cut.
-        ops.append(
-            "q 0 0 0 1 K 0.3 w [2 1.5] 0 d "
-            + " ".join(f"{_num(a)} {_num(b)} m {_num(c)} {_num(d)} l" for a, b, c, d in ticks)
-            + " S Q"
-        )
-    return "\n".join(ops)
+        ops.append(stroke("0.3 w [2 1.5] 0 d", ticks))
+    if centers:
+        ops.append(stroke("0.6 w", centers))
+    # Vertical segments in the top/bottom margins (x0 == x1 and outside the panel height).
+    blocked = sorted(
+        {a for a, b, c, d in lines + ticks + centers if abs(a - c) < 0.01 and (b > y1 or b < y0)}
+    )
+    return "\n".join(ops), blocked
+
+
+def _fit(text: str, size: float, low: float, high: float, blocked: list[float]):
+    """Where a line of text fits between the ticks of a margin: the first free stretch wide
+    enough, or the widest one with the text cut short. None if nothing fits."""
+
+    pad = 1.5 * MM
+    char = size * 0.52  # average Helvetica width
+    edges = [low] + [b for b in blocked if low < b < high] + [high]
+    stretches = [
+        (a + pad, b - pad) for a, b in zip(edges, edges[1:], strict=False) if b - a > 2 * pad
+    ]
+    if not stretches or not text:
+        return None
+    need = len(text) * char
+    for a, b in stretches:
+        if b - a >= need:
+            return a, text
+    a, b = max(stretches, key=lambda s: s[1] - s[0])
+    room = int((b - a) / char)
+    if room < 4:
+        return None
+    return a, text[: room - 1] + "…"
 
 
 _SIDE_NAMES = {"left": "esq.", "right": "dir.", "top": "acima", "bottom": "abaixo"}
@@ -299,8 +340,39 @@ def _panel_label(
     title: str,
     total: int,
     sides: dict[int, dict[str, int]],
+    blocked: list[float] | None = None,
 ) -> str:
+    """Top line in the top margin, bottom line in the bottom one, both clear of the marks."""
+
     size = max(4.0, min(10.0, margin * 0.4))
+    top = tile.label_top
+    if top is None:
+        top = _default_head(tile, printed, title, total)
+    if tile.label_bottom is not None:
+        bottom = tile.label_bottom
+    else:
+        around = sides.get(tile.number, {})
+        near = " · ".join(
+            f"{_SIDE_NAMES[side]}: painel {around[side]}"
+            for side in ("left", "right", "top", "bottom")
+            if side in around
+        )
+        bottom = f"Vizinhos: {near}" if near else ""
+
+    x0, _, x1, y1 = geometry.physical
+    ops = []
+    for text, y in ((top, y1 + (margin - size) / 2), (bottom, (margin - size) / 2)):
+        placed = _fit(text.strip(), size, x0, x1, blocked or [])
+        if placed is None:
+            continue
+        x, line = placed
+        ops.append(
+            f"BT {font} {_num(size)} Tf 0 0 0 1 k {_num(x)} {_num(y)} Td ({_text(line)}) Tj ET"
+        )
+    return "\n".join(ops)
+
+
+def _default_head(tile: TilingTile, printed: Rect, title: str, total: int) -> str:
     v = tile.visible
     w = tile.white
     physical = (
@@ -309,7 +381,7 @@ def _panel_label(
         if w.left + w.right + w.top + w.bottom > 0
         else ""
     )
-    head = " · ".join(
+    return " · ".join(
         part
         for part in (
             title,
@@ -322,23 +394,6 @@ def _panel_label(
         )
         if part
     )
-    around = sides.get(tile.number, {})
-    near = " · ".join(
-        f"{_SIDE_NAMES[side]}: painel {around[side]}"
-        for side in ("left", "right", "top", "bottom")
-        if side in around
-    )
-    lines = [head] + ([f"Vizinhos: {near}"] if near else [])
-    # Top margin, clear of the crop marks at the corners and of the overlap ticks.
-    x = geometry.logical[0] + min(4 * MM, margin)
-    y = geometry.physical[3] + (margin - size) / 2
-    ops = [f"BT {font} {_num(size)} Tf 0 0 0 1 k {_num(x)} {_num(y)} Td ({_text(lines[0])}) Tj ET"]
-    if len(lines) > 1:
-        y2 = (margin - size) / 2
-        ops.append(
-            f"BT {font} {_num(size)} Tf 0 0 0 1 k {_num(x)} {_num(y2)} Td ({_text(lines[1])}) Tj ET"
-        )
-    return "\n".join(ops)
 
 
 def check_constraint(tiles: list[TilingTile], frame: ArtFrame, constraint) -> None:

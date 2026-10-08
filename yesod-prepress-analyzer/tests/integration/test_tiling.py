@@ -126,10 +126,58 @@ def test_panels_guide_and_package(tmp_path):
         ]
         config = json.loads(archive.read("configuracao.json"))
         assert config["panels"][1]["neighbours"] == {"left": 1, "right": 3}
+        manifest = archive.read("manifesto.csv").decode("utf-8-sig").splitlines()
+        assert manifest[0].startswith("Projeto;Revisão;Nº;Posição;Arquivo")
+        assert len(manifest) == 4
+        assert manifest[2].split(";")[:3] == ["Loja Centro", "R1", "02"]
+        assert manifest[2].endswith("esq. 01, dir. 03")
 
     with pikepdf.open(out.guide) as guide:
-        assert len(guide.pages) == 1
+        # Overview + one sheet per panel.
+        assert len(guide.pages) == 4
+        sheet = _page_text(guide.pages[2])
+        assert "Painel 02 de 3" in sheet
+        # Panel 2 prints 25 mm over panel 1 and panel 3 prints over it.
+        assert "este fica por cima \\(25 mm\\)" in sheet
+        assert "este fica por baixo \\(25 mm\\)" in sheet
     assert out.summary["panels"] == 3
+    assert out.summary["revision"] == 1
+
+
+def _page_text(page) -> str:
+    contents = page.obj.Contents
+    streams = contents if isinstance(contents, pikepdf.Array) else [contents]
+    return b"".join(item.read_bytes() for item in streams).decode("cp1252")
+
+
+def test_label_lines_from_the_screen_and_mark_types(tmp_path):
+    source = banner_pdf(tmp_path / "banner.pdf")
+    req = request(tmp_path)
+    req.tiles[0].label_top = "Loja · painel 01/3 · R2"
+    req.tiles[0].label_bottom = ""
+    req.marks.overlap_marks = False
+    req.marks.center_marks = True
+    req.config["revision"] = 2
+    out = build_package(req, source, tmp_path)
+    assert out.summary["revision"] == 2
+    with pikepdf.open(out.pdf) as pdf:
+        first = _page_text(pdf.pages[0])
+        assert "(Loja · painel 01/3 · R2) Tj".encode("cp1252").decode("cp1252") in first
+        assert "Vizinhos" not in first
+        # No dashed overlap ticks; the centre ticks are drawn thicker.
+        second = _page_text(pdf.pages[1])
+        assert "[2 1.5] 0 d" not in second
+        assert "0.6 w" in second
+
+
+def test_label_moves_past_the_ticks_or_is_cut_short():
+    from app.tiling.export import _fit
+
+    # Free stretches: 0..100 and 100..300 (tick at 100), 1.5 mm padding each side.
+    x, text = _fit("x" * 20, 10, 0, 300, [100.0])
+    assert x > 100 and text == "x" * 20
+    x, text = _fit("x" * 200, 10, 0, 300, [100.0])
+    assert x > 100 and text.endswith("…") and len(text) < 200
 
 
 def test_neighbours_and_file_names():

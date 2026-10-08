@@ -5,6 +5,7 @@ import {
   autoGrid,
   calculateProject,
   defaultMedia,
+  fillLabel,
   hasErrors,
   mergeTiles,
   migrateLegacy,
@@ -281,6 +282,25 @@ describe('mídia', () => {
     expect(g.media!.placements[0].across).toBe(1020)
     expect(g.issues.map((i) => i.code)).toContain('MARKS_OUTSIDE_MEDIA')
     expect(hasErrors(g.issues)).toBe(false)
+  })
+})
+
+describe('etiqueta, revisão e nomes', () => {
+  it('preenche as variáveis da etiqueta e não deixa separador sobrando', () => {
+    const p = project(3000, 1000, 3, 1, { overlap: edges({ left: 20 }) })
+    const g = calculateProject(p, { project: 'Loja' })
+    const numbers = new Map(g.tiles.map((t) => [t.id, t.number]))
+    const middle = g.tiles.find((t) => t.id === 'L1C2')!
+    const ctx = { project: 'Loja', total: 3, revision: 2, numberOf: (id: string) => numbers.get(id) }
+    expect(fillLabel('{projeto} · {zona} · painel {nn}/{total} · {pos} · {impresso} mm · {rev}', middle, ctx)).toBe(
+      'Loja · painel 02/3 · L1C2 · 1020 × 1000 mm · R2',
+    )
+    expect(fillLabel('Vizinhos: {vizinhos}', middle, ctx)).toBe('Vizinhos: esq. 01, dir. 03')
+  })
+
+  it('{rev} no nome do arquivo acompanha a revisão', () => {
+    const p = { ...project(2000, 1000, 2, 1), nameTemplate: '{projeto}_{nn}_{rev}' }
+    expect(calculateProject(p, { project: 'Van', revision: 3 }).tiles[0].name).toBe('Van_01_R3')
   })
 })
 

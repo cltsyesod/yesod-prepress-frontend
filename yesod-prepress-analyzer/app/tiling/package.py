@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 import zipfile
 from dataclasses import dataclass
@@ -37,6 +39,7 @@ def build_package(
     tiles = sorted(request.tiles, key=lambda t: t.number)
     sides = neighbours(tiles)
     total = len(tiles)
+    revision = request.revision_number
     files: list[dict] = []
     pdf_path, zip_path, guide_path = (
         workdir / "paineis.pdf",
@@ -67,6 +70,7 @@ def build_package(
             title=request.title,
             background=request.background,
             background_image=background,
+            revision=revision,
         )
         guide.save(guide_path)
 
@@ -86,24 +90,36 @@ def build_package(
                 archive.write(target, f"paineis/{unique}.pdf")
                 target.unlink()
                 printed = printed_area(tile, frame)
+                white = tile.white
                 files.append(
                     {
                         "number": tile.number,
+                        "id": tile.id,
                         "file": f"{unique}.pdf",
                         "region": tile.region,
                         "column": tile.column,
                         "row": tile.row,
                         "visibleMm": [round(tile.visible.w, 1), round(tile.visible.h, 1)],
                         "printedMm": [round(printed.w, 1), round(printed.h, 1)],
+                        "physicalMm": [
+                            round(printed.w + white.left + white.right, 1),
+                            round(printed.h + white.top + white.bottom, 1),
+                        ],
                         "rotation": tile.rotation,
                         "neighbours": sides.get(tile.number, {}),
                     }
                 )
             archive.write(guide_path, "GUIA_DE_INSTALACAO.pdf")
+            archive.writestr("manifesto.csv", manifest_csv(files, request.title, revision))
             archive.writestr(
                 "configuracao.json",
                 json.dumps(
-                    {"title": request.title, "panels": files, "config": request.config},
+                    {
+                        "title": request.title,
+                        "revision": revision,
+                        "panels": files,
+                        "config": request.config,
+                    },
                     ensure_ascii=False,
                     indent=2,
                 ),
@@ -113,5 +129,55 @@ def build_package(
         pdf=pdf_path,
         zip=zip_path,
         guide=guide_path,
-        summary={"panels": total, "files": files},
+        summary={"panels": total, "revision": revision, "files": files},
     )
+
+
+_ROTATION = {0: "em pé", 90: "deitado", 180: "em pé 180°", 270: "deitado 180°"}
+_SIDES = (("left", "esq."), ("right", "dir."), ("top", "acima"), ("bottom", "abaixo"))
+
+
+def manifest_csv(files: list[dict], title: str, revision: int) -> str:
+    """One line per panel file, ready to open in a spreadsheet (pt-BR: ';' and decimal comma)."""
+
+    def mm(value: float) -> str:
+        return f"{value:.1f}".replace(".", ",")
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, delimiter=";", lineterminator="\r\n")
+    writer.writerow(
+        [
+            "Projeto",
+            "Revisão",
+            "Nº",
+            "Posição",
+            "Arquivo",
+            "Região",
+            "Cobre L (mm)",
+            "Cobre A (mm)",
+            "Impresso L (mm)",
+            "Impresso A (mm)",
+            "Físico L (mm)",
+            "Físico A (mm)",
+            "Na mídia",
+            "Vizinhos",
+        ]
+    )
+    for f in files:
+        around = f["neighbours"]
+        near = ", ".join(f"{label} {around[side]:02d}" for side, label in _SIDES if side in around)
+        writer.writerow(
+            [
+                title,
+                f"R{revision}",
+                f"{f['number']:02d}",
+                f.get("id", ""),
+                f["file"],
+                f["region"],
+                *(mm(v) for v in (*f["visibleMm"], *f["printedMm"], *f["physicalMm"])),
+                _ROTATION.get(f["rotation"], ""),
+                near,
+            ]
+        )
+    # BOM: Excel opens UTF-8 with accents correctly.
+    return "﻿" + buffer.getvalue()

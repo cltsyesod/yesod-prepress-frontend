@@ -1,8 +1,12 @@
 import supabase from '@/lib/supabase/client'
 import { getErrorMessage } from '@/lib/supabase/errors'
 import {
+  DEFAULT_LABEL_BOTTOM,
+  DEFAULT_LABEL_TOP,
+  fillLabel,
   isLegacy,
   migrateLegacy,
+  type LabelContext,
   type GridRequest,
   type ProjectGeometry,
   type TilingProjectModel,
@@ -23,8 +27,16 @@ export interface TilingBackground {
 
 export interface TilingMarksConfig {
   marginMm: number
+  /** Marcas de corte nos cantos do painel físico. */
   cropMarks: boolean
+  /** Marcas tracejadas de início/fim da sobreposição (sem valor: segue as de corte). */
+  overlapMarks?: boolean
+  /** Marcas no meio de cada borda, para alinhar os painéis na instalação. */
+  centerMarks?: boolean
   label: boolean
+  /** Modelos das duas linhas da etiqueta (margem de cima e de baixo). */
+  labelTop?: string
+  labelBottom?: string
 }
 
 /** O que fica salvo: o projeto do motor + o que é só desta tela. */
@@ -34,11 +46,68 @@ export interface TilingConfig {
   project: TilingProjectModel
   request: GridRequest
   marks: TilingMarksConfig
+  /** Revisão dos arquivos: sobe a cada exportação de um projeto alterado. */
+  revision?: number
+  /** Impressão digital do conteúdo na última exportação (para saber se ficou desatualizada). */
+  exportedHash?: string
+}
+
+/** JSON com chaves em ordem e números arredondados: o mesmo conteúdo dá sempre o mesmo texto. */
+function stable(value: unknown): string {
+  if (typeof value === 'number') return String(Math.round(value * 100) / 100)
+  if (Array.isArray(value)) return `[${value.map(stable).join(',')}]`
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, v]) => v !== undefined)
+      .sort(([a], [b]) => a.localeCompare(b))
+    return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${stable(v)}`).join(',')}}`
+  }
+  return JSON.stringify(value ?? null)
+}
+
+/** Impressão digital (FNV-1a) do que define os arquivos: projeto, nome, página, marcas e imagem do guia. */
+export function contentHash(values: {
+  project: TilingProjectModel
+  name: string
+  page: number
+  marks: TilingMarksConfig
+  background: TilingBackground | null
+}): string {
+  const text = stable([values.project, values.name, values.page, values.marks, values.background])
+  let hash = 0x811c9dc5
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i)
+    hash = Math.imul(hash, 0x01000193)
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0')
+}
+
+/** Exportado e alterado depois: os arquivos baixados não correspondem mais ao projeto. */
+export function isOutdated(row: TilingProject): boolean {
+  if (row.status !== 'completed' || !row.config?.exportedHash || !row.config.project) return false
+  return (
+    contentHash({
+      project: row.config.project,
+      name: row.name,
+      page: row.config.page || 1,
+      marks: row.config.marks,
+      background: row.background,
+    }) !== row.config.exportedHash
+  )
 }
 
 export interface TilingResult {
   panels?: number
-  files?: { number: number; file: string; printedMm: [number, number] }[]
+  files?: {
+    number: number
+    id?: string
+    file: string
+    region?: string
+    printedMm: [number, number]
+    physicalMm?: [number, number]
+    rotation?: number
+  }[]
+  revision?: number
   sizes?: { pdf: number; guide: number; zip: number }
   warnings?: string[]
 }
@@ -94,11 +163,24 @@ export function readConfig(raw: unknown): TilingConfig | null {
   return null
 }
 
-/** O que o analisador recebe: só os painéis ligados, já calculados pelo motor. */
-export function exportPayload(geometry: ProjectGeometry) {
-  const tiles = geometry.tiles
-    .filter((t) => t.enabled)
+/** O que o analisador recebe: só os painéis ligados, já calculados pelo motor, com a etiqueta pronta. */
+export function exportPayload(
+  geometry: ProjectGeometry,
+  labels?: { marks: TilingMarksConfig; context: Omit<LabelContext, 'total' | 'numberOf'> },
+) {
+  const active = geometry.tiles.filter((t) => t.enabled)
+  const numbers = new Map(active.map((t) => [t.id, t.number]))
+  const context: LabelContext | null = labels
+    ? { ...labels.context, total: active.length, numberOf: (id) => numbers.get(id) }
+    : null
+  const tiles = active
     .map((t) => ({
+      ...(context && labels
+        ? {
+            labelTop: labels.marks.label ? fillLabel(labels.marks.labelTop ?? DEFAULT_LABEL_TOP, t, context) : '',
+            labelBottom: labels.marks.label ? fillLabel(labels.marks.labelBottom ?? DEFAULT_LABEL_BOTTOM, t, context) : '',
+          }
+        : {}),
       number: t.number,
       id: t.id,
       name: t.name,
@@ -142,9 +224,10 @@ export const tilingService = {
       config: TilingConfig
       geometry: ProjectGeometry
       background: TilingBackground | null
+      labels?: Parameters<typeof exportPayload>[1]
     },
   ): Promise<string> {
-    const { tiles, seams } = exportPayload(values.geometry)
+    const { tiles, seams } = exportPayload(values.geometry, values.labels)
     const row = {
       name: values.name,
       project_id: values.projectId,
