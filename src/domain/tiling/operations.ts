@@ -344,7 +344,8 @@ const patchTiles = (
 ): TilingProjectModel => {
   const tiles = { ...project.tiles }
   for (const key of keys) tiles[key] = patch(tiles[key] ?? {})
-  return { ...project, tiles }
+  // Ajuste manual: uma mudança global depois disso pede confirmação antes de recalcular.
+  return { ...custom(project), tiles }
 }
 
 /** Desligar mantém o painel na grade, mas ele não é impresso (ex.: vidro, área sem material). */
@@ -380,8 +381,11 @@ export function setGap(project: TilingProjectModel, seamId: string, gap: GapSett
   const gaps = { ...project.gaps }
   if (gap && gap.width > 0) gaps[seamId] = gap
   else delete gaps[seamId]
-  return { ...project, gaps }
+  return { ...custom(project), gaps }
 }
+
+/** A grade foi editada à mão: recalcular pelos parâmetros globais pede confirmação. */
+export const hasManualEdits = (project: TilingProjectModel) => project.grid.mode === 'custom'
 
 /** Mesma estrutura numa arte de outro tamanho (modelo reutilizável). */
 export function fitToPoster(project: TilingProjectModel, poster: Poster): TilingProjectModel {

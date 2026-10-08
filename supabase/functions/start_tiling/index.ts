@@ -104,11 +104,13 @@ Deno.serve(async (req: Request) => {
         sizeBytes: file.size_bytes || undefined,
       },
       page: Math.max(1, Number(config.page) || 1),
-      fileScale: config.fileScale || 1,
+      fileScale: config.project?.poster?.scale || config.fileScale || 1,
       tiles: tiling.tiles,
       seams: Array.isArray(tiling.seams) ? tiling.seams : [],
       background,
       marks: config.marks ?? {},
+      // O analisador confere de novo se cada painel cabe no material.
+      constraint: config.project?.constraint ?? {},
       config,
     })
     const timestamp = String(Math.floor(Date.now() / 1000))

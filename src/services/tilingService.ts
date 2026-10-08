@@ -1,6 +1,12 @@
 import supabase from '@/lib/supabase/client'
 import { getErrorMessage } from '@/lib/supabase/errors'
-import type { Seam, Tile, TilingLayout, TilingSettings } from '@/lib/tiling'
+import {
+  isLegacy,
+  migrateLegacy,
+  type GridRequest,
+  type ProjectGeometry,
+  type TilingProjectModel,
+} from '@/domain/tiling'
 
 const BUCKET = 'tiling'
 
@@ -21,18 +27,13 @@ export interface TilingMarksConfig {
   label: boolean
 }
 
+/** O que fica salvo: o projeto do motor + o que é só desta tela. */
 export interface TilingConfig {
+  version: 2
   page: number
-  fileScale: number
-  /** Tamanho do formato final no arquivo (mm, escala 1:1), para refazer a escala. */
-  trimMm: { w: number; h: number }
-  settings: TilingSettings
-  layout: TilingLayout
+  project: TilingProjectModel
+  request: GridRequest
   marks: TilingMarksConfig
-  /** Painéis em pé (largura do material = largura do painel) ou deitados. */
-  direction: 'standing' | 'lying'
-  materialWidthMm: number
-  materialLengthMm: number
 }
 
 export interface TilingResult {
@@ -58,6 +59,7 @@ export interface TilingProject {
   output: { pdf?: string; zip?: string; guide?: string }
   error_message: string
   updated: string
+  completed_at: string | null
 }
 
 export interface TilingTemplate {
@@ -70,17 +72,52 @@ export interface TilingTemplate {
 
 export const TILING_ACTIVE = ['queued', 'running']
 
-/** O que o analisador recebe de cada painel. */
-export function tilesForExport(tiles: Tile[]) {
-  return tiles.map((t) => ({
-    number: t.number,
-    name: t.name,
-    region: t.region,
-    column: t.column,
-    row: t.row,
-    visible: t.visible,
-    printed: t.printed,
+const DEFAULT_MARKS: TilingMarksConfig = { marginMm: 10, cropMarks: true, label: true }
+
+/** Configuração salva em qualquer formato -> formato atual (os antigos são convertidos). */
+export function readConfig(raw: unknown): TilingConfig | null {
+  if (!raw || typeof raw !== 'object') return null
+  const value = raw as Record<string, unknown>
+  if (value.version === 2 && value.project) return raw as TilingConfig
+  if (isLegacy(raw)) {
+    const project = migrateLegacy(raw as Parameters<typeof migrateLegacy>[0])
+    if (!project) return null
+    const settings = (value.settings ?? {}) as { mode?: 'equal' | 'max' }
+    return {
+      version: 2,
+      page: Number(value.page) || 1,
+      project,
+      request: { mode: settings.mode ?? 'equal' },
+      marks: { ...DEFAULT_MARKS, ...((value.marks as TilingMarksConfig) ?? {}) },
+    }
+  }
+  return null
+}
+
+/** O que o analisador recebe: só os painéis ligados, já calculados pelo motor. */
+export function exportPayload(geometry: ProjectGeometry) {
+  const tiles = geometry.tiles
+    .filter((t) => t.enabled)
+    .map((t) => ({
+      number: t.number,
+      id: t.id,
+      name: t.name,
+      zone: t.zone,
+      column: t.column,
+      row: t.row,
+      logical: t.logical,
+      print: t.print,
+      white: t.white,
+    }))
+  const seams = geometry.seams.map((s) => ({
+    orientation: s.orientation,
+    position: s.position,
+    start: s.start,
+    end: s.end,
+    kind: s.gap ? 'gap' : 'overlap',
+    widthMm: s.gap?.width ?? 0,
   }))
+  return { tiles, seams }
 }
 
 export const tilingService = {
@@ -94,12 +131,6 @@ export const tilingService = {
     return (data ?? []) as TilingProject[]
   },
 
-  async get(id: string): Promise<TilingProject | null> {
-    const { data, error } = await supabase.from('tiling_projects').select('*').eq('id', id).maybeSingle()
-    if (error) throw error
-    return data as TilingProject | null
-  },
-
   /** Cria ou atualiza o rascunho; devolve o id. */
   async save(
     id: string | null,
@@ -108,25 +139,18 @@ export const tilingService = {
       projectId: string
       fileId: string
       config: TilingConfig
-      tiles: Tile[]
-      seams: Seam[]
+      geometry: ProjectGeometry
       background: TilingBackground | null
     },
   ): Promise<string> {
+    const { tiles, seams } = exportPayload(values.geometry)
     const row = {
       name: values.name,
       project_id: values.projectId,
       file_id: values.fileId,
       config: values.config,
-      tiles: tilesForExport(values.tiles),
-      seams: values.seams.map((s) => ({
-        orientation: s.orientation,
-        position: s.position,
-        start: s.start,
-        end: s.end,
-        kind: s.kind,
-        widthMm: s.widthMm,
-      })),
+      tiles,
+      seams,
       background: values.background,
       updated: new Date().toISOString(),
     }
