@@ -13,7 +13,7 @@ export default function NotFoundPage() {
           title="Página não encontrada"
           description="A página que você está procurando não existe ou foi movida."
           actionLabel="Ir para a Visão Geral"
-          onAction={() => navigate('/dashboard')}
+          onAction={() => navigate('/trabalhos')}
         />
       </div>
     </div>

@@ -14,7 +14,7 @@
     "format": "oxfmt",
     "format:check": "oxfmt --check",
     "preview": "vite preview",
-    "test": "echo \"there are no tests for this project\" && exit 0",
+    "test": "vitest run",
     "test:watch": "echo \"there are no tests for this project\" && exit 0"
   },
   "dependencies": {
@@ -57,6 +57,8 @@
     "embla-carousel-react": "^8.6.0",
     "input-otp": "^1.4.2",
     "next-themes": "^0.4.6",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^5.7.284",
     "react": "^19.2.7",
     "react-day-picker": "^9.14.0",
     "react-dom": "^19.2.7",
@@ -85,6 +87,7 @@
     "postcss": "^8.5.15",
     "tailwindcss": "^3.4.19",
     "typescript": "^6.0.3",
-    "vite": "8.0.16"
+    "vite": "8.0.16",
+    "vitest": "^5.0.3"
   }
 }

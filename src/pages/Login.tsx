@@ -20,7 +20,7 @@ export default function LoginPage() {
     setLoading(true)
     try {
       await signIn(email, password)
-      navigate('/dashboard')
+      navigate('/trabalhos')
     } catch (err: any) {
       setError(err?.message || 'Erro ao fazer login. Verifique suas credenciais.')
     } finally {

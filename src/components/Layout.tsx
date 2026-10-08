@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Outlet } from 'react-router-dom'
+import { Outlet, useLocation } from 'react-router-dom'
 import { AppSidebar } from '@/components/AppSidebar'
 import { AppHeader } from '@/components/AppHeader'
 import { cn } from '@/lib/utils'
@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils'
 export default function Layout() {
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
+  const workspace = useLocation().pathname.startsWith('/paineis')
 
   return (
     <div className="min-h-screen bg-background flex text-foreground font-sans">
@@ -37,7 +38,8 @@ export default function Layout() {
         )}
       >
         <AppHeader onOpenMobileMenu={() => setMobileOpen(true)} />
-        <main className="flex-1 p-4 sm:p-6 max-w-[1200px] w-full mx-auto">
+        {/* Áreas de trabalho (painéis) usam a tela inteira, sem margem nem largura máxima. */}
+        <main className={cn('flex-1 w-full', workspace ? 'min-w-0' : 'p-4 sm:p-6 max-w-[1200px] mx-auto')}>
           <Outlet />
         </main>
       </div>

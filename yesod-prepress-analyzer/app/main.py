@@ -7,6 +7,8 @@ from fastapi.responses import JSONResponse
 
 from app.api.health import router as health_router
 from app.api.jobs import router as jobs_router
+from app.api.nesting import router as nesting_router
+from app.api.tiling import router as tiling_router
 from app.core.config import get_settings
 from app.core.exceptions import AnalyzerError
 from app.core.logging import configure_logging
@@ -29,6 +31,8 @@ app = FastAPI(
 )
 app.include_router(health_router)
 app.include_router(jobs_router, prefix=settings.api_prefix)
+app.include_router(nesting_router, prefix=settings.api_prefix)
+app.include_router(tiling_router, prefix=settings.api_prefix)
 
 
 @app.exception_handler(AnalyzerError)

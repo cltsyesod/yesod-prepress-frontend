@@ -1,0 +1,21 @@
+# Produção (VPS): HTTPS automático com Caddy na frente da API.
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+services:
+  caddy:
+    image: caddy:2.10-alpine
+    environment:
+      ANALYZER_DOMAIN: ${ANALYZER_DOMAIN:?defina ANALYZER_DOMAIN no .env}
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  caddy-data:
+  caddy-config:

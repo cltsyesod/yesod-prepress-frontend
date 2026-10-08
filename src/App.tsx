@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom'
 import { Toaster } from '@/components/ui/toaster'
 import { Toaster as Sonner } from '@/components/ui/sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
@@ -8,18 +8,19 @@ import { ProtectedRoute } from '@/components/ProtectedRoute'
 import Layout from '@/components/Layout'
 
 import LoginPage from '@/pages/Login'
-import DashboardPage from '@/pages/Dashboard'
-import ProjectsPage from '@/pages/Projects'
-import NewProjectPage from '@/pages/NewProject'
-import ProjectDetailPage from '@/pages/ProjectDetail'
-import ProjectAnalysisPage from '@/pages/ProjectAnalysis'
-import ProjectVersionsPage from '@/pages/ProjectVersions'
-import ProjectReportPage from '@/pages/ProjectReport'
-import ReportsPage from '@/pages/Reports'
+import QueuePage from '@/pages/Queue'
+import JobWorkspacePage from '@/pages/JobWorkspace'
+import NestingPage from '@/pages/Nesting'
+import TilingPage from '@/pages/Tiling'
 import ProductionProfilesPage from '@/pages/ProductionProfiles'
 import SettingsPage from '@/pages/Settings'
-import TeamPage from '@/pages/Team'
 import NotFoundPage from '@/pages/NotFound'
+
+// Links antigos (/projects/:id e subpáginas) continuam funcionando.
+function LegacyProjectRedirect() {
+  const { id } = useParams()
+  return <Navigate to={`/trabalhos/${id}`} replace />
+}
 
 const App = () => (
   <BrowserRouter>
@@ -33,18 +34,20 @@ const App = () => (
 
             <Route element={<ProtectedRoute />}>
               <Route element={<Layout />}>
-                <Route path="/" element={<Navigate to="/dashboard" replace />} />
-                <Route path="/dashboard" element={<DashboardPage />} />
-                <Route path="/projects" element={<ProjectsPage />} />
-                <Route path="/projects/new" element={<NewProjectPage />} />
-                <Route path="/projects/:id" element={<ProjectDetailPage />} />
-                <Route path="/projects/:id/analysis" element={<ProjectAnalysisPage />} />
-                <Route path="/projects/:id/versions" element={<ProjectVersionsPage />} />
-                <Route path="/projects/:id/report" element={<ProjectReportPage />} />
-                <Route path="/reports" element={<ReportsPage />} />
-                <Route path="/production-profiles" element={<ProductionProfilesPage />} />
-                <Route path="/settings" element={<SettingsPage />} />
-                <Route path="/team" element={<TeamPage />} />
+                <Route path="/" element={<Navigate to="/trabalhos" replace />} />
+                <Route path="/trabalhos" element={<QueuePage />} />
+                <Route path="/trabalhos/:id" element={<JobWorkspacePage />} />
+                <Route path="/montagem" element={<NestingPage />} />
+                <Route path="/paineis" element={<TilingPage />} />
+                <Route path="/perfis" element={<ProductionProfilesPage />} />
+                <Route path="/configuracoes" element={<SettingsPage />} />
+
+                <Route path="/dashboard" element={<Navigate to="/trabalhos" replace />} />
+                <Route path="/projects" element={<Navigate to="/trabalhos" replace />} />
+                <Route path="/projects/new" element={<Navigate to="/trabalhos" replace />} />
+                <Route path="/projects/:id/*" element={<LegacyProjectRedirect />} />
+                <Route path="/production-profiles" element={<Navigate to="/perfis" replace />} />
+                <Route path="/settings" element={<Navigate to="/configuracoes" replace />} />
               </Route>
             </Route>
 

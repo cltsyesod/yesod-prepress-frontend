@@ -32,7 +32,7 @@ export default function SettingsPage() {
     <div>
       <PageHeader
         title="Configurações"
-        breadcrumbs={[{ label: 'Home', href: '/dashboard' }, { label: 'Configurações' }]}
+        breadcrumbs={[{ label: 'Fila de trabalho', href: '/trabalhos' }, { label: 'Configurações' }]}
       />
 
       <div className="space-y-6">

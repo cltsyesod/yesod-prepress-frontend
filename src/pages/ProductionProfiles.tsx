@@ -128,7 +128,7 @@ export default function ProductionProfilesPage() {
     <div>
       <PageHeader
         title="Perfis de Produção"
-        breadcrumbs={[{ label: 'Home', href: '/dashboard' }, { label: 'Perfis de Produção' }]}
+        breadcrumbs={[{ label: 'Fila de trabalho', href: '/trabalhos' }, { label: 'Perfis de Produção' }]}
       />
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2 flex-1 max-w-md">

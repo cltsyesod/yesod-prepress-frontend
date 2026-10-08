@@ -10,6 +10,7 @@ from app.contracts.job_request import DownloadSource
 from app.core.config import Settings
 from app.core.exceptions import DownloadError
 from app.core.security import validate_outbound_url
+from app.fixes.image_pdf import sniff
 
 
 class FileDownloader:
@@ -30,7 +31,7 @@ class FileDownloader:
         digest = hashlib.sha256()
         size = 0
         timeout = httpx.Timeout(self.settings.download_timeout_seconds)
-        headers = {"User-Agent": self.settings.user_agent, "Accept": "application/pdf"}
+        headers = {"User-Agent": self.settings.user_agent, "Accept": source.expected_mime_type}
         if source.access_token:
             headers["Authorization"] = f"Bearer {source.access_token}"
         job_limit = min(
@@ -73,8 +74,12 @@ class FileDownloader:
         if size < 5:
             destination.unlink(missing_ok=True)
             raise DownloadError("downloaded file is empty")
-        with destination.open("rb") as stream:
-            if stream.read(5) != b"%PDF-":
-                destination.unlink(missing_ok=True)
-                raise DownloadError("downloaded file is not a PDF")
+        # The content must really be what the signed job says (PDF, TIFF, JPEG or PNG).
+        if sniff(destination) != source.expected_mime_type:
+            destination.unlink(missing_ok=True)
+            raise DownloadError(
+                "downloaded file is not a PDF"
+                if source.expected_mime_type == "application/pdf"
+                else "downloaded file does not match its image type"
+            )
         return size, actual_sha

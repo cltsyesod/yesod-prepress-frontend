@@ -105,7 +105,7 @@ def inspect_document(path: Path, profile: ProductionProfile, settings: Settings)
             qpdf_output=qpdf_output,
             pdfium_ok=pdfium_ok and pdfium_pages == len(pdf.pages),
             metadata=metadata,
-            pages=inspect_pages(pdf),
+            pages=inspect_pages(pdf, profile.cut_layer_names),
             images=inspect_images(pdf),
             fonts=inspect_fonts(pdf),
             colors=inspect_colors(pdf),
