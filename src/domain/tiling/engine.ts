@@ -15,6 +15,7 @@ import {
   type TilingProjectModel,
   zeroEdges,
 } from './model'
+import { layoutMedia, onMedia, orientationOf, rotationOf } from './media'
 import { validateProject } from './validate'
 
 export const cellKey = (c: number, r: number) => `${c},${r}`
@@ -88,7 +89,8 @@ export function fillName(
 
 export function calculateProject(
   project: TilingProjectModel,
-  context: { project?: string; client?: string } = {},
+  /** `marksMargin`: margem técnica das marcas em volta de cada painel (gasta mídia). */
+  context: { project?: string; client?: string; marksMargin?: number } = {},
 ): ProjectGeometry {
   const { xs, ys } = project.grid
   const columns = xs.length - 1
@@ -164,6 +166,7 @@ export function calculateProject(
     const row = rows - g.r1 + 1
     const column = g.c0 + 1
     const zone = s.zone ?? ''
+    const rotation = rotationOf(orientationOf(physical.w, physical.h, project.constraint), { row, column }, project.constraint.flipFlop)
     return {
       key: g.key,
       cells: g.cells,
@@ -181,6 +184,7 @@ export function calculateProject(
       white,
       bleed,
       neighbours,
+      rotation,
     }
   })
 
@@ -220,15 +224,15 @@ export function calculateProject(
     }
   }
 
-  const across = project.constraint.direction === 'standing' ? (t: TileGeometry) => t.physical.w : (t: TileGeometry) => t.physical.h
-  const widest = active.reduce((m, t) => Math.max(m, across(t)), 0)
+  const widest = active.reduce((m, t) => Math.max(m, onMedia(t).across), 0)
   const mediaUsage = project.constraint.printableWidth > 0 ? Math.min(1, widest / project.constraint.printableWidth) : 0
 
   return {
     tiles: [...tiles].sort((a, b) => (a.enabled === b.enabled ? a.number - b.number : a.enabled ? -1 : 1)),
     seams,
     overlaps,
-    issues: validateProject(project, tiles),
+    issues: validateProject(project, tiles, { marksMargin: context.marksMargin }),
     mediaUsage,
+    media: layoutMedia(active, project.constraint, context.marksMargin ?? 0),
   }
 }

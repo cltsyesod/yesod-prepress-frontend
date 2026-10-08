@@ -166,6 +166,25 @@ def test_panels_that_do_not_fit_the_material_are_refused(tmp_path):
         build_package(req, source, tmp_path)
 
 
+def test_lying_and_flip_flop_panels_are_rotated_and_checked_lying(tmp_path):
+    source = banner_pdf(tmp_path / "banner.pdf")
+    req = request(tmp_path)
+    req.constraint.direction = "auto"
+    # 1510 mm tall panels only fit a 1600 × 1100 mm sheet lying down.
+    req.constraint.printable_width_mm = 1600
+    req.constraint.printable_length_mm = 1100
+    for tile, rotation in zip(req.tiles, (90, 270, 90), strict=True):
+        tile.rotation = rotation
+    out = build_package(req, source, tmp_path)
+    with pikepdf.open(out.pdf) as pdf:
+        assert [int(page.obj.Rotate) for page in pdf.pages] == [90, 270, 90]
+    assert [f["rotation"] for f in out.summary["files"]] == [90, 270, 90]
+
+    req.tiles[1].rotation = 0
+    with pytest.raises(Exception, match="não cabem no material"):
+        build_package(req, source, tmp_path)
+
+
 def test_panel_outside_the_artwork_is_refused(tmp_path):
     source = banner_pdf(tmp_path / "banner.pdf")
     req = request(tmp_path)

@@ -62,13 +62,40 @@ export interface TileSettings {
   number?: number
 }
 
+/** A mídia na impressora: de onde sai a largura imprimível. */
+export interface MediaSettings {
+  /** Largura nominal da mídia (rolo ou chapa). */
+  width: number
+  /** Margens que a impressora não imprime, em cada lado da largura. */
+  marginLeft: number
+  marginRight: number
+  /** Faixa reservada para a barra de cor/controle, ao lado dos painéis. */
+  colorBar: number
+  /** Espaço entre painéis na mídia (para o corte). */
+  spacing: number
+  /** Preço da mídia por m² (0 = sem custo). */
+  pricePerM2: number
+}
+
+/** Como o painel entra na mídia: em pé, deitado (girado 90°) ou o que couber melhor. */
+export type Direction = 'standing' | 'lying' | 'auto'
+
 export interface PrintConstraint {
-  /** Largura imprimível do material (não a largura nominal da mídia). */
+  /**
+   * Largura imprimível do material. Com `media`, é calculada (largura da mídia menos as
+   * margens e a barra de cor); sem ela, é digitada direto.
+   */
   printableWidth: number
   /** Comprimento máximo (0 = rolo sem limite). */
   printableLength: number
   /** "standing": largura do painel na largura do material; "lying": altura do painel nela. */
-  direction: 'standing' | 'lying'
+  direction: Direction
+  media?: MediaSettings
+  /**
+   * Flip-flop: painéis alternados saem girados 180°, para que as duas bordas de cada emenda
+   * sejam impressas do mesmo lado da cabeça (cor igual na emenda).
+   */
+  flipFlop?: boolean
 }
 
 export interface TilingRules {
@@ -120,6 +147,36 @@ export interface TileGeometry {
   white: Edges
   bleed: Edges
   neighbours: Partial<Record<Edge, string>>
+  /** Giro do painel na mídia (graus, sentido horário): 90 = deitado, +180 no flip-flop. */
+  rotation: 0 | 90 | 180 | 270
+}
+
+/** Onde cada painel cai na mídia: x na largura (a partir da margem), y no comprimento. */
+export interface MediaPlacement {
+  tile: string
+  x: number
+  y: number
+  /** Medidas na mídia (já giradas), com a margem técnica das marcas. */
+  across: number
+  along: number
+  rotation: 0 | 90 | 180 | 270
+}
+
+export interface MediaLayout {
+  /** Largura da mídia (nominal; sem mídia informada, a largura imprimível). */
+  width: number
+  printableWidth: number
+  /** Comprimento de mídia consumido. */
+  length: number
+  placements: MediaPlacement[]
+  /** Área dos painéis físicos, em m². */
+  panelArea: number
+  /** Área de mídia consumida (largura × comprimento), em m². */
+  mediaArea: number
+  /** Parte da mídia consumida que não vira painel (0–1). */
+  waste: number
+  /** Custo da mídia consumida (null sem preço informado). */
+  cost: number | null
 }
 
 export interface SeamGeometry {
@@ -148,4 +205,6 @@ export interface ProjectGeometry {
   issues: Issue[]
   /** Aproveitamento da largura do material pelo painel mais largo (0–1). */
   mediaUsage: number
+  /** Painéis distribuídos na mídia (null sem largura imprimível). */
+  media: MediaLayout | null
 }

@@ -2,6 +2,7 @@
  * Validação de produção: nenhum arquivo sai de um projeto com erro. Avisos não bloqueiam.
  */
 
+import { onMedia } from './media'
 import { EDGES, type Issue, type TileGeometry, type TilingProjectModel } from './model'
 
 /** Maior página que um PDF pode descrever (200 polegadas). */
@@ -10,8 +11,13 @@ const EPS = 0.01
 
 const mm = (v: number) => `${Math.round(v * 10) / 10} mm`
 
-export function validateProject(project: TilingProjectModel, tiles: TileGeometry[]): Issue[] {
+export function validateProject(
+  project: TilingProjectModel,
+  tiles: TileGeometry[],
+  options: { marksMargin?: number } = {},
+): Issue[] {
   const issues: Issue[] = []
+  const marksMargin = options.marksMargin ?? 0
   const { xs, ys } = project.grid
   const { poster, constraint, rules } = project
 
@@ -59,15 +65,25 @@ export function validateProject(project: TilingProjectModel, tiles: TileGeometry
         })
       }
     }
-    // Cabe no material?
-    const across = constraint.direction === 'standing' ? t.physical.w : t.physical.h
-    const along = constraint.direction === 'standing' ? t.physical.h : t.physical.w
+    // Cabe no material, na posição em que vai (em pé ou deitado)?
+    const { across, along } = onMedia(t)
     if (constraint.printableWidth > 0 && across > constraint.printableWidth + EPS) {
       issues.push({
         severity: 'error',
         code: 'TILE_EXCEEDS_WIDTH',
         tile: t.id,
         message: `${label} (${mm(across)}) passa da largura imprimível de ${mm(constraint.printableWidth)}.`,
+      })
+    } else if (
+      constraint.printableWidth > 0 &&
+      marksMargin > 0 &&
+      across + 2 * marksMargin > constraint.printableWidth + EPS
+    ) {
+      issues.push({
+        severity: 'warning',
+        code: 'MARKS_OUTSIDE_MEDIA',
+        tile: t.id,
+        message: `${label}: o painel cabe, mas as marcas (margem de ${mm(marksMargin)}) passam da largura imprimível.`,
       })
     }
     if (constraint.printableLength > 0 && along > constraint.printableLength + EPS) {
@@ -83,7 +99,13 @@ export function validateProject(project: TilingProjectModel, tiles: TileGeometry
     }
   }
 
-  if (!(constraint.printableWidth > 0)) {
+  if (constraint.media && constraint.media.width > 0 && !(constraint.printableWidth > 0)) {
+    issues.push({
+      severity: 'error',
+      code: 'MEDIA_NO_PRINTABLE_AREA',
+      message: 'As margens e a barra de cor ocupam toda a largura da mídia.',
+    })
+  } else if (!(constraint.printableWidth > 0)) {
     issues.push({
       severity: 'warning',
       code: 'NO_MEDIA',

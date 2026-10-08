@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   AlertTriangle,
   CircleCheck,
@@ -7,7 +7,7 @@ import {
   Eye,
   EyeOff,
   FileArchive,
-  Grid3x3,
+  FolderOpen,
   Loader2,
   Redo2,
   RotateCcw,
@@ -18,6 +18,7 @@ import {
   Trash2,
   Undo2,
   Upload,
+  XCircle,
 } from 'lucide-react'
 import {
   AlertDialog,
@@ -31,21 +32,24 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Progress } from '@/components/ui/progress'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Slider } from '@/components/ui/slider'
 import { EdgesInput } from '@/components/tiling/EdgesInput'
 import { GridSizes } from '@/components/tiling/GridSizes'
+import { IssuesList } from '@/components/tiling/IssuesList'
+import { MediaPreview } from '@/components/tiling/MediaPreview'
+import { PanelTable } from '@/components/tiling/PanelTable'
 import { SeamInspector } from '@/components/tiling/SeamInspector'
 import { TileInspector } from '@/components/tiling/TileInspector'
 import { TilingCanvas } from '@/components/tiling/TilingCanvas'
+import { Field, NumberField, Readout, Section, Segmented, TextField, fmt, fmtM, fmtMoney, fmtSize } from '@/components/tiling/fields'
 import {
   addLine,
   autoGrid,
   calculateProject,
+  defaultMedia,
   edgesForSide,
   fitToPoster,
   hasErrors,
@@ -53,10 +57,14 @@ import {
   mergeTiles,
   moveLine,
   newProject,
+  setConstraint,
+  setMedia,
   splitTile,
   zeroEdges,
+  type Direction,
   type Edges,
   type GridRequest,
+  type MediaSettings,
   type Poster,
   type PrintConstraint,
   type TilingProjectModel,
@@ -93,13 +101,11 @@ function parseScale(value: unknown): number {
   return Number.isFinite(n) && n > 0 ? n : 1
 }
 
-const numberOr = (value: string, fallback: number) => {
-  const n = Number(value.replace(',', '.'))
-  return value.trim() === '' || !Number.isFinite(n) ? fallback : n
-}
-
 type Unit = 'mm' | 'cm' | 'm'
 const UNIT_FACTOR: Record<Unit, number> = { mm: 1, cm: 10, m: 1000 }
+
+type LeftTab = 'arte' | 'midia' | 'grade' | 'bordas' | 'saida'
+type BottomTab = 'paineis' | 'problemas' | 'midia' | 'exportacao'
 
 interface Prefs {
   constraint: PrintConstraint
@@ -111,7 +117,7 @@ interface Prefs {
 
 // Valores iniciais da tela; o operador ajusta a cada trabalho e o último uso é lembrado.
 const DEFAULT_PREFS: Prefs = {
-  constraint: { printableWidth: 0, printableLength: 0, direction: 'standing' },
+  constraint: { printableWidth: 0, printableLength: 0, direction: 'standing', media: defaultMedia(0) },
   rules: { overlap: edgesForSide('next', 20), white: zeroEdges(), minimumTile: 50 },
   nameTemplate: '{projeto}_L{lin}C{col}',
   request: { mode: 'equal' },
@@ -121,7 +127,13 @@ const DEFAULT_PREFS: Prefs = {
 function loadPrefs(): Prefs {
   try {
     const saved = JSON.parse(localStorage.getItem(PREFS_KEY) || 'null')
-    return saved ? { ...DEFAULT_PREFS, ...saved, request: { mode: saved.request?.mode ?? 'equal' } } : DEFAULT_PREFS
+    if (!saved) return DEFAULT_PREFS
+    return {
+      ...DEFAULT_PREFS,
+      ...saved,
+      constraint: { ...DEFAULT_PREFS.constraint, ...saved.constraint },
+      request: { mode: saved.request?.mode ?? 'equal' },
+    }
   } catch {
     return DEFAULT_PREFS
   }
@@ -147,6 +159,26 @@ function posterOf(art: PdfPageImage, scale: number): Poster {
   }
 }
 
+const STATUS_LABEL: Record<TilingProject['status'], string> = {
+  draft: 'Rascunho',
+  queued: 'Na fila',
+  running: 'Exportando',
+  completed: 'Exportado',
+  failed: 'Falhou',
+}
+
+const NAME_TOKENS: [string, string][] = [
+  ['{projeto}', 'Nome do projeto'],
+  ['{cliente}', 'Cliente'],
+  ['{lin}', 'Linha (1 = de cima)'],
+  ['{col}', 'Coluna (1 = esquerda)'],
+  ['{nn}', 'Número com 2 dígitos'],
+  ['{zona}', 'Região do painel'],
+]
+
+const time = (date: string | Date) =>
+  new Date(date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+
 export default function TilingPage() {
   const { user } = useAuth()
   const profiles = profileService.getProfilesSync()
@@ -168,7 +200,9 @@ export default function TilingPage() {
   const [dragStart, setDragStart] = useState<TilingProjectModel | null>(null)
   const [selected, setSelected] = useState<string[]>([])
   const [selectedSeam, setSelectedSeam] = useState<string | null>(null)
-  const [confirm, setConfirm] = useState<{ message: string; run: () => void } | null>(null)
+  const [confirm, setConfirm] = useState<{ title: string; message: string; action: string; run: () => void } | null>(null)
+  const [leftTab, setLeftTab] = useState<LeftTab>('arte')
+  const [bottomTab, setBottomTab] = useState<BottomTab>('paineis')
 
   const [background, setBackground] = useState<TilingBackground | null>(null)
   const [backgroundUrl, setBackgroundUrl] = useState('')
@@ -180,6 +214,8 @@ export default function TilingPage() {
   const [templateName, setTemplateName] = useState('')
   const [busy, setBusy] = useState(false)
   const [downloads, setDownloads] = useState<{ pdf?: string; zip?: string; guide?: string }>({})
+  const [savedSignature, setSavedSignature] = useState<string | null>(null)
+  const cleanOnLoad = useRef(false)
 
   const job = jobs.find((j) => j.id === jobId) ?? null
   const current = saved.find((p) => p.id === tilingId) ?? null
@@ -220,26 +256,46 @@ export default function TilingPage() {
   }
 
   /** Recalcula a grade pelos parâmetros; se houver ajustes manuais, pergunta antes. */
-  const regrid = (base: TilingProjectModel, request: GridRequest, ask: boolean) => {
+  const regrid = (base: TilingProjectModel, request: GridRequest) => {
     const run = () => {
       commit(autoGrid(base, request))
       setSelected([])
       setSelectedSeam(null)
     }
-    if (ask && hasManualEdits(base)) {
+    if (hasManualEdits(base)) {
       setConfirm({
-        message: 'Essa alteração recalculará a grade e poderá remover ajustes manuais feitos nos painéis e nas linhas.',
+        title: 'Recalcular a grade?',
+        message: 'A grade será refeita pelos parâmetros e os ajustes manuais (linhas movidas, painéis juntados, frestas, ajustes por painel) serão perdidos.',
+        action: 'Recalcular',
         run,
       })
     } else run()
   }
 
   /** Mudança global (material, regras): na grade automática ela é recalculada na hora. */
-  const changeGlobal = (mutate: (p: TilingProjectModel) => TilingProjectModel) => {
+  const changeGlobal = (next: TilingProjectModel) => {
     if (!project) return
-    const next = mutate(project)
     if (hasManualEdits(project)) commit(next)
     else commit(autoGrid(next, prefs.request))
+  }
+
+  const updateConstraint = (patch: Partial<PrintConstraint>) => {
+    if (!project) return
+    const next = setConstraint(project, patch)
+    setPrefs((p) => ({ ...p, constraint: next.constraint }))
+    changeGlobal(next)
+  }
+  const updateMedia = (patch: Partial<MediaSettings>) => {
+    if (!project) return
+    const media = { ...(project.constraint.media ?? defaultMedia(project.constraint.printableWidth)), ...patch }
+    const next = setMedia(project, media)
+    setPrefs((p) => ({ ...p, constraint: next.constraint }))
+    changeGlobal(next)
+  }
+  const updateRules = (patch: Partial<TilingRules>) => {
+    if (!project) return
+    setPrefs((p) => ({ ...p, rules: { ...p.rules, ...patch } }))
+    changeGlobal({ ...project, rules: { ...project.rules, ...patch } })
   }
 
   // ---- Arte ---------------------------------------------------------------------------
@@ -259,6 +315,7 @@ export default function TilingPage() {
         setTilingId(null)
         setPending(null)
         setBackground(null)
+        setSavedSignature(null)
       }
     } catch (err) {
       toast({ title: 'Não foi possível abrir a arte', description: getErrorMessage(err), variant: 'destructive' })
@@ -301,16 +358,34 @@ export default function TilingPage() {
 
   // ---- Geometria ----------------------------------------------------------------------
   const geometry = useMemo(
-    () => (project ? calculateProject(project, { project: name || job?.name, client: job?.clientName }) : null),
-    [project, name, job],
+    () =>
+      project
+        ? calculateProject(project, { project: name || job?.name, client: job?.clientName, marksMargin: prefs.marks.marginMm })
+        : null,
+    [project, name, job, prefs.marks.marginMm],
   )
-  const errors = useMemo(() => geometry?.issues.filter((i) => i.severity === 'error') ?? [], [geometry])
-  const warnings = geometry?.issues.filter((i) => i.severity === 'warning') ?? []
+  const issues = useMemo(() => geometry?.issues ?? [], [geometry])
+  const errors = useMemo(() => issues.filter((i) => i.severity === 'error'), [issues])
+  const warnings = issues.filter((i) => i.severity === 'warning')
   const flagged = useMemo(() => new Set(errors.map((e) => e.tile).filter(Boolean) as string[]), [errors])
   const selectedTiles = geometry?.tiles.filter((t) => selected.includes(t.key)) ?? []
   const single = selectedTiles.length === 1 ? selectedTiles[0] : null
   const seam = geometry?.seams.find((s) => s.id === selectedSeam) ?? null
   const active = geometry?.tiles.filter((t) => t.enabled) ?? []
+  const numbers = useMemo(() => Object.fromEntries((geometry?.tiles ?? []).map((t) => [t.id, t.number])), [geometry])
+
+  // ---- Salvo / alterado ---------------------------------------------------------------
+  const signature = useMemo(
+    () => (project ? JSON.stringify([project, name, background, prefs.marks, prefs.request, pageNumber]) : ''),
+    [project, name, background, prefs.marks, prefs.request, pageNumber],
+  )
+  useEffect(() => {
+    if (cleanOnLoad.current && project) {
+      cleanOnLoad.current = false
+      setSavedSignature(signature)
+    }
+  }, [signature]) // eslint-disable-line react-hooks/exhaustive-deps
+  const dirty = !!project && signature !== savedSignature
 
   // ---- Imagem de referência -----------------------------------------------------------
   useEffect(() => {
@@ -353,14 +428,24 @@ export default function TilingPage() {
       background,
     })
     setTilingId(id)
+    setSavedSignature(signature)
     loadSaved()
     return id
   }
 
+  const saveNow = () =>
+    save()
+      .then((id) => id && toast({ title: 'Painelamento salvo' }))
+      .catch((err) => toast({ title: 'Não foi possível salvar', description: getErrorMessage(err), variant: 'destructive' }))
+
   const exportPanels = async () => {
-    if (!geometry || hasErrors(geometry.issues)) return
+    if (!geometry || hasErrors(geometry.issues)) {
+      setBottomTab('problemas')
+      return
+    }
     setBusy(true)
     setDownloads({})
+    setBottomTab('exportacao')
     try {
       const id = await save()
       if (id) await tilingService.export(id)
@@ -391,12 +476,30 @@ export default function TilingPage() {
       return
     }
     setPending(cfg)
+    cleanOnLoad.current = true
     await chooseJob(row.project_id ?? '', { fileId: row.file_id ?? '', scale: cfg.project.poster.scale })
     setTilingId(row.id)
     setName(row.name)
     setPageNumber(cfg.page || 1)
     setBackground(row.background)
+    setLeftTab('grade')
+    if (row.status !== 'draft') setBottomTab('exportacao')
   }
+
+  const removeSaved = (row: TilingProject) =>
+    setConfirm({
+      title: 'Apagar o painelamento?',
+      message: `"${row.name || 'Sem nome'}" e os arquivos exportados deixam de aparecer aqui. A arte do trabalho não é alterada.`,
+      action: 'Apagar',
+      run: () =>
+        tilingService
+          .remove(row.id)
+          .then(() => {
+            if (row.id === tilingId) setTilingId(null)
+            loadSaved()
+          })
+          .catch((err) => toast({ title: 'Não foi possível apagar', description: getErrorMessage(err), variant: 'destructive' })),
+    })
 
   const applyTemplate = (template: TilingTemplate) => {
     const cfg = readConfig(template.config)
@@ -407,8 +510,9 @@ export default function TilingPage() {
       if (template.background) setBackground(template.background)
       toast({ title: `Modelo "${template.name}" aplicado` })
     }
-    if (hasManualEdits(project)) setConfirm({ message: 'O modelo substitui a grade e os ajustes atuais.', run })
-    else run()
+    if (hasManualEdits(project)) {
+      setConfirm({ title: 'Aplicar o modelo?', message: 'O modelo substitui a grade e os ajustes atuais.', action: 'Aplicar', run })
+    } else run()
   }
 
   const saveTemplate = async () => {
@@ -425,463 +529,1019 @@ export default function TilingPage() {
   }
 
   // ---- Seleção ------------------------------------------------------------------------
+  const selectTile = (key: string, additive: boolean) => {
+    setSelectedSeam(null)
+    setSelected((s) => (additive ? (s.includes(key) ? s.filter((k) => k !== key) : [...s, key]) : [key]))
+  }
   const selectWhere = (match: (t: { row: number; column: number }) => boolean) => {
     if (!geometry) return
     setSelectedSeam(null)
     setSelected(geometry.tiles.filter(match).map((t) => t.key))
   }
+  const selectById = (id: string) => {
+    const t = geometry?.tiles.find((x) => x.id === id)
+    if (t) selectTile(t.key, false)
+  }
+
+  // Atalhos: Ctrl+Z / Ctrl+Y (ou Ctrl+Shift+Z), Ctrl+S, Esc limpa a seleção.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const typing = e.target instanceof HTMLElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)
+      const mod = e.ctrlKey || e.metaKey
+      if (mod && e.key.toLowerCase() === 's') {
+        e.preventDefault()
+        if (project) saveNow()
+        return
+      }
+      if (typing) return
+      if (mod && e.key.toLowerCase() === 'z') {
+        e.preventDefault()
+        if (e.shiftKey) redo()
+        else undo()
+      } else if (mod && e.key.toLowerCase() === 'y') {
+        e.preventDefault()
+        redo()
+      } else if (e.key === 'Escape') {
+        setSelected([])
+        setSelectedSeam(null)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
 
   const u = UNIT_FACTOR[unit]
-  const show = (v: number) => String(Math.round((v / u) * 100) / 100)
   const running = current ? TILING_ACTIVE.includes(current.status) : false
   const rules = project?.rules
   const constraint = project?.constraint
+  const media = constraint ? (constraint.media ?? defaultMedia(constraint.printableWidth)) : null
+  const columns = project ? project.grid.xs.length - 1 : 0
+  const rows = project ? project.grid.ys.length - 1 : 0
+  const disabledCount = (geometry?.tiles.length ?? 0) - active.length
+
+  const tabs: { id: LeftTab; label: string }[] = [
+    { id: 'arte', label: 'Arte' },
+    { id: 'midia', label: 'Mídia' },
+    { id: 'grade', label: 'Grade' },
+    { id: 'bordas', label: 'Bordas' },
+    { id: 'saida', label: 'Saída' },
+  ]
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold text-foreground">Painéis</h1>
-          <p className="text-sm text-muted-foreground">
-            Divida uma arte grande (veículo, fachada, empena) em painéis imprimíveis, com sobreposição, área de
-            colagem, frestas e guia de instalação.
-          </p>
-        </div>
-        {saved.length > 0 && (
-          <Select value={tilingId ?? ''} onValueChange={(id) => { const row = saved.find((s) => s.id === id); if (row) openSaved(row) }}>
-            <SelectTrigger className="w-72">
-              <SelectValue placeholder="Abrir painelamento salvo" />
-            </SelectTrigger>
-            <SelectContent>
-              {saved.map((row) => (
-                <SelectItem key={row.id} value={row.id}>
-                  {row.name || 'Sem nome'} · {row.status === 'completed' ? 'exportado' : row.status === 'draft' ? 'rascunho' : row.status}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
-      </div>
+    <div className="flex h-[calc(100vh-56px)] min-h-[560px] flex-col bg-background text-sm">
+      {/* ---- Barra de ferramentas ---- */}
+      <div className="flex min-h-11 flex-wrap items-center gap-1 border-b border-border bg-card px-2 py-1">
+        <span className="px-1 text-sm font-semibold text-foreground">Painéis</span>
+        <Divider />
+        <Input
+          className="h-7 w-52 text-xs"
+          value={name}
+          placeholder="Nome do projeto"
+          disabled={!project}
+          onChange={(e) => setName(e.target.value)}
+        />
+        <Divider />
+        <ToolButton title="Desfazer (Ctrl+Z)" disabled={!history.past.length} onClick={undo}>
+          <Undo2 className="h-4 w-4" />
+        </ToolButton>
+        <ToolButton title="Refazer (Ctrl+Y)" disabled={!history.future.length} onClick={redo}>
+          <Redo2 className="h-4 w-4" />
+        </ToolButton>
+        <Divider />
+        <ToolButton
+          title="Juntar os painéis selecionados (precisam formar um retângulo)"
+          disabled={!project || selectedTiles.length < 2}
+          onClick={() => {
+            if (!project) return
+            const next = mergeTiles(project, selected)
+            if (!next) {
+              toast({ title: 'Os painéis escolhidos precisam formar um retângulo' })
+              return
+            }
+            commit(next)
+            setSelected([])
+          }}
+          label="Juntar"
+        >
+          <Combine className="h-4 w-4" />
+        </ToolButton>
+        <ToolButton title="Separar o painel juntado" disabled={!project || !single || single.cells.length < 2} onClick={() => project && single && commit(splitTile(project, single.key))} label="Separar">
+          <Scissors className="h-4 w-4" />
+        </ToolButton>
+        <ToolButton
+          title="Nova linha vertical no meio do painel selecionado"
+          disabled={!project || !single}
+          onClick={() => project && single && commit(addLine(project, 'vertical', Math.round(single.logical.x + single.logical.w / 2)))}
+        >
+          <SplitSquareHorizontal className="h-4 w-4" />
+        </ToolButton>
+        <ToolButton
+          title="Nova linha horizontal no meio do painel selecionado"
+          disabled={!project || !single}
+          onClick={() => project && single && commit(addLine(project, 'horizontal', Math.round(single.logical.y + single.logical.h / 2)))}
+        >
+          <SplitSquareVertical className="h-4 w-4" />
+        </ToolButton>
+        <Divider />
+        <span className="px-1 text-xs text-muted-foreground">Selecionar</span>
+        <ToolButton disabled={!project} onClick={() => selectWhere(() => true)} label="Todos" />
+        <ToolButton disabled={!single} onClick={() => single && selectWhere((t) => t.row === single.row)} label="Linha" />
+        <ToolButton disabled={!single} onClick={() => single && selectWhere((t) => t.column === single.column)} label="Coluna" />
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,370px)_minmax(0,1fr)]">
-        <section className="space-y-5 rounded-lg border border-border bg-card p-4">
-          <div className="space-y-2">
-            <Label>1. Arte</Label>
-            <Select value={jobId} onValueChange={(id) => chooseJob(id)}>
-              <SelectTrigger>
-                <SelectValue placeholder="Escolha o trabalho" />
+        <div className="ml-auto flex items-center gap-1.5">
+          {project && (
+            <span className={cn('px-2 text-xs', dirty ? 'text-amber-700 dark:text-amber-400' : 'text-muted-foreground')}>
+              {dirty ? 'Alterações não salvas' : current ? `Salvo ${time(current.updated)}` : ''}
+            </span>
+          )}
+          {saved.length > 0 && (
+            <Select
+              value=""
+              onValueChange={(id) => {
+                const row = saved.find((s) => s.id === id)
+                if (row) openSaved(row)
+              }}
+            >
+              <SelectTrigger className="h-7 w-32 text-xs">
+                <FolderOpen className="h-3.5 w-3.5" />
+                <SelectValue placeholder="Abrir" />
               </SelectTrigger>
-              <SelectContent>
-                {jobs.map((j) => (
-                  <SelectItem key={j.id} value={j.id}>
-                    {j.name}
-                    {j.clientName ? ` · ${j.clientName}` : ''}
+              <SelectContent align="end">
+                {saved.map((row) => (
+                  <SelectItem key={row.id} value={row.id}>
+                    {row.name || 'Sem nome'} · {STATUS_LABEL[row.status]}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
-            {art && art.pageCount > 1 && (
-              <div className="flex items-center gap-2 text-sm">
-                <span className="text-muted-foreground">Página</span>
-                <Input className="h-8 w-20" inputMode="numeric" value={pageNumber} onChange={(e) => { setPageNumber(Math.min(art.pageCount, Math.max(1, Math.round(numberOr(e.target.value, 1))))); setProjectSource('') }} />
-                <span className="text-muted-foreground">de {art.pageCount}</span>
-              </div>
-            )}
-            {artError && <p className="text-sm text-destructive">Não foi possível abrir o PDF ({artError}).</p>}
-          </div>
+          )}
+          <Button size="sm" variant="outline" className="h-7 text-xs" disabled={busy || !project} onClick={saveNow} title="Salvar (Ctrl+S)">
+            <Save className="h-3.5 w-3.5" />
+            Salvar
+          </Button>
+          <Button
+            size="sm"
+            className="h-7 text-xs"
+            disabled={busy || running || !project || !active.length}
+            title={errors.length ? 'Há erros: veja a aba Problemas' : 'Gera o PDF dos painéis, um arquivo por painel e o guia'}
+            onClick={exportPanels}
+          >
+            {busy || running ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileArchive className="h-3.5 w-3.5" />}
+            Exportar
+          </Button>
+        </div>
+      </div>
 
-          {project && rules && constraint && (
-            <>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="col-span-2 flex items-center justify-between">
-                  <Label>Tamanho final</Label>
-                  <Select value={unit} onValueChange={(v) => setUnit(v as Unit)}>
-                    <SelectTrigger className="h-8 w-20">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="mm">mm</SelectItem>
-                      <SelectItem value="cm">cm</SelectItem>
-                      <SelectItem value="m">m</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-muted-foreground">Largura ({unit})</Label>
-                  <Input inputMode="decimal" value={show(project.poster.width)} onChange={(e) => { const w = numberOr(e.target.value, 0) * u; if (w > 0 && art) changeScale((w / (art.trim[2] - art.trim[0])) * MM) }} />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-muted-foreground">Altura ({unit})</Label>
-                  <Input inputMode="decimal" value={show(project.poster.height)} onChange={(e) => { const h = numberOr(e.target.value, 0) * u; if (h > 0 && art) changeScale((h / (art.trim[3] - art.trim[1])) * MM) }} />
-                </div>
-                <p className="col-span-2 text-xs text-muted-foreground">
-                  Escala do arquivo 1:{Math.round(scale * 100) / 100} ({Math.round(scale * 10000) / 100}%), proporção mantida: a
-                  arte nunca é distorcida nem reamostrada.
-                </p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <Label className="col-span-2">2. Material e grade</Label>
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-muted-foreground">Largura imprimível ({unit})</Label>
-                  <Input inputMode="decimal" value={constraint.printableWidth ? show(constraint.printableWidth) : ''} onChange={(e) => { const v = numberOr(e.target.value, 0) * u; setPrefs((p) => ({ ...p, constraint: { ...p.constraint, printableWidth: v } })); changeGlobal((p) => ({ ...p, constraint: { ...p.constraint, printableWidth: v } })) }} />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-muted-foreground">Comprimento máx. ({unit})</Label>
-                  <Input inputMode="decimal" placeholder="Rolo: sem limite" value={constraint.printableLength ? show(constraint.printableLength) : ''} onChange={(e) => { const v = numberOr(e.target.value, 0) * u; setPrefs((p) => ({ ...p, constraint: { ...p.constraint, printableLength: v } })); changeGlobal((p) => ({ ...p, constraint: { ...p.constraint, printableLength: v } })) }} />
-                </div>
-                <p className="col-span-2 -mt-1 text-xs text-muted-foreground">
-                  Use a largura que a impressora realmente imprime (mídia menos as margens dela).
-                </p>
-                <div className="col-span-2 space-y-1.5">
-                  <Label className="text-xs text-muted-foreground">Painéis</Label>
-                  <Select value={constraint.direction} onValueChange={(v) => { const direction = v as PrintConstraint['direction']; setPrefs((p) => ({ ...p, constraint: { ...p.constraint, direction } })); changeGlobal((p) => ({ ...p, constraint: { ...p.constraint, direction } })) }}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="standing">Em pé (largura do material = largura do painel)</SelectItem>
-                      <SelectItem value="lying">Deitados (largura do material = altura do painel)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-muted-foreground">Colunas</Label>
-                  <Input inputMode="numeric" placeholder="Automático" value={prefs.request.columns || ''} onChange={(e) => setPrefs((p) => ({ ...p, request: { ...p.request, columns: Math.max(0, Math.round(numberOr(e.target.value, 0))) } }))} />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-muted-foreground">Linhas</Label>
-                  <Input inputMode="numeric" placeholder="Automático" value={prefs.request.rows || ''} onChange={(e) => setPrefs((p) => ({ ...p, request: { ...p.request, rows: Math.max(0, Math.round(numberOr(e.target.value, 0))) } }))} />
-                </div>
-                <div className="col-span-2 space-y-1.5">
-                  <Label className="text-xs text-muted-foreground">Divisão automática</Label>
-                  <Select value={prefs.request.mode} onValueChange={(v) => setPrefs((p) => ({ ...p, request: { ...p.request, mode: v as GridRequest['mode'] } }))}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="equal">Painéis iguais</SelectItem>
-                      <SelectItem value="max">Máximo do material + resto</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <Button className="col-span-2" variant="outline" onClick={() => regrid(project, prefs.request, true)}>
-                  <RotateCcw className="h-4 w-4" />
-                  {prefs.request.columns || prefs.request.rows ? 'Aplicar colunas e linhas' : 'Recalcular a grade pelo material'}
-                </Button>
-                <p className="col-span-2 text-xs text-muted-foreground">
-                  {hasManualEdits(project)
-                    ? 'A grade foi ajustada à mão: mudanças no material não a refazem sozinhas.'
-                    : 'Grade automática: acompanha o material, a sobreposição e a área branca.'}
-                  {geometry && constraint.printableWidth > 0 && ` Uso da largura do material: ${Math.round(geometry.mediaUsage * 100)}%.`}
-                </p>
-              </div>
-
-              <Collapsible>
-                <CollapsibleTrigger className="flex w-full items-center justify-between text-sm font-medium">
-                  Larguras das colunas e alturas das linhas
-                  <Grid3x3 className="h-4 w-4 text-muted-foreground" />
-                </CollapsibleTrigger>
-                <CollapsibleContent className="pt-3">
-                  <GridSizes project={project} onChange={commit} />
-                </CollapsibleContent>
-              </Collapsible>
-
-              <div className="space-y-2">
-                <Label>3. Sobreposição padrão (mm)</Label>
-                <div className="flex flex-wrap gap-1.5">
-                  {(
-                    [
-                      ['next', 'Direita/cima cobre'],
-                      ['previous', 'Esquerda/baixo cobre'],
-                      ['split', 'Metade de cada'],
-                    ] as const
-                  ).map(([side, label]) => {
-                    const total = Math.max(...Object.values(rules.overlap)) * (side === 'split' ? 2 : 1) || 20
-                    return (
-                      <Button key={side} size="sm" variant="outline" className="h-7 text-xs" onClick={() => { const overlap = edgesForSide(side, total); setPrefs((p) => ({ ...p, rules: { ...p.rules, overlap } })); changeGlobal((p) => ({ ...p, rules: { ...p.rules, overlap } })) }}>
-                        {label}
-                      </Button>
-                    )
-                  })}
-                </div>
-                <EdgesInput value={rules.overlap} onChange={(edge, v) => { const overlap = { ...rules.overlap, [edge]: v ?? 0 }; setPrefs((p) => ({ ...p, rules: { ...p.rules, overlap } })); changeGlobal((p) => ({ ...p, rules: { ...p.rules, overlap } })) }} />
-                <p className="text-xs text-muted-foreground">
-                  Faixa da arte vizinha repetida em cada borda. Só vale onde existe painel ao lado; cada painel pode ter
-                  o seu (selecione-o).
-                </p>
-              </div>
-
-              <div className="space-y-2">
-                <Label>4. Área branca de colagem (mm)</Label>
-                <EdgesInput value={rules.white} onChange={(edge, v) => { const white = { ...rules.white, [edge]: v ?? 0 }; setPrefs((p) => ({ ...p, rules: { ...p.rules, white } })); changeGlobal((p) => ({ ...p, rules: { ...p.rules, white } })) }} />
-                <p className="text-xs text-muted-foreground">Sem tinta, fora da imagem: para colar, soldar ou fixar o painel.</p>
-              </div>
-
-              <div className="space-y-2">
-                <Label>5. Sangria nas bordas externas (mm)</Label>
-                <EdgesInput value={rules.bleed} onChange={(edge, v) => { const bleed = { ...rules.bleed, [edge]: v ?? 0 }; setPrefs((p) => ({ ...p, rules: { ...p.rules, bleed } })); changeGlobal((p) => ({ ...p, rules: { ...p.rules, bleed } })) }} />
-                <p className="text-xs text-muted-foreground">
-                  O arquivo tem {Object.entries(project.poster.availableBleed).map(([e, v]) => `${{ top: 'C', right: 'D', bottom: 'B', left: 'E' }[e]} ${Math.round(v)}`).join(' · ')} mm de sangria.
-                  Fresta (vão sem impressão) é definida clicando numa linha da grade.
-                </p>
-                <div className="flex items-center gap-2 text-sm">
-                  <span className="text-muted-foreground">Menor painel aceito (mm)</span>
-                  <Input className="h-8 w-20" inputMode="decimal" value={rules.minimumTile} onChange={(e) => { const minimumTile = Math.max(1, numberOr(e.target.value, 50)); setPrefs((p) => ({ ...p, rules: { ...p.rules, minimumTile } })); commit({ ...project, rules: { ...project.rules, minimumTile } }) }} />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label>6. Nomes dos arquivos</Label>
-                <Input value={project.nameTemplate} onChange={(e) => { const nameTemplate = e.target.value; setPrefs((p) => ({ ...p, nameTemplate })); commit({ ...project, nameTemplate }) }} />
-                <p className="text-xs text-muted-foreground">
-                  {'{projeto}'}, {'{cliente}'}, {'{lin}'}, {'{col}'} (L1C1 = canto de cima à esquerda), {'{nn}'}/{'{n}'} (número) e {'{zona}'}.
-                </p>
-              </div>
-
-              <div className="space-y-2">
-                <Label>7. Imagem de referência</Label>
-                <p className="text-xs text-muted-foreground">Gabarito do veículo ou foto da fachada. Só na tela e no guia, nunca nos painéis.</p>
-                <label className="flex cursor-pointer items-center gap-2 text-sm text-primary">
-                  <Upload className="h-4 w-4" />
-                  {background ? 'Trocar imagem' : 'Enviar imagem (PNG, JPEG ou WebP)'}
-                  <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (file) uploadBackground(file); e.target.value = '' }} />
-                </label>
-                {background && (
-                  <div className="grid grid-cols-3 gap-2">
-                    {(['xMm', 'yMm', 'widthMm'] as const).map((key) => (
-                      <div key={key} className="space-y-1">
-                        <Label className="text-xs text-muted-foreground">{{ xMm: 'X (mm)', yMm: 'Y (mm)', widthMm: 'Largura (mm)' }[key]}</Label>
-                        <Input inputMode="decimal" value={background[key]} onChange={(e) => setBackground({ ...background, [key]: key === 'widthMm' ? Math.max(1, numberOr(e.target.value, 1)) : numberOr(e.target.value, 0) })} />
-                      </div>
-                    ))}
-                    <div className="col-span-3 space-y-1">
-                      <Label className="text-xs text-muted-foreground">Opacidade {Math.round(background.opacity * 100)}%</Label>
-                      <Slider value={[background.opacity * 100]} min={5} max={100} step={5} onValueChange={([v]) => setBackground({ ...background, opacity: v / 100 })} />
-                    </div>
-                    <label className="col-span-3 flex items-center gap-2 text-sm">
-                      <Checkbox checked={background.visibleInGuide} onCheckedChange={(v) => setBackground({ ...background, visibleInGuide: v === true })} />
-                      Mostrar no guia de instalação
-                    </label>
-                    <div className="col-span-3 flex gap-2">
-                      <Button size="sm" variant="outline" onClick={() => setBackground({ ...background, visible: !background.visible })}>
-                        {background.visible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                        {background.visible ? 'Ocultar na tela' : 'Mostrar na tela'}
-                      </Button>
-                      <Button size="sm" variant="ghost" onClick={() => setBackground(null)}>
-                        <Trash2 className="h-4 w-4" />
-                        Remover
-                      </Button>
-                    </div>
-                  </div>
+      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+        {/* ---- Propriedades do projeto ---- */}
+        <aside className="flex w-full shrink-0 flex-col border-b border-border bg-card lg:w-[300px] lg:border-b-0 lg:border-r">
+          <div className="flex border-b border-border">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                disabled={tab.id !== 'arte' && !project}
+                onClick={() => setLeftTab(tab.id)}
+                className={cn(
+                  '-mb-px flex-1 border-b-2 px-1 py-2 text-xs transition-colors disabled:opacity-40',
+                  leftTab === tab.id ? 'border-primary font-medium text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground',
                 )}
-              </div>
-
-              <div className="space-y-2">
-                <Label>8. Marcas e etiqueta</Label>
-                <div className="flex items-center gap-2 text-sm">
-                  <span className="text-muted-foreground">Margem técnica em volta do painel (mm)</span>
-                  <Input className="h-8 w-20" inputMode="decimal" value={prefs.marks.marginMm} onChange={(e) => setPrefs((p) => ({ ...p, marks: { ...p.marks, marginMm: Math.max(0, numberOr(e.target.value, 0)) } }))} />
-                </div>
-                <label className="flex items-center gap-2 text-sm">
-                  <Checkbox checked={prefs.marks.cropMarks} onCheckedChange={(v) => setPrefs((p) => ({ ...p, marks: { ...p.marks, cropMarks: v === true } }))} />
-                  Marcas de corte e de sobreposição
-                </label>
-                <label className="flex items-center gap-2 text-sm">
-                  <Checkbox checked={prefs.marks.label} onCheckedChange={(v) => setPrefs((p) => ({ ...p, marks: { ...p.marks, label: v === true } }))} />
-                  Etiqueta com L/C, número, medidas e vizinhos
-                </label>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Modelos</Label>
-                {templates.length > 0 && (
-                  <Select value="" onValueChange={(id) => { const t = templates.find((x) => x.id === id); if (t) applyTemplate(t) }}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Usar um modelo salvo" />
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {leftTab === 'arte' && (
+              <>
+                <Section title="Trabalho">
+                  <Select value={jobId} onValueChange={(id) => chooseJob(id)}>
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue placeholder="Escolha o trabalho com a arte" />
                     </SelectTrigger>
                     <SelectContent>
-                      {templates.map((t) => (
-                        <SelectItem key={t.id} value={t.id}>
-                          {t.name}
+                      {jobs.map((j) => (
+                        <SelectItem key={j.id} value={j.id}>
+                          {j.name}
+                          {j.clientName ? ` · ${j.clientName}` : ''}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
+                  {art && art.pageCount > 1 && (
+                    <Field label={`Página (de ${art.pageCount})`}>
+                      <NumberField
+                        unit=""
+                        integer
+                        min={1}
+                        value={pageNumber}
+                        onCommit={(v) => {
+                          setPageNumber(Math.min(art.pageCount, Math.max(1, v ?? 1)))
+                          setProjectSource('')
+                        }}
+                      />
+                    </Field>
+                  )}
+                  {artError && <p className="text-xs text-destructive">Não foi possível abrir o PDF ({artError}).</p>}
+                  {pdfUrl && !project && !artError && (
+                    <p className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" /> Abrindo a arte…
+                    </p>
+                  )}
+                </Section>
+                {project && art && (
+                  <>
+                    <Section
+                      title="Tamanho final"
+                      action={
+                        <Segmented<Unit>
+                          value={unit}
+                          onChange={setUnit}
+                          options={(['mm', 'cm', 'm'] as const).map((v) => ({ value: v, label: v }))}
+                        />
+                      }
+                    >
+                      <Field label="Largura">
+                        <NumberField
+                          unit={unit}
+                          value={project.poster.width / u}
+                          onCommit={(v) => v && changeScale(((v * u) / (art.trim[2] - art.trim[0])) * MM)}
+                        />
+                      </Field>
+                      <Field label="Altura">
+                        <NumberField
+                          unit={unit}
+                          value={project.poster.height / u}
+                          onCommit={(v) => v && changeScale(((v * u) / (art.trim[3] - art.trim[1])) * MM)}
+                        />
+                      </Field>
+                      <Field label="Escala do arquivo" hint="1:10 = o arquivo está em 10% do tamanho final. A proporção é sempre mantida e a arte nunca é reamostrada.">
+                        <NumberField unit="1:x" value={scale} min={0.001} onCommit={(v) => v && changeScale(v)} />
+                      </Field>
+                    </Section>
+                    <Section title="Arquivo">
+                      <Readout label="Formato no arquivo" value={`${fmt(((art.trim[2] - art.trim[0]) / MM), 1)} × ${fmt(((art.trim[3] - art.trim[1]) / MM), 1)} mm`} />
+                      <Readout
+                        label="Sangria disponível"
+                        hint="Arte além do formato final que o arquivo tem (cima, direita, baixo, esquerda)"
+                        value={(['top', 'right', 'bottom', 'left'] as const).map((e) => fmt(project.poster.availableBleed[e], 0)).join(' / ') + ' mm'}
+                      />
+                      {art.pageCount > 1 && <Readout label="Páginas" value={art.pageCount} />}
+                    </Section>
+                    <Section title="Imagem de referência">
+                      <p className="text-[11px] text-muted-foreground">Gabarito do veículo ou foto da fachada. Só na tela e no guia, nunca nos painéis.</p>
+                      <label className="flex cursor-pointer items-center gap-2 text-xs text-primary hover:underline">
+                        <Upload className="h-3.5 w-3.5" />
+                        {background ? 'Trocar imagem' : 'Enviar imagem (PNG, JPEG ou WebP)'}
+                        <input
+                          type="file"
+                          accept="image/png,image/jpeg,image/webp"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0]
+                            if (file) uploadBackground(file)
+                            e.target.value = ''
+                          }}
+                        />
+                      </label>
+                      {background && (
+                        <>
+                          <Field label="Posição X">
+                            <NumberField value={background.xMm} min={-1e6} onCommit={(v) => setBackground({ ...background, xMm: v ?? 0 })} />
+                          </Field>
+                          <Field label="Posição Y">
+                            <NumberField value={background.yMm} min={-1e6} onCommit={(v) => setBackground({ ...background, yMm: v ?? 0 })} />
+                          </Field>
+                          <Field label="Largura">
+                            <NumberField value={background.widthMm} min={1} onCommit={(v) => setBackground({ ...background, widthMm: v ?? 1 })} />
+                          </Field>
+                          <Field label={`Opacidade ${Math.round(background.opacity * 100)}%`}>
+                            <Slider value={[background.opacity * 100]} min={5} max={100} step={5} onValueChange={([v]) => setBackground({ ...background, opacity: v / 100 })} />
+                          </Field>
+                          <CheckRow checked={background.visibleInGuide} onChange={(v) => setBackground({ ...background, visibleInGuide: v })}>
+                            Mostrar no guia de instalação
+                          </CheckRow>
+                          <div className="flex gap-1">
+                            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setBackground({ ...background, visible: !background.visible })}>
+                              {background.visible ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                              {background.visible ? 'Ocultar' : 'Mostrar'}
+                            </Button>
+                            <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setBackground(null)}>
+                              <Trash2 className="h-3.5 w-3.5" />
+                              Remover
+                            </Button>
+                          </div>
+                        </>
+                      )}
+                    </Section>
+                  </>
                 )}
-                <div className="flex gap-2">
-                  <Input placeholder="Nome do modelo (ex.: Sprinter lateral)" value={templateName} onChange={(e) => setTemplateName(e.target.value)} />
-                  <Button variant="outline" disabled={!templateName.trim()} onClick={saveTemplate} title="Salvar modelo">
-                    <Save className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-            </>
-          )}
-        </section>
+              </>
+            )}
 
-        <section className="min-w-0 space-y-3">
-          {!project || !geometry ? (
-            <p className="rounded-lg border border-dashed border-border p-10 text-center text-sm text-muted-foreground">
-              {pdfUrl ? 'Abrindo a arte…' : 'Escolha o trabalho com a arte grande.'}
-            </p>
-          ) : (
-            <>
-              <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-border bg-card p-2">
-                <Input className="h-8 w-48" value={name} placeholder="Nome do projeto" onChange={(e) => setName(e.target.value)} />
-                <span className="mx-1 h-5 w-px bg-border" />
-                <Button size="sm" variant="ghost" disabled={!history.past.length} onClick={undo} title="Desfazer">
-                  <Undo2 className="h-4 w-4" />
-                </Button>
-                <Button size="sm" variant="ghost" disabled={!history.future.length} onClick={redo} title="Refazer">
-                  <Redo2 className="h-4 w-4" />
-                </Button>
-                <span className="mx-1 h-5 w-px bg-border" />
-                <Button size="sm" variant="outline" disabled={selectedTiles.length < 2} onClick={() => { const next = mergeTiles(project, selected); if (!next) { toast({ title: 'Os painéis escolhidos precisam formar um retângulo' }); return } commit(next); setSelected([]) }}>
-                  <Combine className="h-4 w-4" />
-                  Juntar
-                </Button>
-                <Button size="sm" variant="outline" disabled={!single || single.cells.length < 2} onClick={() => single && commit(splitTile(project, single.key))}>
-                  <Scissors className="h-4 w-4" />
-                  Separar
-                </Button>
-                <Button size="sm" variant="outline" disabled={!single} title="Nova linha vertical no meio do painel" onClick={() => single && commit(addLine(project, 'vertical', Math.round(single.logical.x + single.logical.w / 2)))}>
-                  <SplitSquareHorizontal className="h-4 w-4" />
-                </Button>
-                <Button size="sm" variant="outline" disabled={!single} title="Nova linha horizontal no meio do painel" onClick={() => single && commit(addLine(project, 'horizontal', Math.round(single.logical.y + single.logical.h / 2)))}>
-                  <SplitSquareVertical className="h-4 w-4" />
-                </Button>
-                <span className="mx-1 h-5 w-px bg-border" />
-                <span className="text-xs text-muted-foreground">Selecionar:</span>
-                <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => selectWhere(() => true)}>Tudo</Button>
-                <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={!single} onClick={() => single && selectWhere((t) => t.row === single.row)}>Linha</Button>
-                <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={!single} onClick={() => single && selectWhere((t) => t.column === single.column)}>Coluna</Button>
-                <div className="ml-auto flex items-center gap-1.5">
-                  <Button size="sm" variant="outline" disabled={busy} onClick={() => save().then(() => toast({ title: 'Painelamento salvo' })).catch((err) => toast({ title: 'Não foi possível salvar', description: getErrorMessage(err), variant: 'destructive' }))}>
-                    <Save className="h-4 w-4" />
-                    Salvar
-                  </Button>
-                  <Button size="sm" disabled={busy || running || errors.length > 0 || !active.length} title={errors.length ? 'Corrija os erros antes de exportar' : undefined} onClick={exportPanels}>
-                    {busy || running ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileArchive className="h-4 w-4" />}
-                    Exportar painéis
-                  </Button>
-                </div>
-              </div>
-
-              <div className="h-[calc(100vh-18rem)] min-h-[360px] overflow-hidden rounded-lg border border-border bg-muted p-2">
-                <TilingCanvas
-                  art={art ? { url: art.url, rect: { x: ((art.visible[0] - art.trim[0]) * scale) / MM, y: ((art.visible[1] - art.trim[1]) * scale) / MM, w: ((art.visible[2] - art.visible[0]) * scale) / MM, h: ((art.visible[3] - art.visible[1]) * scale) / MM } } : null}
-                  poster={{ w: project.poster.width, h: project.poster.height }}
-                  background={background && background.visible && backgroundUrl ? { url: backgroundUrl, rect: { x: background.xMm, y: background.yMm, w: background.widthMm, h: background.widthMm * backgroundAspect }, opacity: background.opacity } : null}
-                  geometry={geometry}
-                  selected={selected}
-                  selectedSeam={selectedSeam}
-                  flagged={flagged}
-                  onSelectTile={(key, additive) => {
-                    setSelectedSeam(null)
-                    setSelected((s) => (additive ? (s.includes(key) ? s.filter((k) => k !== key) : [...s, key]) : [key]))
-                  }}
-                  onSelectSeam={(id) => {
-                    setSelectedSeam(id)
-                    if (id) setSelected([])
-                  }}
-                  onMoveSeam={(id, position) => {
-                    if (!dragStart) setDragStart(project)
-                    setProject((p) => (p ? moveLine(p, id, position) : p))
-                  }}
-                  onMoveEnd={() => {
-                    if (dragStart) setHistory((h) => ({ past: [...h.past.slice(-79), dragStart], future: [] }))
-                    setDragStart(null)
-                  }}
-                />
-              </div>
-
-              <div className="grid gap-3 xl:grid-cols-2">
-                <div className="space-y-2 rounded-lg border border-border bg-card p-3 text-sm">
-                  <p className="flex items-center gap-2 text-foreground">
-                    {errors.length ? <AlertTriangle className="h-4 w-4 text-destructive" /> : <CircleCheck className="h-4 w-4 text-emerald-600" />}
-                    <strong>{active.length}</strong> painéis
-                    {errors.length ? ` · ${errors.length} erro(s) a corrigir antes de exportar` : ' · pronto para exportar'}
-                  </p>
-                  {[...errors, ...warnings].length > 0 && (
-                    <ul className="max-h-40 space-y-1 overflow-auto">
-                      {[...errors, ...warnings].map((issue, i) => (
-                        <li key={i} className={cn('text-xs', issue.severity === 'error' ? 'text-destructive' : 'text-amber-700 dark:text-amber-400')}>
-                          {issue.message}
-                        </li>
-                      ))}
-                    </ul>
+            {leftTab === 'midia' && project && constraint && media && (
+              <>
+                <Section title="Mídia na impressora">
+                  <Field label="Largura da mídia">
+                    <NumberField value={media.width} onCommit={(v) => updateMedia({ width: v ?? 0 })} />
+                  </Field>
+                  <Field label="Margem esquerda" hint="Faixa que a impressora não imprime">
+                    <NumberField value={media.marginLeft} onCommit={(v) => updateMedia({ marginLeft: v ?? 0 })} />
+                  </Field>
+                  <Field label="Margem direita" hint="Faixa que a impressora não imprime">
+                    <NumberField value={media.marginRight} onCommit={(v) => updateMedia({ marginRight: v ?? 0 })} />
+                  </Field>
+                  <Field label="Barra de cor" hint="Faixa reservada para a barra de cor/controle, ao lado dos painéis">
+                    <NumberField value={media.colorBar} onCommit={(v) => updateMedia({ colorBar: v ?? 0 })} />
+                  </Field>
+                  <div className="mt-1 border-t border-dashed border-border pt-1.5">
+                    <Readout
+                      label="Largura imprimível"
+                      strong
+                      value={constraint.printableWidth > 0 ? `${fmt(constraint.printableWidth)} mm` : 'não informada'}
+                      tone={constraint.printableWidth > 0 ? undefined : 'warning'}
+                    />
+                  </div>
+                  <Field label="Comprimento máx." hint="Limite de comprimento por painel (chapa ou impressora). Vazio = rolo sem limite.">
+                    <NumberField
+                      allowEmpty
+                      placeholder="sem limite"
+                      value={constraint.printableLength || undefined}
+                      onCommit={(v) => updateConstraint({ printableLength: v ?? 0 })}
+                    />
+                  </Field>
+                </Section>
+                <Section title="Posição dos painéis na mídia">
+                  <Segmented<Direction>
+                    value={constraint.direction}
+                    onChange={(direction) => updateConstraint({ direction })}
+                    options={[
+                      { value: 'standing', label: 'Em pé', hint: 'A largura do painel vai na largura da mídia' },
+                      { value: 'lying', label: 'Deitado', hint: 'A altura do painel vai na largura da mídia (girado 90°)' },
+                      { value: 'auto', label: 'Automático', hint: 'Cada painel na posição que cabe e gasta menos mídia' },
+                    ]}
+                  />
+                  <CheckRow checked={!!constraint.flipFlop} onChange={(flipFlop) => updateConstraint({ flipFlop })}>
+                    <span title="Painéis alternados saem girados 180°: as duas bordas de cada emenda são impressas do mesmo lado da cabeça, e a cor fica igual na emenda.">
+                      Flip-flop (alternar 180°)
+                    </span>
+                  </CheckRow>
+                </Section>
+                <Section title="Consumo e custo">
+                  <Field label="Espaço entre painéis" hint="Distância entre painéis na mídia, para o corte">
+                    <NumberField value={media.spacing} onCommit={(v) => updateMedia({ spacing: v ?? 0 })} />
+                  </Field>
+                  <Field label="Preço da mídia">
+                    <NumberField unit="R$/m²" value={media.pricePerM2} onCommit={(v) => updateMedia({ pricePerM2: v ?? 0 })} />
+                  </Field>
+                  {geometry?.media && (
+                    <div className="mt-1 space-y-1 border-t border-dashed border-border pt-1.5">
+                      <Readout label="Uso da largura" hint="Painel mais largo ÷ largura imprimível" value={`${fmt(geometry.mediaUsage * 100, 0)}%`} />
+                      <Readout label="Comprimento consumido" value={fmtM(geometry.media.length)} />
+                      <Readout label="Desperdício" value={`${fmt(geometry.media.waste * 100, 1)}%`} />
+                      <Readout label="Custo da mídia" value={geometry.media.cost === null ? '—' : fmtMoney(geometry.media.cost)} strong />
+                    </div>
                   )}
-                  <p className="text-xs text-muted-foreground">
-                    Azul: o que o painel cobre · tracejado: o que é impresso · pontilhado cinza: área branca · laranja:
-                    sobreposição · cinza escuro: fresta · vermelho: não imprime. Shift + clique escolhe vários; arraste as
-                    linhas para mudar a divisão.
-                  </p>
-                </div>
+                </Section>
+              </>
+            )}
 
-                {selectedTiles.length > 0 && <TileInspector project={project} tiles={selectedTiles} onChange={commit} />}
-                {seam && <SeamInspector project={project} seam={seam} onChange={commit} onRemoved={() => setSelectedSeam(null)} />}
-              </div>
+            {leftTab === 'grade' && project && rules && (
+              <>
+                <Section title="Divisão automática">
+                  <Segmented<GridRequest['mode']>
+                    value={prefs.request.mode}
+                    onChange={(mode) => setPrefs((p) => ({ ...p, request: { ...p.request, mode } }))}
+                    options={[
+                      { value: 'equal', label: 'Painéis iguais', hint: 'Todos os painéis com a mesma medida' },
+                      { value: 'max', label: 'Máximo + resto', hint: 'Painéis no máximo do material e o resto no último' },
+                    ]}
+                  />
+                  <Field label="Colunas" hint="Vazio = calcular pelo material">
+                    <NumberField
+                      unit=""
+                      integer
+                      min={1}
+                      allowEmpty
+                      placeholder="auto"
+                      value={prefs.request.columns || undefined}
+                      onCommit={(v) => setPrefs((p) => ({ ...p, request: { ...p.request, columns: v } }))}
+                    />
+                  </Field>
+                  <Field label="Linhas" hint="Vazio = calcular pelo material">
+                    <NumberField
+                      unit=""
+                      integer
+                      min={1}
+                      allowEmpty
+                      placeholder="auto"
+                      value={prefs.request.rows || undefined}
+                      onCommit={(v) => setPrefs((p) => ({ ...p, request: { ...p.request, rows: v } }))}
+                    />
+                  </Field>
+                  <Button size="sm" variant="outline" className="h-7 w-full text-xs" onClick={() => regrid(project, prefs.request)}>
+                    <RotateCcw className="h-3.5 w-3.5" />
+                    Recalcular a grade
+                  </Button>
+                  <Readout
+                    label="Grade atual"
+                    value={`${columns} × ${rows} · ${hasManualEdits(project) ? 'editada à mão' : 'automática'}`}
+                    hint={
+                      hasManualEdits(project)
+                        ? 'Mudanças no material e nas bordas não refazem a grade sozinhas'
+                        : 'Acompanha o material, a sobreposição e a área branca'
+                    }
+                  />
+                </Section>
+                <Section title="Medidas da grade">
+                  <GridSizes project={project} onChange={commit} />
+                </Section>
+                <Section title="Limites">
+                  <Field label="Menor painel aceito" hint="Nenhum painel pode cobrir menos que isso na largura ou na altura">
+                    <NumberField
+                      value={rules.minimumTile}
+                      min={1}
+                      onCommit={(v) => {
+                        const minimumTile = Math.max(1, v ?? 50)
+                        setPrefs((p) => ({ ...p, rules: { ...p.rules, minimumTile } }))
+                        commit({ ...project, rules: { ...project.rules, minimumTile } })
+                      }}
+                    />
+                  </Field>
+                </Section>
+              </>
+            )}
 
-              {current && current.id === tilingId && current.status !== 'draft' && (
-                <div className="space-y-2 rounded-lg border border-border bg-card p-3 text-sm">
-                  {running ? (
-                    <>
-                      <div className="flex items-center justify-between">
-                        <span className="flex items-center gap-2">
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                          {current.current_step || 'Na fila do analisador'}
-                        </span>
-                        <span className="text-muted-foreground">{current.progress}%</span>
-                      </div>
-                      <Progress value={current.progress} />
-                    </>
-                  ) : current.status === 'failed' ? (
-                    <p className="text-destructive">A exportação falhou: {current.error_message || 'sem detalhes'}</p>
-                  ) : (
-                    <>
-                      <p className="text-foreground">Painéis prontos ({current.result.panels ?? active.length}).</p>
-                      {current.result.warnings?.map((w) => (
-                        <p key={w} className="text-amber-700 dark:text-amber-400">{w}</p>
-                      ))}
-                      <div className="flex flex-wrap gap-2">
-                        {downloads.pdf && (
-                          <Button size="sm" variant="outline" asChild>
-                            <a href={downloads.pdf} target="_blank" rel="noreferrer"><Download className="h-4 w-4" />Todos os painéis (PDF)</a>
-                          </Button>
-                        )}
-                        {downloads.zip && !!current.result.sizes?.zip && (
-                          <Button size="sm" variant="outline" asChild>
-                            <a href={downloads.zip} target="_blank" rel="noreferrer"><FileArchive className="h-4 w-4" />Um arquivo por painel (ZIP)</a>
-                          </Button>
-                        )}
-                        {downloads.guide && (
-                          <Button size="sm" variant="outline" asChild>
-                            <a href={downloads.guide} target="_blank" rel="noreferrer"><Download className="h-4 w-4" />Guia de instalação</a>
-                          </Button>
-                        )}
-                      </div>
-                    </>
+            {leftTab === 'bordas' && project && rules && (
+              <>
+                <Section title="Sobreposição padrão">
+                  <Segmented
+                    value={
+                      rules.overlap.left > 0 && rules.overlap.right === 0
+                        ? 'next'
+                        : rules.overlap.right > 0 && rules.overlap.left === 0
+                          ? 'previous'
+                          : rules.overlap.left > 0 && rules.overlap.left === rules.overlap.right
+                            ? 'split'
+                            : ('' as string)
+                    }
+                    onChange={(side) => {
+                      const total = Math.max(...Object.values(rules.overlap)) * (side === 'split' ? 2 : 1) || 20
+                      updateRules({ overlap: edgesForSide(side as 'next' | 'previous' | 'split', total) })
+                    }}
+                    options={[
+                      { value: 'next', label: 'Dir./cima cobre', hint: 'O painel da direita (ou de cima) imprime a faixa repetida' },
+                      { value: 'previous', label: 'Esq./baixo cobre', hint: 'O painel da esquerda (ou de baixo) imprime a faixa repetida' },
+                      { value: 'split', label: 'Metade', hint: 'Metade da faixa em cada painel' },
+                    ]}
+                  />
+                  <EdgesInput value={rules.overlap} onChange={(edge, v) => updateRules({ overlap: { ...rules.overlap, [edge]: v ?? 0 } })} />
+                  <p className="text-[11px] text-muted-foreground">Faixa da arte vizinha repetida em cada borda. Só vale onde há painel ao lado.</p>
+                </Section>
+                <Section title="Área branca de colagem">
+                  <EdgesInput value={rules.white} onChange={(edge, v) => updateRules({ white: { ...rules.white, [edge]: v ?? 0 } })} />
+                  <p className="text-[11px] text-muted-foreground">Sem tinta, fora da imagem: para colar, soldar ou fixar.</p>
+                </Section>
+                <Section title="Sangria nas bordas externas">
+                  <EdgesInput value={rules.bleed} onChange={(edge, v) => updateRules({ bleed: { ...rules.bleed, [edge]: v ?? 0 } })} />
+                  <Readout
+                    label="Disponível no arquivo"
+                    value={(['top', 'right', 'bottom', 'left'] as const).map((e) => fmt(project.poster.availableBleed[e], 0)).join(' / ') + ' mm'}
+                    hint="Cima / direita / baixo / esquerda"
+                  />
+                </Section>
+                <p className="px-3 py-2 text-[11px] text-muted-foreground">
+                  Fresta (vão sem impressão): clique numa linha da grade. Ajuste de um painel só: clique no painel.
+                </p>
+              </>
+            )}
+
+            {leftTab === 'saida' && project && (
+              <>
+                <Section title="Nome dos arquivos">
+                  <TextField
+                    value={project.nameTemplate}
+                    onCommit={(nameTemplate) => {
+                      setPrefs((p) => ({ ...p, nameTemplate }))
+                      commit({ ...project, nameTemplate })
+                    }}
+                  />
+                  <div className="flex flex-wrap gap-1">
+                    {NAME_TOKENS.map(([token, label]) => (
+                      <button
+                        key={token}
+                        type="button"
+                        title={`${label}: clique para incluir`}
+                        className="rounded border border-border bg-muted/50 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground"
+                        onClick={() => {
+                          const nameTemplate = project.nameTemplate + token
+                          setPrefs((p) => ({ ...p, nameTemplate }))
+                          commit({ ...project, nameTemplate })
+                        }}
+                      >
+                        {token}
+                      </button>
+                    ))}
+                  </div>
+                  {active[0] && <Readout label="Exemplo" value={`${active[0].name}.pdf`} />}
+                </Section>
+                <Section title="Marcas e etiqueta">
+                  <Field label="Margem técnica" hint="Faixa em volta de cada painel onde ficam as marcas e a etiqueta. Também gasta mídia.">
+                    <NumberField value={prefs.marks.marginMm} onCommit={(v) => setPrefs((p) => ({ ...p, marks: { ...p.marks, marginMm: v ?? 0 } }))} />
+                  </Field>
+                  <CheckRow checked={prefs.marks.cropMarks} onChange={(cropMarks) => setPrefs((p) => ({ ...p, marks: { ...p.marks, cropMarks } }))}>
+                    Marcas de corte e de sobreposição
+                  </CheckRow>
+                  <CheckRow checked={prefs.marks.label} onChange={(label) => setPrefs((p) => ({ ...p, marks: { ...p.marks, label } }))}>
+                    Etiqueta (posição, número, medidas, vizinhos)
+                  </CheckRow>
+                </Section>
+                <Section title="Modelos">
+                  {templates.length > 0 && (
+                    <Select
+                      value=""
+                      onValueChange={(id) => {
+                        const t = templates.find((x) => x.id === id)
+                        if (t) applyTemplate(t)
+                      }}
+                    >
+                      <SelectTrigger className="h-8 text-xs">
+                        <SelectValue placeholder="Aplicar um modelo salvo" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {templates.map((t) => (
+                          <SelectItem key={t.id} value={t.id}>
+                            {t.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   )}
+                  <div className="flex gap-1">
+                    <Input className="h-7 text-xs" placeholder="Nome (ex.: Sprinter lateral)" value={templateName} onChange={(e) => setTemplateName(e.target.value)} />
+                    <Button size="sm" variant="outline" className="h-7 text-xs" disabled={!templateName.trim()} onClick={saveTemplate}>
+                      Salvar
+                    </Button>
+                  </div>
+                </Section>
+              </>
+            )}
+          </div>
+        </aside>
+
+        {/* ---- Prancheta e painel inferior ---- */}
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <div className="relative min-h-[320px] flex-1 overflow-hidden bg-muted/60">
+            {project && geometry ? (
+              <>
+                <div className="absolute inset-0 p-3">
+                  <TilingCanvas
+                    art={
+                      art
+                        ? {
+                            url: art.url,
+                            rect: {
+                              x: ((art.visible[0] - art.trim[0]) * scale) / MM,
+                              y: ((art.visible[1] - art.trim[1]) * scale) / MM,
+                              w: ((art.visible[2] - art.visible[0]) * scale) / MM,
+                              h: ((art.visible[3] - art.visible[1]) * scale) / MM,
+                            },
+                          }
+                        : null
+                    }
+                    poster={{ w: project.poster.width, h: project.poster.height }}
+                    background={
+                      background && background.visible && backgroundUrl
+                        ? {
+                            url: backgroundUrl,
+                            rect: { x: background.xMm, y: background.yMm, w: background.widthMm, h: background.widthMm * backgroundAspect },
+                            opacity: background.opacity,
+                          }
+                        : null
+                    }
+                    geometry={geometry}
+                    selected={selected}
+                    selectedSeam={selectedSeam}
+                    flagged={flagged}
+                    onSelectTile={selectTile}
+                    onSelectSeam={(id) => {
+                      setSelectedSeam(id)
+                      if (id) setSelected([])
+                    }}
+                    onMoveSeam={(id, position) => {
+                      if (!dragStart) setDragStart(project)
+                      setProject((p) => (p ? moveLine(p, id, position) : p))
+                    }}
+                    onMoveEnd={() => {
+                      if (dragStart) setHistory((h) => ({ past: [...h.past.slice(-79), dragStart], future: [] }))
+                      setDragStart(null)
+                    }}
+                  />
                 </div>
-              )}
-            </>
+                <Legend />
+              </>
+            ) : (
+              <EmptyState
+                saved={saved}
+                loading={!!pdfUrl && !artError}
+                onOpen={openSaved}
+                onRemove={removeSaved}
+              />
+            )}
+          </div>
+
+          {project && geometry && (
+            <div className="flex h-[230px] shrink-0 flex-col border-t border-border bg-card">
+              <div className="flex border-b border-border px-1">
+                <BottomTabButton active={bottomTab === 'paineis'} onClick={() => setBottomTab('paineis')}>
+                  Painéis <Count>{active.length}</Count>
+                </BottomTabButton>
+                <BottomTabButton active={bottomTab === 'problemas'} onClick={() => setBottomTab('problemas')}>
+                  Problemas
+                  {errors.length > 0 && <Count tone="error">{errors.length}</Count>}
+                  {warnings.length > 0 && <Count tone="warning">{warnings.length}</Count>}
+                </BottomTabButton>
+                <BottomTabButton active={bottomTab === 'midia'} onClick={() => setBottomTab('midia')}>
+                  Na mídia
+                </BottomTabButton>
+                <BottomTabButton active={bottomTab === 'exportacao'} onClick={() => setBottomTab('exportacao')}>
+                  Exportação
+                  {current && current.id === tilingId && current.status !== 'draft' && (
+                    <span
+                      className={cn(
+                        'ml-1.5 h-2 w-2 rounded-full',
+                        running ? 'animate-pulse bg-primary' : current.status === 'failed' ? 'bg-destructive' : 'bg-emerald-500',
+                      )}
+                    />
+                  )}
+                </BottomTabButton>
+              </div>
+              <div className="min-h-0 flex-1 overflow-auto">
+                {bottomTab === 'paineis' && <PanelTable tiles={geometry.tiles} issues={issues} selected={selected} onSelect={selectTile} />}
+                {bottomTab === 'problemas' && <IssuesList issues={issues} onSelectTile={selectById} />}
+                {bottomTab === 'midia' && <MediaPreview layout={geometry.media} media={constraint?.media} numbers={numbers} />}
+                {bottomTab === 'exportacao' && (
+                  <ExportPanel
+                    current={current && current.id === tilingId ? current : null}
+                    running={running}
+                    dirty={dirty}
+                    errors={errors.length}
+                    downloads={downloads}
+                    panels={active.length}
+                  />
+                )}
+              </div>
+            </div>
           )}
-        </section>
+        </div>
+
+        {/* ---- Inspetor da seleção ---- */}
+        {project && geometry && (
+          <aside className="w-full shrink-0 overflow-y-auto border-t border-border bg-card lg:w-[280px] lg:border-l lg:border-t-0">
+            {selectedTiles.length > 0 ? (
+              <TileInspector project={project} tiles={selectedTiles} onChange={commit} />
+            ) : seam ? (
+              <SeamInspector project={project} seam={seam} onChange={commit} onRemoved={() => setSelectedSeam(null)} />
+            ) : (
+              <>
+                <Section title="Projeto">
+                  <Readout label="Arte (tamanho final)" value={`${fmtSize({ w: project.poster.width, h: project.poster.height })} mm`} />
+                  <Readout label="Grade" value={`${columns} colunas × ${rows} linhas`} />
+                  <Readout label="Painéis a imprimir" value={active.length} strong />
+                  {disabledCount > 0 && <Readout label="Não imprimem" value={disabledCount} />}
+                  {active.length > 0 && (
+                    <Readout
+                      label="Maior painel físico"
+                      value={`${fmtSize(active.reduce((m, t) => (t.physical.w * t.physical.h > m.physical.w * m.physical.h ? t : m)).physical)} mm`}
+                    />
+                  )}
+                  <Readout
+                    label="Situação"
+                    value={errors.length ? `${errors.length} erro(s)` : warnings.length ? `pronto, ${warnings.length} aviso(s)` : 'pronto para exportar'}
+                    tone={errors.length ? 'error' : warnings.length ? 'warning' : 'ok'}
+                  />
+                </Section>
+                <div className="space-y-1.5 px-3 py-3 text-[11px] text-muted-foreground">
+                  <p>Clique num painel para ajustar; Shift + clique escolhe vários.</p>
+                  <p>Clique numa linha para a fresta; arraste a linha para mover a divisão.</p>
+                  <p>Esc limpa a seleção · Ctrl+Z desfaz · Ctrl+S salva.</p>
+                </div>
+              </>
+            )}
+          </aside>
+        )}
+      </div>
+
+      {/* ---- Barra de status ---- */}
+      <div className="flex h-7 shrink-0 items-center gap-4 overflow-x-auto whitespace-nowrap border-t border-border bg-muted/60 px-3 text-[11px] text-muted-foreground">
+        {project && geometry ? (
+          <>
+            <span>
+              Arte <b className="font-medium text-foreground">{fmtSize({ w: project.poster.width, h: project.poster.height })} mm</b> · 1:{fmt(scale, 2)}
+            </span>
+            <span>
+              <b className="font-medium text-foreground">{active.length}</b> painéis ({columns} × {rows}
+              {disabledCount ? `, ${disabledCount} sem impressão` : ''})
+            </span>
+            <span>Grade {hasManualEdits(project) ? 'editada à mão' : 'automática'}</span>
+            {constraint && constraint.printableWidth > 0 ? (
+              <span>
+                Imprimível <b className="font-medium text-foreground">{fmt(constraint.printableWidth, 0)} mm</b> · uso {fmt(geometry.mediaUsage * 100, 0)}%
+              </span>
+            ) : (
+              <span className="text-amber-700 dark:text-amber-400">Mídia não informada</span>
+            )}
+            {geometry.media && (
+              <span>
+                Consumo <b className="font-medium text-foreground">{fmtM(geometry.media.length)}</b> · desperdício {fmt(geometry.media.waste * 100, 0)}%
+                {geometry.media.cost !== null && ` · ${fmtMoney(geometry.media.cost)}`}
+              </span>
+            )}
+            <button type="button" className="ml-auto flex items-center gap-3 hover:text-foreground" onClick={() => setBottomTab('problemas')}>
+              <span className="flex items-center gap-1">
+                {errors.length ? <XCircle className="h-3.5 w-3.5 text-destructive" /> : <CircleCheck className="h-3.5 w-3.5 text-emerald-600" />}
+                {errors.length} erro(s)
+              </span>
+              <span className="flex items-center gap-1">
+                <AlertTriangle className={cn('h-3.5 w-3.5', warnings.length ? 'text-amber-500' : '')} />
+                {warnings.length} aviso(s)
+              </span>
+            </button>
+          </>
+        ) : (
+          <span>Nenhuma arte aberta</span>
+        )}
       </div>
 
       <AlertDialog open={!!confirm} onOpenChange={(open) => !open && setConfirm(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Recalcular a grade?</AlertDialogTitle>
+            <AlertDialogTitle>{confirm?.title}</AlertDialogTitle>
             <AlertDialogDescription>{confirm?.message}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={() => { confirm?.run(); setConfirm(null) }}>Recalcular</AlertDialogAction>
+            <AlertDialogAction
+              onClick={() => {
+                confirm?.run()
+                setConfirm(null)
+              }}
+            >
+              {confirm?.action}
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </div>
+  )
+}
+
+// ---- Peças da tela ----------------------------------------------------------------------
+
+const Divider = () => <span className="mx-1 h-5 w-px bg-border" />
+
+function ToolButton({
+  title,
+  label,
+  disabled,
+  onClick,
+  children,
+}: {
+  title?: string
+  label?: string
+  disabled?: boolean
+  onClick: () => void
+  children?: ReactNode
+}) {
+  return (
+    <Button size="sm" variant="ghost" className="h-7 gap-1.5 px-2 text-xs" title={title} disabled={disabled} onClick={onClick}>
+      {children}
+      {label}
+    </Button>
+  )
+}
+
+function CheckRow({ checked, onChange, children }: { checked: boolean; onChange: (value: boolean) => void; children: ReactNode }) {
+  return (
+    <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground/80">
+      <Checkbox checked={checked} onCheckedChange={(v) => onChange(v === true)} />
+      {children}
+    </label>
+  )
+}
+
+function BottomTabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        '-mb-px flex items-center border-b-2 px-3 py-1.5 text-xs transition-colors',
+        active ? 'border-primary font-medium text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground',
+      )}
+    >
+      {children}
+    </button>
+  )
+}
+
+function Count({ tone, children }: { tone?: 'error' | 'warning'; children: ReactNode }) {
+  return (
+    <span
+      className={cn(
+        'ml-1.5 rounded px-1.5 text-[10px] font-semibold tabular-nums',
+        tone === 'error' ? 'bg-destructive text-destructive-foreground' : tone === 'warning' ? 'bg-amber-500 text-white' : 'bg-muted text-muted-foreground',
+      )}
+    >
+      {children}
+    </span>
+  )
+}
+
+/** O que cada traço da prancheta significa. */
+function Legend() {
+  const items: [string, ReactNode][] = [
+    ['Cobre da arte', <span className="h-2.5 w-3.5 border-[1.5px] border-blue-600" />],
+    ['Impresso', <span className="h-2.5 w-3.5 border border-dashed border-sky-400" />],
+    ['Sobreposição', <span className="h-2.5 w-3.5 bg-orange-500/50" />],
+    ['Área branca', <span className="h-2.5 w-3.5 border border-dotted border-slate-400 bg-white/60" />],
+    ['Fresta', <span className="h-2.5 w-3.5 bg-slate-800/60" />],
+    ['Não imprime', <span className="h-2.5 w-3.5 border border-dashed border-red-500 bg-red-500/20" />],
+  ]
+  return (
+    <div className="pointer-events-none absolute bottom-2 left-2 flex flex-wrap gap-x-3 gap-y-1 rounded border border-border bg-card/90 px-2 py-1 text-[10px] text-muted-foreground shadow-sm">
+      {items.map(([label, swatch]) => (
+        <span key={label} className="flex items-center gap-1">
+          {swatch}
+          {label}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+/** Sem arte aberta: os painelamentos salvos, para retomar um deles. */
+function EmptyState({
+  saved,
+  loading,
+  onOpen,
+  onRemove,
+}: {
+  saved: TilingProject[]
+  loading: boolean
+  onOpen: (row: TilingProject) => void
+  onRemove: (row: TilingProject) => void
+}) {
+  if (loading) {
+    return (
+      <div className="flex h-full items-center justify-center gap-2 text-xs text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" /> Abrindo a arte…
+      </div>
+    )
+  }
+  return (
+    <div className="h-full overflow-auto p-6">
+      <div className="mx-auto max-w-4xl space-y-4">
+        <div className="rounded border border-dashed border-border bg-card px-4 py-5 text-center text-xs text-muted-foreground">
+          Para um painelamento novo, escolha o trabalho com a arte na aba <b className="text-foreground">Arte</b>, à esquerda.
+        </div>
+        {saved.length > 0 && (
+          <div className="overflow-hidden rounded border border-border bg-card">
+            <div className="border-b border-border px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Painelamentos salvos
+            </div>
+            <table className="w-full text-xs">
+              <thead className="bg-muted/60 text-left text-[11px] text-muted-foreground">
+                <tr>
+                  <th className="px-3 py-1.5 font-medium">Nome</th>
+                  <th className="px-3 py-1.5 font-medium">Situação</th>
+                  <th className="px-3 py-1.5 text-right font-medium">Painéis</th>
+                  <th className="px-3 py-1.5 font-medium">Atualizado</th>
+                  <th className="w-24 px-3 py-1.5" />
+                </tr>
+              </thead>
+              <tbody>
+                {saved.map((row) => (
+                  <tr key={row.id} className="border-t border-border hover:bg-accent/50">
+                    <td className="px-3 py-1.5 font-medium text-foreground">{row.name || 'Sem nome'}</td>
+                    <td className="px-3 py-1.5">
+                      <span
+                        className={cn(
+                          'rounded px-1.5 py-0.5 text-[10px] font-medium',
+                          row.status === 'completed' && 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400',
+                          row.status === 'failed' && 'bg-destructive/15 text-destructive',
+                          TILING_ACTIVE.includes(row.status) && 'bg-primary/15 text-primary',
+                          row.status === 'draft' && 'bg-muted text-muted-foreground',
+                        )}
+                      >
+                        {STATUS_LABEL[row.status]}
+                      </span>
+                    </td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">{Array.isArray(row.tiles) ? row.tiles.length : '—'}</td>
+                    <td className="px-3 py-1.5 tabular-nums text-muted-foreground">{time(row.updated)}</td>
+                    <td className="px-3 py-1 text-right">
+                      <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={() => onOpen(row)}>
+                        Abrir
+                      </Button>
+                      <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-muted-foreground" title="Apagar" onClick={() => onRemove(row)}>
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function ExportPanel({
+  current,
+  running,
+  dirty,
+  errors,
+  downloads,
+  panels,
+}: {
+  current: TilingProject | null
+  running: boolean
+  dirty: boolean
+  errors: number
+  downloads: { pdf?: string; zip?: string; guide?: string }
+  panels: number
+}) {
+  if (!current || current.status === 'draft') {
+    return (
+      <p className="px-3 py-3 text-xs text-muted-foreground">
+        {errors
+          ? `Corrija ${errors} erro(s) na aba Problemas antes de exportar.`
+          : 'Ainda não exportado. "Exportar" gera o PDF com todos os painéis, um PDF por painel (ZIP) e o guia de instalação.'}
+      </p>
+    )
+  }
+  if (running) {
+    return (
+      <div className="space-y-2 px-3 py-3 text-xs">
+        <div className="flex items-center justify-between">
+          <span className="flex items-center gap-2">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            {current.current_step || 'Na fila do analisador'}
+          </span>
+          <span className="tabular-nums text-muted-foreground">{current.progress}%</span>
+        </div>
+        <Progress value={current.progress} className="h-1.5" />
+      </div>
+    )
+  }
+  if (current.status === 'failed') {
+    return <p className="px-3 py-3 text-xs text-destructive">A exportação falhou: {current.error_message || 'sem detalhes'}</p>
+  }
+  return (
+    <div className="space-y-2 px-3 py-3 text-xs">
+      <p className="flex items-center gap-2 text-foreground">
+        <CircleCheck className="h-4 w-4 text-emerald-600" />
+        {current.result.panels ?? panels} painéis exportados em {current.completed_at ? time(current.completed_at) : time(current.updated)}.
+      </p>
+      {dirty && (
+        <p className="flex items-center gap-2 text-amber-700 dark:text-amber-400">
+          <AlertTriangle className="h-3.5 w-3.5" />
+          O projeto mudou depois da exportação: os arquivos abaixo estão desatualizados. Exporte de novo.
+        </p>
+      )}
+      {current.result.warnings?.map((w) => (
+        <p key={w} className="text-amber-700 dark:text-amber-400">
+          {w}
+        </p>
+      ))}
+      <div className="flex flex-wrap gap-2">
+        {downloads.pdf && (
+          <Button size="sm" variant="outline" className="h-7 text-xs" asChild>
+            <a href={downloads.pdf} target="_blank" rel="noreferrer">
+              <Download className="h-3.5 w-3.5" />
+              Todos os painéis (PDF)
+            </a>
+          </Button>
+        )}
+        {downloads.zip && !!current.result.sizes?.zip && (
+          <Button size="sm" variant="outline" className="h-7 text-xs" asChild>
+            <a href={downloads.zip} target="_blank" rel="noreferrer">
+              <FileArchive className="h-3.5 w-3.5" />
+              Um arquivo por painel (ZIP)
+            </a>
+          </Button>
+        )}
+        {downloads.guide && (
+          <Button size="sm" variant="outline" className="h-7 text-xs" asChild>
+            <a href={downloads.guide} target="_blank" rel="noreferrer">
+              <Download className="h-3.5 w-3.5" />
+              Guia de instalação
+            </a>
+          </Button>
+        )}
+      </div>
     </div>
   )
 }

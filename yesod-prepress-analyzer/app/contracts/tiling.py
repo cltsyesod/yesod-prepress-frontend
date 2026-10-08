@@ -52,6 +52,8 @@ class TilingTile(BaseModel):
     """Print window: the logical part plus overlaps and the outer bleed."""
     white: Edges = Field(default_factory=Edges)
     """Unprinted glue/weld area added outside the print window, per edge."""
+    rotation: Literal[0, 90, 180, 270] = 0
+    """How the panel goes on the media (clockwise): 90 = lying, +180 for flip-flop."""
 
 
 class TilingConstraint(BaseModel):
@@ -65,7 +67,8 @@ class TilingConstraint(BaseModel):
     printable_length_mm: float = Field(
         default=0, ge=0, validation_alias=AliasChoices("printableLength", "printable_length_mm")
     )
-    direction: Literal["standing", "lying"] = "standing"
+    direction: Literal["standing", "lying", "auto"] = "standing"
+    """With "auto" each panel brings its own rotation."""
 
 
 class TilingSeam(BaseModel):

@@ -1,8 +1,7 @@
-import { Eye, EyeOff, RotateCcw } from 'lucide-react'
+import { Eye, EyeOff } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { EdgesInput } from '@/components/tiling/EdgesInput'
+import { Field, NumberField, Readout, Section, TextField, fmtSize } from '@/components/tiling/fields'
 import {
   EDGES,
   applyToGrid,
@@ -15,8 +14,7 @@ import {
   type TilingProjectModel,
 } from '@/domain/tiling'
 
-const mm = (v: number) => Math.round(v)
-const size = (r: { w: number; h: number }) => `${mm(r.w)} × ${mm(r.h)} mm`
+export const ROTATION_LABEL: Record<number, string> = { 0: 'Em pé', 90: 'Deitado', 180: 'Em pé, 180°', 270: 'Deitado, 180°' }
 
 /** Valor comum de uma borda entre os painéis escolhidos (vazio se forem diferentes). */
 function common(project: TilingProjectModel, keys: string[], field: 'overlap' | 'white'): Partial<Edges> {
@@ -43,100 +41,110 @@ export function TileInspector({
   const allOff = tiles.every((t) => !t.enabled)
   const effective = (field: 'overlap' | 'white'): Edges =>
     single ? single[field] : { ...project.rules[field], ...common(project, keys, field) }
+  const custom = (field: 'overlap' | 'white') => Object.keys(common(project, keys, field)).length > 0
 
   return (
-    <div className="space-y-3 rounded-lg border border-border bg-card p-3 text-sm">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="font-medium text-foreground">
-          {single
-            ? `Painel ${single.id}${single.enabled ? ` · nº ${String(single.number).padStart(2, '0')}` : ' · não imprime'}`
-            : `${tiles.length} painéis: ${tiles.map((t) => t.id).join(', ')}`}
-        </p>
-        <Button size="sm" variant="outline" onClick={() => onChange(setEnabled(project, keys, allOff))}>
-          {allOff ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
-          {allOff ? 'Imprimir' : 'Não imprimir'}
-        </Button>
-      </div>
+    <>
+      <Section
+        title={single ? `Painel ${single.id}` : `${tiles.length} painéis`}
+        action={
+          <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={() => onChange(setEnabled(project, keys, allOff))}>
+            {allOff ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+            {allOff ? 'Imprimir' : 'Não imprimir'}
+          </Button>
+        }
+      >
+        {!single && <p className="text-xs text-muted-foreground">{tiles.map((t) => t.id).join(', ')}</p>}
+        {single && (
+          <>
+            <Field label="Número" wide>
+              <NumberField
+                unit=""
+                integer
+                min={1}
+                allowEmpty
+                value={project.tiles[single.key]?.number}
+                placeholder={single.enabled ? String(single.number) : '—'}
+                onCommit={(n) => onChange(setTileInfo(project, single.key, { number: n }))}
+              />
+            </Field>
+            <Field label="Arquivo" wide>
+              <TextField
+                value={project.tiles[single.key]?.name ?? ''}
+                placeholder={single.name}
+                onCommit={(name) => onChange(setTileInfo(project, single.key, { name: name || undefined }))}
+              />
+            </Field>
+            <Field label="Região" wide>
+              <TextField
+                value={project.tiles[single.key]?.zone ?? ''}
+                placeholder="ex.: Lateral esquerda"
+                onCommit={(zone) => onChange(setTileInfo(project, single.key, { zone: zone || undefined }))}
+              />
+            </Field>
+          </>
+        )}
+      </Section>
 
-      {single && (
-        <div className="grid grid-cols-[72px_1fr] items-center gap-2">
-          <Label className="text-xs text-muted-foreground">Número</Label>
-          <Input
-            className="h-8"
-            inputMode="numeric"
-            value={project.tiles[single.key]?.number ?? ''}
-            placeholder={String(single.number)}
-            onChange={(e) => {
-              const n = Math.round(Number(e.target.value))
-              onChange(setTileInfo(project, single.key, { number: e.target.value.trim() && n > 0 ? n : undefined }))
-            }}
+      {single && single.enabled && (
+        <Section title="Medidas">
+          <Readout label="Cobre da arte" hint="Parte da arte que é deste painel" value={`${fmtSize(single.logical)} mm`} />
+          <Readout label="Impresso" hint="Cobre + sobreposições + sangria" value={`${fmtSize(single.print)} mm`} />
+          <Readout label="Painel físico" hint="Impresso + área branca de colagem" value={`${fmtSize(single.physical)} mm`} strong />
+          <Readout label="Na mídia" value={ROTATION_LABEL[single.rotation]} />
+          <Readout
+            label="Vizinhos"
+            value={
+              (['left', 'top', 'right', 'bottom'] as const)
+                .filter((e) => single.neighbours[e])
+                .map((e) => `${{ left: 'E', top: 'C', right: 'D', bottom: 'B' }[e]} ${single.neighbours[e]}`)
+                .join(' · ') || '—'
+            }
           />
-          <Label className="text-xs text-muted-foreground">Arquivo</Label>
-          <Input
-            className="h-8"
-            value={project.tiles[single.key]?.name ?? ''}
-            placeholder={single.name}
-            onChange={(e) => onChange(setTileInfo(project, single.key, { name: e.target.value || undefined }))}
-          />
-          <Label className="text-xs text-muted-foreground">Região</Label>
-          <Input
-            className="h-8"
-            value={project.tiles[single.key]?.zone ?? ''}
-            placeholder="ex.: Lateral esquerda, porta"
-            onChange={(e) => onChange(setTileInfo(project, single.key, { zone: e.target.value || undefined }))}
-          />
-        </div>
+        </Section>
       )}
 
       {(['overlap', 'white'] as const).map((field) => (
-        <div key={field} className="space-y-1.5">
-          <div className="flex items-center justify-between">
-            <Label className="text-xs">
-              {field === 'overlap' ? 'Sobreposição (mm)' : 'Área branca de colagem (mm)'}
-            </Label>
-            <div className="flex gap-1">
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-7 px-2 text-xs"
-                title="Usar o padrão do projeto"
-                onClick={() => onChange(resetTileEdges(project, keys, field))}
-              >
-                <RotateCcw className="h-3.5 w-3.5" />
-                Padrão
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-7 px-2 text-xs"
+        <Section
+          key={field}
+          title={field === 'overlap' ? 'Sobreposição' : 'Área branca'}
+          action={
+            <div className="flex gap-0.5">
+              {custom(field) && (
+                <button
+                  type="button"
+                  className="rounded px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+                  title="Voltar ao padrão do projeto"
+                  onClick={() => onChange(resetTileEdges(project, keys, field))}
+                >
+                  Padrão
+                </button>
+              )}
+              <button
+                type="button"
+                className="rounded px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
                 title="Estes valores viram o padrão de todos os painéis"
                 onClick={() => onChange(applyToGrid(project, field, effective(field)))}
               >
-                Aplicar a toda a grade
-              </Button>
+                Aplicar a todos
+              </button>
             </div>
-          </div>
+          }
+        >
           <EdgesInput
             value={common(project, keys, field)}
             placeholder={project.rules[field]}
             onChange={(edge, value) => onChange(setTileEdges(project, keys, field, { [edge]: value }))}
           />
-          {field === 'overlap' && single && (
-            <p className="text-xs text-muted-foreground">
-              Valendo: {EDGES.map((e) => `${{ top: 'C', right: 'D', bottom: 'B', left: 'E' }[e]} ${mm(single.overlap[e])}`).join(' · ')}
-              {' '}(sem painel vizinho, a borda fica sem sobreposição)
-            </p>
-          )}
-        </div>
+          <p className="text-[11px] text-muted-foreground">
+            {field === 'overlap'
+              ? single
+                ? `Valendo: ${EDGES.map((e) => `${{ top: 'C', right: 'D', bottom: 'B', left: 'E' }[e]} ${Math.round(single.overlap[e])}`).join(' · ')}. Sem vizinho, a borda fica sem sobreposição.`
+                : 'Campo vazio = padrão do projeto.'
+              : 'Sem tinta, fora da imagem. Campo vazio = padrão do projeto.'}
+          </p>
+        </Section>
       ))}
-
-      {single && single.enabled && (
-        <p className="text-xs text-muted-foreground">
-          Cobre {size(single.logical)} · impresso {size(single.print)}
-          {(single.physical.w !== single.print.w || single.physical.h !== single.print.h) &&
-            ` · painel com área branca ${size(single.physical)}`}
-        </p>
-      )}
-    </div>
+    </>
   )
 }

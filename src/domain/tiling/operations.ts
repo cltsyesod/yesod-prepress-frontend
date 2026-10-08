@@ -5,10 +5,12 @@
  */
 
 import { cellGroups, cellKey, parseCell } from './engine'
+import { printableWidthOf } from './media'
 import {
   type Edge,
   type Edges,
   type GapSetting,
+  type MediaSettings,
   type Poster,
   type PrintConstraint,
   type TileSettings,
@@ -66,9 +68,27 @@ export interface GridRequest {
 
 /** Grade automática pelo material e pelas regras padrão (sobreposição, branco, sangria). */
 export function autoGrid(project: TilingProjectModel, request: GridRequest): TilingProjectModel {
+  const { constraint } = project
+  let lines: { xs: number[]; ys: number[] }
+  if (constraint.direction === 'auto') {
+    // Automático: a orientação que dá menos painéis (empate: em pé).
+    const standing = gridLines(project, request, true)
+    const lying = gridLines(project, request, false)
+    const count = (g: { xs: number[]; ys: number[] }) => (g.xs.length - 1) * (g.ys.length - 1)
+    lines = count(lying) < count(standing) ? lying : standing
+  } else lines = gridLines(project, request, constraint.direction === 'standing')
+  return {
+    ...project,
+    grid: { ...lines, mode: 'auto', lockedColumns: [], lockedRows: [] },
+    merged: [],
+    tiles: {},
+    gaps: {},
+  }
+}
+
+function gridLines(project: TilingProjectModel, request: GridRequest, standing: boolean) {
   const { poster, rules, constraint } = project
   const bleed = (e: Edge) => Math.min(rules.bleed[e], poster.availableBleed[e])
-  const standing = constraint.direction === 'standing'
   const maxW = standing ? constraint.printableWidth : constraint.printableLength
   const maxH = standing ? constraint.printableLength : constraint.printableWidth
   const xs =
@@ -99,13 +119,21 @@ export function autoGrid(project: TilingProjectModel, request: GridRequest): Til
           },
           request.mode,
         )
-  return {
-    ...project,
-    grid: { xs, ys, mode: 'auto', lockedColumns: [], lockedRows: [] },
-    merged: [],
-    tiles: {},
-    gaps: {},
-  }
+  return { xs, ys }
+}
+
+/** Mídia na impressora: a largura imprimível passa a ser calculada a partir dela. */
+export function setMedia(project: TilingProjectModel, media: MediaSettings | undefined): TilingProjectModel {
+  const constraint: PrintConstraint = media
+    ? { ...project.constraint, media, printableWidth: printableWidthOf(media) }
+    : { ...project.constraint, media: undefined }
+  return { ...project, constraint }
+}
+
+export const setConstraint = (project: TilingProjectModel, patch: Partial<PrintConstraint>): TilingProjectModel => {
+  const constraint = { ...project.constraint, ...patch }
+  if (constraint.media) constraint.printableWidth = printableWidthOf(constraint.media)
+  return { ...project, constraint }
 }
 
 export function newProject(

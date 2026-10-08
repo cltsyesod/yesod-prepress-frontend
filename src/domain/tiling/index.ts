@@ -3,3 +3,4 @@ export { calculateProject, cellGroups, cellKey, fillName, parseCell } from './en
 export * from './operations'
 export { hasErrors, PDF_MAX_MM, validateProject } from './validate'
 export { edgesForSide, isLegacy, migrateLegacy } from './migrate'
+export { defaultMedia, layoutMedia, onMedia, orientationOf, printableWidthOf, rotationOf } from './media'

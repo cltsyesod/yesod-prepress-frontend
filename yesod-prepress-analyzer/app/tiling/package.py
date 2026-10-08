@@ -95,6 +95,7 @@ def build_package(
                         "row": tile.row,
                         "visibleMm": [round(tile.visible.w, 1), round(tile.visible.h, 1)],
                         "printedMm": [round(printed.w, 1), round(printed.h, 1)],
+                        "rotation": tile.rotation,
                         "neighbours": sides.get(tile.number, {}),
                     }
                 )

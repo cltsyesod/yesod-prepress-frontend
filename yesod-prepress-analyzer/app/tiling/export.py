@@ -201,6 +201,10 @@ def build_panels(
         )
         page.obj.TrimBox = pikepdf.Array([round(c, 4) for c in logical])
         page.obj.BleedBox = pikepdf.Array([round(c, 4) for c in (px, py, px + pw, py + ph)])
+        # The page goes out turned the way it sits on the media (lying, flip-flop); the
+        # content and the boxes are untouched, only /Rotate tells the RIP how to place it.
+        if tile.rotation:
+            page.obj.Rotate = tile.rotation
         geometry = _PageGeometry(
             physical=(margin, margin, margin + phys_w, margin + phys_h),
             printed=(px, py, px + pw, py + ph),
@@ -342,13 +346,13 @@ def check_constraint(tiles: list[TilingTile], frame: ArtFrame, constraint) -> No
 
     if constraint.printable_width_mm <= 0:
         return
-    standing = constraint.direction == "standing"
     problems = []
     for tile in tiles:
         p = printed_area(tile, frame)
         w = p.w + tile.white.left + tile.white.right
         h = p.h + tile.white.top + tile.white.bottom
-        across, along = (w, h) if standing else (h, w)
+        lying = tile.rotation % 180 != 0 if tile.rotation else constraint.direction == "lying"
+        across, along = (h, w) if lying else (w, h)
         label = tile.id or f"{tile.number}"
         if across > constraint.printable_width_mm + 0.01:
             problems.append(

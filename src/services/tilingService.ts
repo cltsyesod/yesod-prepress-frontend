@@ -108,6 +108,7 @@ export function exportPayload(geometry: ProjectGeometry) {
       logical: t.logical,
       print: t.print,
       white: t.white,
+      rotation: t.rotation,
     }))
   const seams = geometry.seams.map((s) => ({
     orientation: s.orientation,

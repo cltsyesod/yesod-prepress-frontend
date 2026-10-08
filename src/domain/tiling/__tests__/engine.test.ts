@@ -4,20 +4,24 @@ import {
   applyToGrid,
   autoGrid,
   calculateProject,
+  defaultMedia,
   hasErrors,
   mergeTiles,
   migrateLegacy,
   moveLine,
   newProject,
   removeLine,
+  setConstraint,
   setEnabled,
   setGap,
+  setMedia,
   setSizes,
   setTileEdges,
   sizes,
   toggleLock,
   zeroEdges,
   type Edges,
+  type MediaSettings,
   type TilingProjectModel,
 } from '../index'
 
@@ -220,6 +224,63 @@ describe('grade automática pelo material', () => {
     const { issues, tiles } = calculateProject(p)
     expect(hasErrors(issues)).toBe(false)
     expect(Math.max(...tiles.map((t) => t.physical.w))).toBe(1025)
+  })
+})
+
+describe('mídia', () => {
+  const media = (patch: Partial<MediaSettings> = {}): MediaSettings => ({ ...defaultMedia(1600), ...patch })
+
+  it('largura imprimível = mídia menos margens e barra de cor', () => {
+    const p = setMedia(project(3000, 1000, 2, 1), media({ marginLeft: 5, marginRight: 5, colorBar: 10 }))
+    expect(p.constraint.printableWidth).toBe(1580)
+    expect(hasErrors(calculateProject(p).issues)).toBe(false)
+    const none = setMedia(p, media({ width: 20, marginLeft: 10, marginRight: 10 }))
+    expect(calculateProject(none).issues.map((i) => i.code)).toContain('MEDIA_NO_PRINTABLE_AREA')
+  })
+
+  it('automático: deita o painel que só cabe deitado', () => {
+    let p = project(1200, 800, 1, 1)
+    p = setConstraint(p, { printableWidth: 1000, direction: 'auto' })
+    expect(tile(p, 'L1C1').rotation).toBe(90)
+    expect(hasErrors(calculateProject(p).issues)).toBe(false)
+    p = setConstraint(p, { direction: 'standing' })
+    expect(calculateProject(p).issues.map((i) => i.code)).toContain('TILE_EXCEEDS_WIDTH')
+  })
+
+  it('automático na grade: escolhe a orientação com menos painéis', () => {
+    let p = project(3000, 900, 1, 1)
+    p = autoGrid(setConstraint(p, { printableWidth: 1000, direction: 'auto' }), { mode: 'equal' })
+    // Em pé seriam 3 colunas; deitado, a altura de 900 cabe na largura: 1 linha, 1 painel de 3000 de comprimento.
+    expect(calculateProject(p).tiles).toHaveLength(1)
+    expect(tile(p, 'L1C1').rotation).toBe(90)
+  })
+
+  it('flip-flop gira 180° as colunas alternadas', () => {
+    let p = project(3000, 1000, 3, 1)
+    p = setConstraint(p, { printableWidth: 1100, flipFlop: true })
+    expect(['L1C1', 'L1C2', 'L1C3'].map((id) => tile(p, id).rotation)).toEqual([0, 180, 0])
+  })
+
+  it('distribuição na mídia: lado a lado, comprimento, desperdício e custo', () => {
+    let p = project(2000, 1000, 4, 1)
+    p = setMedia(p, media({ width: 1100, spacing: 10, pricePerM2: 20 }))
+    const layout = calculateProject(p).media!
+    // 4 painéis de 500 × 1000: dois por fileira (500 + 10 + 500 ≤ 1100), duas fileiras.
+    expect(layout.placements.map((m) => [m.x, m.y])).toEqual([[0, 0], [510, 0], [0, 1010], [510, 1010]])
+    expect(layout.length).toBe(2010)
+    expect(layout.mediaArea).toBeCloseTo(2.211, 3)
+    expect(layout.panelArea).toBe(2)
+    expect(layout.waste).toBeCloseTo(1 - 2 / 2.211, 3)
+    expect(layout.cost).toBeCloseTo(44.22, 2)
+  })
+
+  it('a margem das marcas gasta mídia e avisa quando passa da largura', () => {
+    let p = project(1000, 1000, 1, 1)
+    p = setConstraint(p, { printableWidth: 1010 })
+    const g = calculateProject(p, { marksMargin: 10 })
+    expect(g.media!.placements[0].across).toBe(1020)
+    expect(g.issues.map((i) => i.code)).toContain('MARKS_OUTSIDE_MEDIA')
+    expect(hasErrors(g.issues)).toBe(false)
   })
 })
 
