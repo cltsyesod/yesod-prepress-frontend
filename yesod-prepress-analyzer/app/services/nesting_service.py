@@ -8,6 +8,7 @@ from app.contracts.nesting import NestingCallback, NestingRequest
 from app.core.config import Settings
 from app.core.exceptions import AnalyzerError
 from app.nesting.imposition import CutLines
+from app.nesting.marks import Marks
 from app.nesting.planner import PlanItem, PlanOptions, plan
 from app.services.callback_client import CallbackClient
 from app.services.file_downloader import FileDownloader
@@ -87,6 +88,15 @@ class NestingService:
                         merge_mm=request.cut_lines.merge_mm,
                         cut_holes=request.cut_lines.cut_holes,
                         white_is_background=request.cut_lines.white_background != "keep",
+                    ),
+                    marks=Marks(
+                        registration=request.marks.registration,
+                        shape=request.marks.shape,
+                        size_mm=request.marks.size_mm,
+                        distance_mm=request.marks.distance_mm,
+                        spacing_mm=request.marks.spacing_mm,
+                        crop_marks=request.marks.crop_marks,
+                        slug=request.marks.slug,
                     ),
                     max_roll_length_mm=material.max_roll_length_mm,
                 )

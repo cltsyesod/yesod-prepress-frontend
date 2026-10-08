@@ -42,6 +42,22 @@ def pdf_path(geometry: BaseGeometry, *, smooth: bool = False, tolerance: float =
     return " ".join(ops)
 
 
+def circle(cx: float, cy: float, r: float) -> str:
+    """Closed circle path (four Bézier arcs)."""
+
+    k = 0.5523 * r
+    arcs = [
+        ((cx + r, cy + k), (cx + k, cy + r), (cx, cy + r)),
+        ((cx - k, cy + r), (cx - r, cy + k), (cx - r, cy)),
+        ((cx - r, cy - k), (cx - k, cy - r), (cx, cy - r)),
+        ((cx + k, cy - r), (cx + r, cy - k), (cx + r, cy)),
+    ]
+    ops = [f"{_num(cx + r)} {_num(cy)} m"]
+    for points in arcs:
+        ops.append(" ".join(f"{_num(x)} {_num(y)}" for x, y in points) + " c")
+    return " ".join(ops) + " h"
+
+
 def _straight(points: list[tuple[float, float]]) -> str:
     head = f"{_num(points[0][0])} {_num(points[0][1])} m "
     return head + " ".join(f"{_num(x)} {_num(y)} l" for x, y in points[1:]) + " h"

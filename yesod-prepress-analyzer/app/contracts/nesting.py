@@ -91,6 +91,28 @@ class NestingCutLines(BaseModel):
     )
 
 
+class NestingMarks(BaseModel):
+    """Marks around the pieces; shapes and sizes follow the operator's plotter."""
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    registration: Literal["none", "sides", "corners"] = "none"
+    shape: Literal["square", "circle"] = "square"
+    size_mm: float = Field(
+        default=3.0, gt=0, le=50, validation_alias=AliasChoices("sizeMm", "size_mm")
+    )
+    distance_mm: float = Field(
+        default=5.0, ge=0, le=200, validation_alias=AliasChoices("distanceMm", "distance_mm")
+    )
+    spacing_mm: float = Field(
+        default=500.0, ge=0, le=5080, validation_alias=AliasChoices("spacingMm", "spacing_mm")
+    )
+    crop_marks: bool = Field(
+        default=False, validation_alias=AliasChoices("cropMarks", "crop_marks")
+    )
+    slug: str = Field(default="", max_length=200)
+
+
 class NestingRequest(BaseModel):
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
@@ -104,6 +126,7 @@ class NestingRequest(BaseModel):
     cut_lines: NestingCutLines = Field(
         default_factory=NestingCutLines, validation_alias=AliasChoices("cutLines", "cut_lines")
     )
+    marks: NestingMarks = Field(default_factory=NestingMarks)
     items: list[NestingSource] = Field(min_length=1, max_length=200)
 
 

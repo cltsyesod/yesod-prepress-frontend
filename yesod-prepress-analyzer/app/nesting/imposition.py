@@ -19,9 +19,11 @@ from shapely.ops import linemerge, unary_union
 
 from app.fixes.paths import pdf_path
 from app.nesting.engine import Material, NestResult, Placement
+from app.nesting.marks import SLUG_BAND, Marks, crop_marks, registration_marks, slug
 from app.nesting.shapes import PieceShape
 
-_PATH_TOLERANCE_PT = 0.03 * 72 / 25.4  # generated die lines, at final size
+MM_PT = 72 / 25.4
+_PATH_TOLERANCE_PT = 0.03 * MM_PT  # generated die lines, at final size
 _COMMON_LINE_GAP = 0.05  # pt: with no gap between pieces, touching edges share one cut
 _SNAP_PT = 0.6  # placement tolerance between touching rectangles
 
@@ -151,8 +153,22 @@ def build_layout(
     material: Material,
     sources: dict[str, SourcePiece],
     cut_lines: CutLines,
+    marks: Marks | None = None,
 ) -> pikepdf.Pdf:
+    """`material.margin` already includes the band kept free for registration marks."""
+
+    marks = marks or Marks()
+    edge = max(0.0, material.margin - marks.band)  # the real material margin
     out = pikepdf.Pdf.new()
+    font = out.make_indirect(
+        pikepdf.Dictionary(
+            Type=pikepdf.Name.Font,
+            Subtype=pikepdf.Name.Type1,
+            BaseFont=pikepdf.Name.Helvetica,
+            Encoding=pikepdf.Name.WinAnsiEncoding,
+        )
+    )
+    used_sheets = [sheet for sheet in result.sheets if sheet.placements]
     forms: dict[tuple[int, int], pikepdf.Object] = {}
     layers: dict[str, pikepdf.Object] = {}
 
@@ -178,17 +194,19 @@ def build_layout(
             pikepdf.Dictionary(Type=pikepdf.Name.ExtGState, OP=True, op=True, OPM=1)
         )
 
-    for sheet in result.sheets:
-        if not sheet.placements:
-            continue
+    for number, sheet in enumerate(used_sheets, start=1):
         length = (
-            material.length if material.length is not None else sheet.used_length + material.margin
+            material.length
+            if material.length is not None
+            else sheet.used_length + material.margin + (SLUG_BAND if marks.slug else 0.0)
         )
         out.add_blank_page(page_size=(material.width, length))
         page = out.pages[-1]
         content: list[str] = []
         cut_paths: list[str] = []
         straight: list[BaseGeometry] = []  # rectangles touching each other share cut lines
+        printed: list[BaseGeometry] = []
+        rectangles: list[tuple[BaseGeometry, BaseGeometry]] = []  # (trim, printed) for crop marks
         names: dict[tuple[int, int], pikepdf.Name] = {}
 
         for placement in sheet.placements:
@@ -207,11 +225,15 @@ def build_layout(
                     forms[page_key], pikepdf.Name.XObject, prefix="Pc"
                 )
             name = names[page_key]
-            clip = _path(placed(source.shape.bleed, source, placement))
+            area = placed(source.shape.bleed, source, placement)
+            printed.append(area)
             # Even-odd: holes cut out of a piece stay out of its clip.
-            content.append(f"q {clip} W* n {_matrix(source, placement)} {name} Do Q")
+            content.append(f"q {_path(area)} W* n {_matrix(source, placement)} {name} Do Q")
+            trim = placed(source.shape.cut, source, placement)
+            if not source.shape.from_die_line and _is_rectangle(trim):
+                rectangles.append((trim, area))
             if cut_lines.add and not source.shape.from_die_line:
-                cut = placed(source.shape.cut, source, placement)
+                cut = trim
                 if material.gap <= _COMMON_LINE_GAP and _is_rectangle(cut):
                     straight.append(cut)
                 else:
@@ -229,5 +251,27 @@ def build_layout(
                 + " ".join(f"{path} S" for path in cut_paths)
                 + " Q EMC"
             )
-        page.contents_add("\n".join(content).encode())
+
+        # Marks: in the free band along the edges or clear of every piece, never on art.
+        keep_out = unary_union(printed)
+        content.append(registration_marks(marks, material.width, length, edge))
+        content.append(crop_marks(marks, rectangles, keep_out))
+        if marks.slug.strip() and label_fits(sheet.used_length, length, material.margin):
+            text = marks.slug + (f" · {number}/{len(used_sheets)}" if len(used_sheets) > 1 else "")
+            content.append(
+                slug(
+                    text,
+                    material.margin,
+                    sheet.used_length + max(material.gap, 1 * MM_PT),
+                    material.width - material.margin,
+                    keep_out,
+                    str(page.add_resource(font, pikepdf.Name.Font, prefix="Slug")),
+                )
+            )
+        # Slug text is WinAnsi; everything else is ASCII.
+        page.contents_add("\n".join(c for c in content if c).encode("cp1252", "replace"))
     return out
+
+
+def label_fits(used_length: float, length: float, margin: float) -> bool:
+    return used_length + SLUG_BAND <= length - margin + 1e-6

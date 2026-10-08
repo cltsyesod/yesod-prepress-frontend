@@ -20,7 +20,7 @@ from app.core.exceptions import AnalyzerError
 from app.fixes.contour import artwork_silhouette, contour_die_line
 from app.fixes.geometry import MM, Box, describe_mm, expand, intersect, target_trim, visible_box
 from app.fixes.magenta import convert_magenta_strokes
-from app.fixes.paths import pdf_path
+from app.fixes.paths import circle, pdf_path
 
 # Order matters: boxes first, because the die line and the marks use the TrimBox; a
 # magenta die line converted to the cut separation counts as the die line afterwards.
@@ -319,15 +319,63 @@ def _add_crop_marks(pdf: pikepdf.Pdf, profile: ProductionProfile, params: dict) 
             for x, direction in ((x0, -1), (x1, 1)):
                 start, end = x + direction * reach, x + direction * (reach + length)
                 segments.append(f"{_num(start)} {_num(y)} m {_num(end)} {_num(y)} l")
+        extras = []
+        if params.get("registrationTargets"):
+            # Registration targets (circle + cross) at the middle of each side, in the
+            # same band as the marks: outside the bleed, never over the artwork.
+            r = min(length / 2, 3 * MM / scale)
+            middle = reach + length / 2
+            cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+            targets = ((cx, y0 - middle), (cx, y1 + middle), (x0 - middle, cy), (x1 + middle, cy))
+            for tx, ty in targets:
+                extras.append(
+                    circle(tx, ty, r * 0.6)
+                    + f" {_num(tx - r)} {_num(ty)} m {_num(tx + r)} {_num(ty)} l"
+                    + f" {_num(tx)} {_num(ty - r)} m {_num(tx)} {_num(ty + r)} l"
+                )
         page.contents_add(
-            (f"q {cs} CS 1 SCN {_num(width_pt)} w 0 J " + " ".join(segments) + " S Q\n").encode()
+            (
+                f"q {cs} CS 1 SCN {_num(width_pt)} w 0 J "
+                + " ".join(segments + extras)
+                + " S Q\n"
+            ).encode()
         )
+        text = str(params.get("slug") or "").strip()
+        if text:
+            label = _slug(page, text, x0, x1, y0 - reach - length, length, scale)
+            if label:
+                page.contents_add(label.encode("cp1252", "replace"))
         _record(page, "add_crop_marks")
         details.append(
             f"Página {info.number}: marcas em {describe_mm(trim, scale)} ({how}), "
             f"página ampliada para {describe_mm(outer, scale)}"
         )
     return AppliedFix(id="add_crop_marks", label="Marcas de corte inseridas", details=details)
+
+
+def _slug(
+    page: pikepdf.Page, text: str, x0: float, x1: float, y: float, band: float, scale: float
+) -> str:
+    """Identification text below the bottom crop-mark band, between the corner marks."""
+
+    size = min(6.0 / scale, band * 0.8)
+    inset = 2 * MM / scale
+    room = x1 - x0 - 2 * inset
+    # Helvetica averages about half an em per character; cut the text to the room.
+    fits = max(0, int(room / (size * 0.55)))
+    if fits < 4:
+        return ""
+    text = text if len(text) <= fits else text[: fits - 1] + "…"
+    safe = text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+    font = pikepdf.Dictionary(
+        Type=pikepdf.Name.Font,
+        Subtype=pikepdf.Name.Type1,
+        BaseFont=pikepdf.Name.Helvetica,
+        Encoding=pikepdf.Name.WinAnsiEncoding,
+    )
+    name = page.add_resource(font, pikepdf.Name.Font, prefix="YesodSlug")
+    at = f"{_num(x0 + inset)} {_num(y + band * 0.1)}"
+    return f"q BT {name} {_num(size)} Tf 0 0 0 1 k {at} Td ({safe}) Tj ET Q\n"
 
 
 _FIXES = {

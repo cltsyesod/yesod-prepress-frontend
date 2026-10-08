@@ -16,6 +16,7 @@ from app.nesting.engine import (
     used_efficiency,
 )
 from app.nesting.imposition import CutLines, SourcePiece, build_layout
+from app.nesting.marks import Marks
 from app.nesting.shapes import contour_pieces, page_pieces, scaled
 
 MM = 72 / 25.4
@@ -45,6 +46,7 @@ class PlanOptions:
     allow_rotation: bool = True
     rotation_step: float = 90.0
     cut_lines: CutLines = field(default_factory=CutLines)
+    marks: Marks = field(default_factory=Marks)
     max_roll_length_mm: float = 5000.0
 
 
@@ -56,11 +58,27 @@ def _rotations_for(piece_is_rectangle: bool, steps: tuple[float, ...]) -> tuple[
     return useful or (0.0,)
 
 
+def _has_bleed_around_trim(page: pikepdf.Page) -> bool:
+    """A rectangular job: the art runs past a defined TrimBox into the bleed.
+
+    Its cut is the TrimBox (the bleed exists to be cut off); tracing the artwork
+    would put the die line around the bleed instead.
+    """
+
+    trim, bleed = page.obj.get("/TrimBox"), page.obj.get("/BleedBox")
+    if trim is None or bleed is None:
+        return False
+    t = [float(v) for v in trim]
+    b = [float(v) for v in bleed]
+    return min(t[0] - b[0], t[1] - b[1], b[2] - t[2], b[3] - t[3]) > 0.5
+
+
 def plan(items: list[PlanItem], options: PlanOptions, output: Path) -> dict:
     material = Material(
         width=options.width_mm * MM,
         length=options.length_mm * MM if options.length_mm else None,
-        margin=options.margin_mm * MM,
+        # Pieces stay clear of the band where the plotter's registration marks go.
+        margin=options.margin_mm * MM + options.marks.band,
         gap=options.gap_mm * MM,
         max_roll_length=options.max_roll_length_mm * MM,
     )
@@ -81,7 +99,11 @@ def plan(items: list[PlanItem], options: PlanOptions, output: Path) -> dict:
                 page = pdf.pages[number - 1]
                 bleed_in_file = item.bleed_mm / item.file_scale * MM
                 shapes = page_pieces(page, item.cut_names, bleed_in_file, item.use_die_line)
-                if options.cut_lines.add and not shapes[0].from_die_line:
+                if (
+                    options.cut_lines.add
+                    and not shapes[0].from_die_line
+                    and not _has_bleed_around_trim(page)
+                ):
                     # No die line in the file: the system traces it around the artwork.
                     traced = contour_pieces(
                         item.path,
@@ -116,7 +138,7 @@ def plan(items: list[PlanItem], options: PlanOptions, output: Path) -> dict:
                     )
 
         result = nest(nest_items, material)
-        layout = build_layout(result, material, sources, options.cut_lines)
+        layout = build_layout(result, material, sources, options.cut_lines, options.marks)
         layout.save(output)
         summary = summarize(result, material, sources)
         summary["fill"] = spare_room(result, material, nest_items, items)
