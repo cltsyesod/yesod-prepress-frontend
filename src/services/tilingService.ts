@@ -14,7 +14,7 @@ import {
 
 const BUCKET = 'tiling'
 
-/** Imagem do veículo/fachada: só referência na tela e no guia, nunca impressa. */
+/** Imagem do local de instalação: só referência na tela e no guia, nunca impressa. */
 export interface TilingBackground {
   path: string
   xMm: number

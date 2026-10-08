@@ -864,7 +864,7 @@ export default function TilingPage() {
                       {art.pageCount > 1 && <Readout label="Páginas" value={art.pageCount} />}
                     </Section>
                     <Section title="Imagem de referência">
-                      <p className="text-[11px] text-muted-foreground">Gabarito do veículo ou foto da fachada. Só na tela e no guia, nunca nos painéis.</p>
+                      <p className="text-[11px] text-muted-foreground">Foto ou gabarito do local de instalação (fachada, parede, vitrine, veículo…). Só na tela e no guia, nunca nos painéis.</p>
                       <label className="flex cursor-pointer items-center gap-2 text-xs text-primary hover:underline">
                         <Upload className="h-3.5 w-3.5" />
                         {background ? 'Trocar imagem' : 'Enviar imagem (PNG, JPEG ou WebP)'}
@@ -1227,7 +1227,7 @@ export default function TilingPage() {
                     </Select>
                   )}
                   <div className="flex gap-1">
-                    <Input className="h-7 text-xs" placeholder="Nome (ex.: Sprinter lateral)" value={templateName} onChange={(e) => setTemplateName(e.target.value)} />
+                    <Input className="h-7 text-xs" placeholder="Nome do modelo (ex.: Empena 3 × 2)" value={templateName} onChange={(e) => setTemplateName(e.target.value)} />
                     <Button size="sm" variant="outline" className="h-7 text-xs" disabled={!templateName.trim()} onClick={saveTemplate}>
                       Salvar
                     </Button>
