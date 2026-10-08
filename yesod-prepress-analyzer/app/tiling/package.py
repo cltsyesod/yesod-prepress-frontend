@@ -16,6 +16,7 @@ from app.contracts.tiling import TilingRequest
 from app.tiling.crop import CropStats, ImageCache, cropped_source
 from app.tiling.cut import plan_cut
 from app.tiling.export import (
+    FinishingReport,
     TilingError,
     art_frame,
     build_panels,
@@ -32,6 +33,8 @@ class TilingOutput:
     pdf: Path
     zip: Path
     guide: Path
+    panels: dict[int, Path]
+    """Each panel's own PDF, by panel number."""
     summary: dict
 
 
@@ -59,8 +62,9 @@ def build_package(
         cut = plan_cut(source, index, frame, request.cut_settings)
 
         # All panels in one PDF: the artwork is stored once (ideal to send to the RIP).
+        report = FinishingReport()
         build_panels(
-            pdf, index, frame, tiles, request.marks, request.title, total, sides, cut
+            pdf, index, frame, tiles, request.marks, request.title, total, sides, cut, report
         ).save(pdf_path)
 
         guide = build_guide(
@@ -78,6 +82,9 @@ def build_package(
         guide.save(guide_path)
 
         used: set[str] = set()
+        panels_dir = workdir / "paineis"
+        panels_dir.mkdir(exist_ok=True)
+        panel_files: dict[int, Path] = {}
         decoded = ImageCache()
         crop_stats = CropStats()
         with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_STORED) as archive:
@@ -99,10 +106,11 @@ def build_package(
                 single = build_panels(
                     art, art_index, frame, [tile], request.marks, request.title, total, sides, cut
                 )
-                target = workdir / f"{unique}.pdf"
+                # Kept on disk: each panel is also uploaded on its own (single download).
+                target = panels_dir / f"{unique}.pdf"
                 single.save(target)
                 archive.write(target, f"paineis/{unique}.pdf")
-                target.unlink()
+                panel_files[tile.number] = target
                 printed = printed_area(tile, frame)
                 white = tile.white
                 files.append(
@@ -144,10 +152,15 @@ def build_package(
         pdf=pdf_path,
         zip=zip_path,
         guide=guide_path,
+        panels=panel_files,
         summary={
             "panels": total,
             "revision": revision,
             "files": files,
+            "finishing": {
+                "labelsShortened": sorted(report.labels_shortened),
+                "noRoomForMarks": report.no_room_for_marks,
+            },
             "cut": {
                 "contour": bool(cut and cut.contour is not None),
                 "panelEdge": bool(cut and cut.panel_edge),

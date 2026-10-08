@@ -85,12 +85,31 @@ Deno.serve(async (req: Request) => {
 
     const folder = `${user.id}/paineis/${tilingId}`
     const paths = { pdf: `${folder}/paineis.pdf`, zip: `${folder}/paineis.zip`, guide: `${folder}/guia.pdf` }
-    const outputs: Record<string, string> = {}
+    const outputs: Record<string, unknown> = {}
     for (const [key, path] of Object.entries(paths)) {
       const { data } = await db.storage.from('tiling').createSignedUploadUrl(path, { upsert: true })
       if (!data?.signedUrl) return fail('Falha ao preparar o envio dos arquivos')
       outputs[key] = data.signedUrl
     }
+    // Cada painel também vai sozinho, para baixar um painel sem o resto.
+    const numbers = [...new Set(tiling.tiles.map((t: any) => Number(t?.number)))].filter(
+      (n): n is number => Number.isInteger(n) && n > 0,
+    )
+    const panelUrls: Record<string, string> = {}
+    const panelPaths: Record<string, string> = {}
+    for (let i = 0; i < numbers.length; i += 20) {
+      await Promise.all(
+        numbers.slice(i, i + 20).map(async (n) => {
+          const path = `${folder}/paineis/${String(n).padStart(3, '0')}.pdf`
+          const { data } = await db.storage.from('tiling').createSignedUploadUrl(path, { upsert: true })
+          if (data?.signedUrl) {
+            panelUrls[n] = data.signedUrl
+            panelPaths[n] = path
+          }
+        }),
+      )
+    }
+    outputs.panels = panelUrls
 
     const config = tiling.config ?? {}
     const payload = JSON.stringify({
@@ -144,7 +163,7 @@ Deno.serve(async (req: Request) => {
         error_message: '',
         last_sequence: 0,
         external_job_id: String(accepted.external_job_id || ''),
-        output: paths,
+        output: { ...paths, panels: panelPaths },
         result: {},
         completed_at: null,
       })

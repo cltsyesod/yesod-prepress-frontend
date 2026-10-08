@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import pikepdf
@@ -157,8 +157,12 @@ def build_panels(
     total: int | None = None,
     sides: dict[int, dict[str, int]] | None = None,
     cut: CutPlan | None = None,
+    report: FinishingReport | None = None,
 ) -> pikepdf.Pdf:
-    """A PDF with one page per panel of `tiles` (in the order given)."""
+    """A PDF with one page per panel of `tiles` (in the order given).
+
+    `report` collects the panels whose label had to be shortened or left out, and whether
+    the margin was too small for marks."""
 
     from app.tiling.cut import cut_ops, cut_resources
 
@@ -228,11 +232,14 @@ def build_panels(
             content.append(drawn)
             if marks.label:
                 font_name = page.add_resource(font, pikepdf.Name.Font, prefix="F")
-                content.append(
-                    _panel_label(
-                        tile, printed, geometry, margin, font_name, title, total, sides, blocked
-                    )
+                label, shortened = _panel_label(
+                    tile, printed, geometry, margin, font_name, title, total, sides, blocked
                 )
+                content.append(label)
+                if shortened and report is not None:
+                    report.labels_shortened.add(tile.id or str(tile.number))
+        elif report is not None and (marks.crop_marks or marks.label or marks.center_marks):
+            report.no_room_for_marks = True
         page.contents_add("\n".join(c for c in content if c).encode("cp1252", "replace"))
     return out
 
@@ -354,8 +361,9 @@ def _panel_label(
     total: int,
     sides: dict[int, dict[str, int]],
     blocked: list[float] | None = None,
-) -> str:
-    """Top line in the top margin, bottom line in the bottom one, both clear of the marks."""
+) -> tuple[str, bool]:
+    """Top line in the top margin, bottom line in the bottom one, both clear of the marks.
+    Also says whether a line had to be shortened or left out."""
 
     size = max(4.0, min(10.0, margin * 0.4))
     top = tile.label_top
@@ -374,15 +382,27 @@ def _panel_label(
 
     x0, _, x1, y1 = geometry.physical
     ops = []
+    shortened = False
     for text, y in ((top, y1 + (margin - size) / 2), (bottom, (margin - size) / 2)):
-        placed = _fit(text.strip(), size, x0, x1, blocked or [])
+        wanted = text.strip()
+        placed = _fit(wanted, size, x0, x1, blocked or [])
         if placed is None:
+            shortened = shortened or bool(wanted)
             continue
         x, line = placed
+        shortened = shortened or line != wanted
         ops.append(
             f"BT {font} {_num(size)} Tf 0 0 0 1 k {_num(x)} {_num(y)} Td ({_text(line)}) Tj ET"
         )
-    return "\n".join(ops)
+    return "\n".join(ops), shortened
+
+
+@dataclass
+class FinishingReport:
+    """What the panel files could not carry in full."""
+
+    labels_shortened: set[str] = field(default_factory=set)
+    no_room_for_marks: bool = False
 
 
 def _default_head(tile: TilingTile, printed: Rect, title: str, total: int) -> str:

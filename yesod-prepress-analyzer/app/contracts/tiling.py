@@ -141,6 +141,10 @@ class TilingCut(BaseModel):
     )
     """Positive = outward from the art, negative = inward."""
     cut_holes: bool = Field(default=False, validation_alias=AliasChoices("cutHoles", "cut_holes"))
+    close_at_edge: bool = Field(
+        default=False, validation_alias=AliasChoices("closeAtEdge", "close_at_edge")
+    )
+    """Close the die line along the panel edge, so each panel is a closed cut piece."""
     white_background: Literal["ignore", "keep"] = Field(
         default="ignore", validation_alias=AliasChoices("whiteBackground", "white_background")
     )
@@ -166,6 +170,8 @@ class TilingOutputs(BaseModel):
     zip: AnyHttpUrl = Field(repr=False)
     """One PDF per panel, the guide and the configuration."""
     guide: AnyHttpUrl = Field(repr=False)
+    panels: dict[int, AnyHttpUrl] = Field(default_factory=dict, repr=False)
+    """One upload URL per panel number, to download a single panel."""
 
 
 class TilingRequest(BaseModel):

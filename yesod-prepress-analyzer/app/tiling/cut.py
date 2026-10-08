@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pikepdf
 from shapely import affinity
-from shapely.geometry import LineString, MultiLineString, box
+from shapely.geometry import LineString, MultiLineString, Polygon, box
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import linemerge
 
@@ -33,6 +33,8 @@ class CutPlan:
     contour: BaseGeometry | None
     """Die line in art millimetres (polygons; their outlines are cut)."""
     panel_edge: bool
+    close_at_edge: bool = False
+    """Closed pieces: where the die line leaves the panel, it runs along the panel edge."""
 
 
 def plan_cut(source: Path, page_index: int, frame: ArtFrame, cut: TilingCut) -> CutPlan | None:
@@ -63,7 +65,13 @@ def plan_cut(source: Path, page_index: int, frame: ArtFrame, cut: TilingCut) -> 
             contour = affinity.affine_transform(
                 die, [k, 0, 0, k, -frame.origin[0] * k, -frame.origin[1] * k]
             )
-    return CutPlan(cut.name.strip() or "CutContour", cut.line_width_pt, contour, cut.panel_edge)
+    return CutPlan(
+        cut.name.strip() or "CutContour",
+        cut.line_width_pt,
+        contour,
+        cut.panel_edge,
+        cut.close_at_edge,
+    )
 
 
 def _lines(geometry: BaseGeometry) -> list[LineString]:
@@ -72,6 +80,12 @@ def _lines(geometry: BaseGeometry) -> list[LineString]:
     if isinstance(geometry, MultiLineString):
         return [g for g in geometry.geoms if not g.is_empty]
     return [g for part in getattr(geometry, "geoms", []) for g in _lines(part)]
+
+
+def _polygons(geometry: BaseGeometry) -> list[Polygon]:
+    if isinstance(geometry, Polygon):
+        return [geometry] if not geometry.is_empty else []
+    return [g for part in getattr(geometry, "geoms", []) for g in _polygons(part)]
 
 
 def _num(value: float) -> str:
@@ -108,7 +122,26 @@ def cut_ops(
 
     paths: list[str] = []
     pieces = 0
-    if plan.contour is not None:
+
+    def to_page(x: float, y: float) -> tuple[float, float]:
+        return origin[0] + (x - printed.x) * MM, origin[1] + (y - printed.y) * MM
+
+    def ring(coords) -> str:
+        points = [to_page(x, y) for x, y in list(coords)[:-1]]
+        head = f"{_num(points[0][0])} {_num(points[0][1])} m "
+        return head + " ".join(f"{_num(x)} {_num(y)} l" for x, y in points[1:]) + " h"
+
+    if plan.contour is not None and plan.close_at_edge:
+        # The piece of the die line inside the panel, closed along the panel edge.
+        window = box(printed.x, printed.y, printed.x + printed.w, printed.y + printed.h)
+        for polygon in _polygons(plan.contour.intersection(window)):
+            polygon = polygon.simplify(_TOLERANCE_MM)
+            if polygon.is_empty or polygon.area <= 0:
+                continue
+            paths.append(ring(polygon.exterior.coords))
+            paths.extend(ring(hole.coords) for hole in polygon.interiors)
+            pieces += 1
+    elif plan.contour is not None:
         window = box(printed.x, printed.y, printed.x + printed.w, printed.y + printed.h)
         inside = _lines(plan.contour.boundary.intersection(window))
         # The cut of a ring can come back in two pieces that meet where the ring starts.

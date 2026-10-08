@@ -45,6 +45,8 @@ import { SeamInspector } from '@/components/tiling/SeamInspector'
 import { TileInspector } from '@/components/tiling/TileInspector'
 import { TilingCanvas } from '@/components/tiling/TilingCanvas'
 import { InstallPanel, areaColor } from '@/components/tiling/InstallPanel'
+import { PanelFilesView } from '@/components/tiling/PanelFilesView'
+import { artOutline } from '@/components/tiling/silhouette'
 import { Field, NumberField, Readout, Section, Segmented, TextField, fmt, fmtM, fmtMoney, fmtSize } from '@/components/tiling/fields'
 import {
   addLine,
@@ -55,6 +57,7 @@ import {
   defaultMedia,
   edgesForSide,
   fillLabel,
+  finishingIssues,
   LABEL_TOKENS,
   revisionTag,
   fitToPoster,
@@ -227,6 +230,8 @@ export default function TilingPage() {
   const [selectedSeam, setSelectedSeam] = useState<string | null>(null)
   const [confirm, setConfirm] = useState<{ title: string; message: string; action: string; run: () => void } | null>(null)
   const [leftTab, setLeftTab] = useState<LeftTab>('arte')
+  /** Prancheta: a grade sobre a arte (edição) ou os painéis como saem nos arquivos. */
+  const [canvasView, setCanvasView] = useState<'grade' | 'arquivos'>('grade')
   const [bottomTab, setBottomTab] = useState<BottomTab>('paineis')
 
   const [background, setBackground] = useState<TilingBackground | null>(null)
@@ -238,7 +243,7 @@ export default function TilingPage() {
   const [templates, setTemplates] = useState<TilingTemplate[]>([])
   const [templateName, setTemplateName] = useState('')
   const [busy, setBusy] = useState(false)
-  const [downloads, setDownloads] = useState<{ pdf?: string; zip?: string; guide?: string }>({})
+  const [downloads, setDownloads] = useState<Downloads>({})
   const [savedSignature, setSavedSignature] = useState<string | null>(null)
   const cleanOnLoad = useRef(false)
   const [revision, setRevision] = useState(1)
@@ -403,20 +408,48 @@ export default function TilingPage() {
     () => (project ? calculateProject(project, engineContext(revision)) : null),
     [project, projectName, job, prefs.marks.marginMm, revision], // eslint-disable-line react-hooks/exhaustive-deps
   )
-  const issues = useMemo(() => geometry?.issues ?? [], [geometry])
-  const errors = useMemo(() => issues.filter((i) => i.severity === 'error'), [issues])
-  const warnings = issues.filter((i) => i.severity === 'warning')
-  const flagged = useMemo(() => new Set(errors.map((e) => e.tile).filter(Boolean) as string[]), [errors])
   const selectedTiles = geometry?.tiles.filter((t) => selected.includes(t.key)) ?? []
   const single = selectedTiles.length === 1 ? selectedTiles[0] : null
   const seam = geometry?.seams.find((s) => s.id === selectedSeam) ?? null
-  const active = geometry?.tiles.filter((t) => t.enabled) ?? []
+  const active = useMemo(() => geometry?.tiles.filter((t) => t.enabled) ?? [], [geometry])
   const numbers = useMemo(() => Object.fromEntries((geometry?.tiles ?? []).map((t) => [t.id, t.number])), [geometry])
+
+  /** Etiqueta de um painel, como vai sair impressa. */
+  const labelOf = (template: string, tile: NonNullable<typeof geometry>['tiles'][number]) =>
+    fillLabel(template, tile, {
+      project: projectName,
+      client: job?.clientName,
+      total: active.length,
+      revision,
+      date: new Date().toLocaleDateString('pt-BR'),
+      numberOf: (id) => numbers[id],
+    })
+  const labels = useMemo(
+    () =>
+      new Map(
+        active.map((t) => [
+          t.id,
+          {
+            top: labelOf(prefs.marks.labelTop ?? DEFAULT_LABEL_TOP, t),
+            bottom: labelOf(prefs.marks.labelBottom ?? DEFAULT_LABEL_BOTTOM, t),
+          },
+        ]),
+      ),
+    [active, prefs.marks.labelTop, prefs.marks.labelBottom, projectName, job, revision, numbers], // eslint-disable-line react-hooks/exhaustive-deps
+  )
+  // Problemas do motor + avisos de acabamento (marcas sem espaço, etiqueta encurtada).
+  const issues = useMemo(
+    () => [...(geometry?.issues ?? []), ...finishingIssues(active, prefs.marks, labels)],
+    [geometry, active, prefs.marks, labels],
+  )
+  const errors = useMemo(() => issues.filter((i) => i.severity === 'error'), [issues])
+  const warnings = issues.filter((i) => i.severity === 'warning')
+  const flagged = useMemo(() => new Set(errors.map((e) => e.tile).filter(Boolean) as string[]), [errors])
 
   // ---- Salvo / alterado ---------------------------------------------------------------
   const signature = useMemo(
-    () => (project ? JSON.stringify([project, name, background, prefs.marks, prefs.request, pageNumber]) : ''),
-    [project, name, background, prefs.marks, prefs.request, pageNumber],
+    () => (project ? JSON.stringify([project, name, background, prefs.marks, prefs.cut, prefs.request, pageNumber]) : ''),
+    [project, name, background, prefs.marks, prefs.cut, prefs.request, pageNumber],
   )
   useEffect(() => {
     if (cleanOnLoad.current && project) {
@@ -435,16 +468,33 @@ export default function TilingPage() {
   )
   const outdated = !!current && current.id === tilingId && current.status === 'completed' && !!exportedHash && exportedHash !== hash
 
-  /** Etiqueta de um painel, como vai sair impressa. */
-  const labelOf = (template: string, tile: NonNullable<typeof geometry>['tiles'][number]) =>
-    fillLabel(template, tile, {
-      project: projectName,
-      client: job?.clientName,
-      total: active.length,
-      revision,
-      date: new Date().toLocaleDateString('pt-BR'),
-      numberOf: (id) => numbers[id],
-    })
+  // ---- Vista dos arquivos: prévia da faca pelo contorno -------------------------------
+  const artRect = useMemo(
+    () =>
+      art
+        ? {
+            x: ((art.visible[0] - art.trim[0]) * scale) / MM,
+            y: ((art.visible[1] - art.trim[1]) * scale) / MM,
+            w: ((art.visible[2] - art.visible[0]) * scale) / MM,
+            h: ((art.visible[3] - art.visible[1]) * scale) / MM,
+          }
+        : null,
+    [art, scale],
+  )
+  const [contourPreview, setContourPreview] = useState<string | null>(null)
+  useEffect(() => {
+    if (!art || !artRect || !prefs.cut.contour || canvasView !== 'arquivos') {
+      setContourPreview(null)
+      return
+    }
+    let cancelled = false
+    artOutline(art.url, artRect, { offsetMm: prefs.cut.offsetMm, whiteIsArt: prefs.cut.whiteBackground === 'keep' })
+      .then((path) => !cancelled && setContourPreview(path || null))
+      .catch(() => !cancelled && setContourPreview(null))
+    return () => {
+      cancelled = true
+    }
+  }, [art, artRect, prefs.cut.contour, prefs.cut.offsetMm, prefs.cut.whiteBackground, canvasView])
 
   // ---- Imagem de referência -----------------------------------------------------------
   useEffect(() => {
@@ -542,11 +592,21 @@ export default function TilingPage() {
       return
     }
     const output = current.output ?? {}
-    Promise.all(
-      (['pdf', 'zip', 'guide'] as const).map(
-        async (key) => [key, output[key] ? await tilingService.signedUrl(output[key]!).catch(() => '') : ''] as const,
+    // Painéis salvos sozinhos: só os que o analisador confirmou ter enviado.
+    const saved = new Set(current.result.panelFiles ?? [])
+    const panelPaths = Object.entries(output.panels ?? {}).filter(([n]) => saved.has(Number(n)))
+    Promise.all([
+      Promise.all(
+        (['pdf', 'zip', 'guide'] as const).map(
+          async (key) => [key, output[key] ? await tilingService.signedUrl(output[key]!).catch(() => '') : ''] as const,
+        ),
       ),
-    ).then((pairs) => setDownloads(Object.fromEntries(pairs)))
+      tilingService.signedUrls(panelPaths.map(([, path]) => path)).catch(() => ({}) as Record<string, string>),
+    ]).then(([pairs, urls]) => {
+      const panels: Record<number, string> = {}
+      for (const [n, path] of panelPaths) if (urls[path]) panels[Number(n)] = urls[path]
+      setDownloads({ ...Object.fromEntries(pairs), panels })
+    })
   }, [current?.id, current?.status, current?.updated]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const openSaved = async (row: TilingProject) => {
@@ -1193,6 +1253,14 @@ export default function TilingPage() {
                         Cortar os vazados internos
                       </CheckRow>
                       <CheckRow
+                        checked={!!prefs.cut.closeAtEdge}
+                        onChange={(closeAtEdge) => setPrefs((p) => ({ ...p, cut: { ...p.cut, closeAtEdge } }))}
+                      >
+                        <span title="Onde a faca sai do painel, ela segue pela borda do painel: cada painel vira uma peça de corte fechada. Desligado, o trecho termina aberto na borda.">
+                          Fechar a faca na borda de cada painel
+                        </span>
+                      </CheckRow>
+                      <CheckRow
                         checked={prefs.cut.whiteBackground === 'keep'}
                         onChange={(keep) => setPrefs((p) => ({ ...p, cut: { ...p.cut, whiteBackground: keep ? 'keep' : 'ignore' } }))}
                       >
@@ -1329,21 +1397,42 @@ export default function TilingPage() {
           <div className="relative min-h-[320px] flex-1 overflow-hidden bg-muted/60">
             {project && geometry ? (
               <>
+                <div className="absolute right-3 top-3 z-10 w-56 rounded-md bg-card/95 shadow-sm">
+                  <Segmented<'grade' | 'arquivos'>
+                    value={canvasView}
+                    onChange={setCanvasView}
+                    options={[
+                      { value: 'grade', label: 'Grade', hint: 'Editar a divisão sobre a arte' },
+                      { value: 'arquivos', label: 'Arquivos', hint: 'Cada painel como sai no PDF: margem, marcas, etiqueta e faca' },
+                    ]}
+                  />
+                </div>
+                {canvasView === 'arquivos' ? (
+                  <div className="absolute inset-0 p-3 pt-12">
+                    <PanelFilesView
+                      art={art && artRect ? { url: art.url, rect: artRect } : null}
+                      geometry={geometry}
+                      selected={selected}
+                      onSelectTile={selectTile}
+                      finishing={{
+                        marginMm: prefs.marks.marginMm,
+                        cropMarks: prefs.marks.cropMarks,
+                        overlapMarks: prefs.marks.overlapMarks ?? prefs.marks.cropMarks,
+                        centerMarks: !!prefs.marks.centerMarks,
+                        label: prefs.marks.label,
+                        labels,
+                        panelEdge: prefs.cut.panelEdge,
+                        contour: prefs.cut.contour ? contourPreview : null,
+                      }}
+                    />
+                    <p className="pointer-events-none absolute bottom-2 left-3 rounded border border-border bg-card/90 px-2 py-1 text-[10px] text-muted-foreground">
+                      Prévia dos arquivos. Em rosa, a faca{prefs.cut.contour ? ' (contorno aproximado; o exato é medido na exportação)' : ''}.
+                    </p>
+                  </div>
+                ) : (
                 <div className="absolute inset-0 p-3">
                   <TilingCanvas
-                    art={
-                      art
-                        ? {
-                            url: art.url,
-                            rect: {
-                              x: ((art.visible[0] - art.trim[0]) * scale) / MM,
-                              y: ((art.visible[1] - art.trim[1]) * scale) / MM,
-                              w: ((art.visible[2] - art.visible[0]) * scale) / MM,
-                              h: ((art.visible[3] - art.visible[1]) * scale) / MM,
-                            },
-                          }
-                        : null
-                    }
+                    art={art && artRect ? { url: art.url, rect: artRect } : null}
                     poster={{ w: project.poster.width, h: project.poster.height }}
                     background={
                       background && background.visible && backgroundUrl
@@ -1379,7 +1468,8 @@ export default function TilingPage() {
                     }}
                   />
                 </div>
-                <Legend />
+                )}
+                {canvasView === 'grade' && <Legend />}
               </>
             ) : (
               <EmptyState
@@ -1711,6 +1801,14 @@ function EmptyState({
 
 const ROTATION_SHORT: Record<number, string> = { 0: 'em pé', 90: 'deitado', 180: 'em pé 180°', 270: 'deitado 180°' }
 
+/** Endereços para baixar; `panels` = um por número de painel. */
+interface Downloads {
+  pdf?: string
+  zip?: string
+  guide?: string
+  panels?: Record<number, string>
+}
+
 function ExportPanel({
   current,
   running,
@@ -1725,7 +1823,7 @@ function ExportPanel({
   outdated: boolean
   nextRevision: string
   errors: number
-  downloads: { pdf?: string; zip?: string; guide?: string }
+  downloads: Downloads
   panels: number
 }) {
   if (!current || current.status === 'draft') {
@@ -1790,6 +1888,16 @@ function ExportPanel({
           .
         </p>
       )}
+      {current.result.finishing?.noRoomForMarks && (
+        <p className="text-amber-700 dark:text-amber-400">A margem técnica era pequena demais: os painéis saíram sem marcas e sem etiqueta.</p>
+      )}
+      {!!current.result.finishing?.labelsShortened.length && (
+        <p className="text-amber-700 dark:text-amber-400">
+          A etiqueta saiu encurtada em {current.result.finishing.labelsShortened.length} painel(is):{' '}
+          {current.result.finishing.labelsShortened.slice(0, 8).join(', ')}
+          {current.result.finishing.labelsShortened.length > 8 ? '…' : ''}.
+        </p>
+      )}
       {current.result.warnings?.map((w) => (
         <p key={w} className="text-amber-700 dark:text-amber-400">
           {w}
@@ -1833,6 +1941,7 @@ function ExportPanel({
               <th className="px-2 py-1 font-medium">Área</th>
               <th className="px-2 py-1 text-right font-medium">Físico (mm)</th>
               <th className="px-2 py-1 font-medium">Na mídia</th>
+              <th className="px-2 py-1" />
             </tr>
           </thead>
           <tbody>
@@ -1843,6 +1952,20 @@ function ExportPanel({
                 <td className="px-2 py-0.5">{f.region || ''}</td>
                 <td className="px-2 py-0.5 text-right">{fmtSize({ w: (f.physicalMm ?? f.printedMm)[0], h: (f.physicalMm ?? f.printedMm)[1] })}</td>
                 <td className="px-2 py-0.5">{ROTATION_SHORT[f.rotation ?? 0]}</td>
+                <td className="px-2 py-0.5 text-right">
+                  {downloads.panels?.[f.number] ? (
+                    <a
+                      href={downloads.panels[f.number]}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 text-primary hover:underline"
+                      title={`Baixar só o ${f.file}`}
+                    >
+                      <Download className="h-3 w-3" />
+                      Baixar
+                    </a>
+                  ) : null}
+                </td>
               </tr>
             ))}
           </tbody>

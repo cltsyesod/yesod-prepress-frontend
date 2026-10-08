@@ -6,6 +6,7 @@ import {
   calculateProject,
   defaultMedia,
   fillLabel,
+  finishingIssues,
   fitToPoster,
   hasErrors,
   mergeTiles,
@@ -304,6 +305,19 @@ describe('etiqueta, revisão e nomes', () => {
       'Loja · painel 02/3 · L1C2 · 1020 × 1000 mm · R2',
     )
     expect(fillLabel('Vizinhos: {vizinhos}', middle, ctx)).toBe('Vizinhos: esq. 01, dir. 03')
+  })
+
+  it('avisa quando a margem não comporta marcas e quando a etiqueta será encurtada', () => {
+    const tiles = calculateProject(project(2000, 1000, 2, 1)).tiles
+    const marks = { marginMm: 10, cropMarks: true, label: true }
+    const short = new Map(tiles.map((t) => [t.id, { top: 'Loja · painel', bottom: '' }]))
+    expect(finishingIssues(tiles, marks, short)).toEqual([])
+    const long = new Map(tiles.map((t) => [t.id, { top: 'x'.repeat(2000), bottom: '' }]))
+    const [issue] = finishingIssues(tiles, marks, long)
+    expect(issue.code).toBe('LABEL_SHORTENED')
+    expect(issue.message).toContain('2 painel(is)')
+    expect(finishingIssues(tiles, { ...marks, marginMm: 1 }, short).map((i) => i.code)).toEqual(['MARKS_NO_ROOM'])
+    expect(finishingIssues(tiles, { marginMm: 1, cropMarks: false, label: false }, short)).toEqual([])
   })
 
   it('{rev} no nome do arquivo acompanha a revisão', () => {

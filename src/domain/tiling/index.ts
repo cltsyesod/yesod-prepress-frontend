@@ -4,5 +4,15 @@ export * from './operations'
 export { hasErrors, PDF_MAX_MM, validateProject } from './validate'
 export { edgesForSide, isLegacy, migrateLegacy } from './migrate'
 export { areaNames, coverMap, installIssues, installOrder } from './install'
-export { DEFAULT_LABEL_BOTTOM, DEFAULT_LABEL_TOP, fillLabel, LABEL_TOKENS, revisionTag, type LabelContext } from './labels'
+export {
+  DEFAULT_LABEL_BOTTOM,
+  DEFAULT_LABEL_TOP,
+  fillLabel,
+  finishingIssues,
+  LABEL_TOKENS,
+  labelSizePt,
+  labelWidthMm,
+  revisionTag,
+  type LabelContext,
+} from './labels'
 export { defaultMedia, layoutMedia, onMedia, orientationOf, printableWidthOf, rotationOf } from './media'

@@ -92,6 +92,50 @@ def test_contour_cut_is_split_between_the_panels(tmp_path):
     assert out.summary["cut"] == {"contour": True, "panelEdge": True, "name": "CutContour"}
 
 
+def test_closed_cut_gives_each_panel_a_closed_piece(tmp_path):
+    source = _page(tmp_path / "shape.pdf", b"0 0 0 1 k 141.73 141.73 566.93 141.73 re f")
+    req = request(THREE, cut={"contour": True, "closeAtEdge": True})
+    out = build_package(req, source, tmp_path)
+    with pikepdf.open(out.pdf) as pdf:
+        for page in pdf.pages:
+            block = re.search(r"CS 1 SCN .*? S Q", _content(page), re.S).group(0)
+            # One closed piece per panel (the shape crosses all three).
+            assert block.count(" m ") == 1 and block.count(" h") == 1
+
+
+def test_each_panel_is_kept_for_its_own_upload(tmp_path):
+    source = _page(tmp_path / "shape.pdf", b"0 0 0 1 k 141.73 141.73 566.93 141.73 re f")
+    out = build_package(request(THREE), source, tmp_path)
+    assert sorted(out.panels) == [1, 2, 3]
+    with pikepdf.open(out.panels[2]) as single:
+        assert len(single.pages) == 1
+
+
+def test_report_of_shortened_labels_and_no_room_for_marks(tmp_path):
+    source = _page(tmp_path / "shape.pdf", b"0 0 0 1 k 141.73 141.73 566.93 141.73 re f")
+    req = request(THREE)
+    req.tiles[0].label_top = "Etiqueta muito longa " * 60
+    out = build_package(req, source, tmp_path)
+    assert out.summary["finishing"] == {"labelsShortened": ["1"], "noRoomForMarks": False}
+    req = request(THREE)
+    req.marks.margin_mm = 1
+    out = build_package(req, source, tmp_path)
+    assert out.summary["finishing"]["noRoomForMarks"] is True
+
+
+def test_panel_upload_urls_are_read_by_number():
+    req = request(
+        THREE,
+        outputs={
+            "pdf": "https://example.com/a",
+            "zip": "https://example.com/b",
+            "guide": "https://example.com/c",
+            "panels": {"1": "https://example.com/p1", "2": "https://example.com/p2"},
+        },
+    )
+    assert sorted(req.outputs.panels) == [1, 2]
+
+
 def test_no_cut_by_default(tmp_path):
     source = _page(tmp_path / "shape.pdf", b"0 0 0 1 k 141.73 141.73 566.93 141.73 re f")
     out = build_package(request(THREE), source, tmp_path)

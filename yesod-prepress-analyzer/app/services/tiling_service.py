@@ -119,9 +119,31 @@ class TilingService:
                         "O pacote .zip ficou grande demais para o armazenamento; use o PDF "
                         "com todos os painéis (uma página por painel)."
                     )
+                # Each panel on its own, so one panel can be downloaded without the rest.
+                uploaded: list[int] = []
+                targets = [(n, url) for n, url in outputs.panels.items() if n in output.panels]
+                for done, (number, url) in enumerate(targets, start=1):
+                    try:
+                        await self.uploader.upload(str(url), output.panels[number])
+                        uploaded.append(number)
+                    except UploadError:
+                        logger.warning("panel upload failed", extra={"panel": number})
+                    if done % 5 == 0 or done == len(targets):
+                        await notify(
+                            "progress",
+                            "running",
+                            80 + int(18 * done / len(targets)),
+                            f"Salvando os painéis ({done} de {len(targets)})",
+                        )
+                if targets and len(uploaded) < len(targets):
+                    warnings.append(
+                        "Alguns painéis não puderam ser salvos separadamente; "
+                        "eles estão no PDF com todos e no .zip."
+                    )
                 summary = {
                     **output.summary,
                     "sizes": {"pdf": pdf_size, "guide": guide_size, "zip": zip_size},
+                    "panelFiles": sorted(uploaded),
                     "warnings": warnings,
                 }
                 await notify("completed", "completed", 100, "Painéis prontos", summary=summary)

@@ -46,6 +46,8 @@ export interface TilingCutConfig {
   offsetMm: number
   cutHoles: boolean
   whiteBackground: 'ignore' | 'keep'
+  /** Fecha a faca na borda de cada painel: cada painel vira uma peça de corte fechada. */
+  closeAtEdge?: boolean
   panelEdge: boolean
   /** Nome da separação de corte que o RIP/plotter reconhece. */
   name: string
@@ -137,6 +139,10 @@ export interface TilingResult {
   cut?: { contour: boolean; panelEdge: boolean; name: string }
   /** Imagens recortadas nos arquivos por painel (as demais seguem inteiras). */
   imageCrop?: { cropped: number; dropped: number; kept: number; keptBecause: string[] }
+  /** O que os arquivos não puderam levar por inteiro. */
+  finishing?: { labelsShortened: string[]; noRoomForMarks: boolean }
+  /** Painéis salvos também sozinhos (para baixar um só). */
+  panelFiles?: number[]
   sizes?: { pdf: number; guide: number; zip: number }
   warnings?: string[]
 }
@@ -154,7 +160,7 @@ export interface TilingProject {
   seams: unknown[]
   background: TilingBackground | null
   result: TilingResult
-  output: { pdf?: string; zip?: string; guide?: string }
+  output: { pdf?: string; zip?: string; guide?: string; panels?: Record<string, string> }
   error_message: string
   updated: string
   completed_at: string | null
@@ -305,6 +311,14 @@ export const tilingService = {
     const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(path, 3600)
     if (error) throw error
     return data.signedUrl
+  },
+
+  /** Vários endereços de uma vez (um por painel). */
+  async signedUrls(paths: string[]): Promise<Record<string, string>> {
+    if (!paths.length) return {}
+    const { data, error } = await supabase.storage.from(BUCKET).createSignedUrls(paths, 3600)
+    if (error) throw error
+    return Object.fromEntries((data ?? []).filter((d) => d.signedUrl && d.path).map((d) => [d.path!, d.signedUrl]))
   },
 
   async listTemplates(): Promise<TilingTemplate[]> {
