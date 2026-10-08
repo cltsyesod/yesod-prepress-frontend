@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react'
 export type PdfBox = [number, number, number, number]
 
 export interface PdfPageImage {
+  /** Endereço do PDF de onde a imagem saiu (para saber se ainda é o arquivo atual). */
+  source: string
   url: string
   pageCount: number
   /** Caixas da página em pontos do PDF. */
@@ -71,7 +73,7 @@ export function usePdfPageImage(url: string, pageNumber: number) {
         await pdf.destroy()
         if (cancelled || !blob) return
         objectUrl = URL.createObjectURL(blob)
-        setImage({ url: objectUrl, pageCount, visible, trim, bleed })
+        setImage({ source: url, url: objectUrl, pageCount, visible, trim, bleed })
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err))
       }

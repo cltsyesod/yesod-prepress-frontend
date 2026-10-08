@@ -38,8 +38,10 @@ import {
   splitAt,
   splitTile,
   toggleRemoved,
+  type OverlapSide,
   type Rect,
   type SeamKind,
+  type SeamSetting,
   type TilingLayout,
   type TilingSettings,
 } from '@/lib/tiling'
@@ -78,11 +80,38 @@ interface Options {
   materialWidthMm: number
   materialLengthMm: number
   mode: 'equal' | 'max'
+  columns: number
+  rows: number
   overlapMm: number
-  overlapSide: 'next' | 'split'
+  overlapSide: OverlapSide
   gapMm: number
   nameTemplate: string
   marks: { marginMm: number; cropMarks: boolean; label: boolean }
+}
+
+const OPTIONS_KEY = 'yesod.tiling.options'
+
+// Último material e emendas usados: conveniência local do operador.
+function loadOptions(): Options {
+  try {
+    const saved = JSON.parse(localStorage.getItem(OPTIONS_KEY) || 'null')
+    return saved ? { ...DEFAULT_OPTIONS, ...saved, columns: 0, rows: 0 } : { ...DEFAULT_OPTIONS }
+  } catch {
+    return { ...DEFAULT_OPTIONS }
+  }
+}
+
+const SIDE_LABELS: Record<'vertical' | 'horizontal', Record<OverlapSide, string>> = {
+  vertical: {
+    next: 'O painel da direita imprime a sobreposição',
+    previous: 'O painel da esquerda imprime a sobreposição',
+    split: 'Metade em cada painel',
+  },
+  horizontal: {
+    next: 'O painel de cima imprime a sobreposição',
+    previous: 'O painel de baixo imprime a sobreposição',
+    split: 'Metade em cada painel',
+  },
 }
 
 // Valores iniciais da tela; o operador ajusta a cada trabalho.
@@ -91,6 +120,8 @@ const DEFAULT_OPTIONS: Options = {
   materialWidthMm: 0,
   materialLengthMm: 0,
   mode: 'equal',
+  columns: 0,
+  rows: 0,
   overlapMm: 20,
   overlapSide: 'next',
   gapMm: 10,
@@ -111,8 +142,11 @@ export default function TilingPage() {
   const [name, setName] = useState('')
   const [scale, setScale] = useState(1)
   const [unit, setUnit] = useState<Unit>('mm')
-  const [options, setOptions] = useState<Options>({ ...DEFAULT_OPTIONS })
+  const [options, setOptions] = useState<Options>(loadOptions)
   const [layout, setLayout] = useState<TilingLayout | null>(null)
+  // A divisão pertence a um arquivo: trocar de arte gera uma nova (ou a salva, ao reabrir).
+  const [layoutSource, setLayoutSource] = useState('')
+  const [pendingLayout, setPendingLayout] = useState<TilingLayout | null>(null)
   const [history, setHistory] = useState<{ past: TilingLayout[]; future: TilingLayout[] }>({ past: [], future: [] })
   const [selected, setSelected] = useState<string[]>([])
   const [selectedSeam, setSelectedSeam] = useState<string | null>(null)
@@ -188,15 +222,36 @@ export default function TilingPage() {
       overlapSide: options.overlapSide,
       gapMm: options.gapMm,
       nameTemplate: options.nameTemplate,
+      columns: options.columns,
+      rows: options.rows,
     }
   }, [art, trimMm?.w, trimMm?.h, scale, options]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Primeira divisão automática ao abrir uma arte.
   useEffect(() => {
-    if (settings && !layout && settings.maxWidthMm + settings.maxHeightMm > 0) {
-      setLayout(newLayout(settings))
+    try {
+      localStorage.setItem(OPTIONS_KEY, JSON.stringify(options))
+    } catch {
+      /* sem armazenamento local */
     }
-  }, [settings, layout])
+  }, [options])
+
+  // Material, colunas e linhas refazem a divisão enquanto ela não foi editada à mão.
+  useEffect(() => {
+    if (!settings || !layout || history.past.length || layoutSource !== pdfUrl) return
+    setLayout(newLayout(settings))
+  }, [options.materialWidthMm, options.materialLengthMm, options.direction, options.mode, options.columns, options.rows]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // A arte aparece assim que abre; sem material informado ela é um painel só, até dividir.
+  useEffect(() => {
+    if (!settings || !art || art.source !== pdfUrl) return
+    if (layout && layoutSource === pdfUrl) return
+    setLayout(pendingLayout ?? newLayout(settings))
+    setPendingLayout(null)
+    setLayoutSource(pdfUrl)
+    setHistory({ past: [], future: [] })
+    setSelected([])
+    setSelectedSeam(null)
+  }, [settings, art, pdfUrl, layout, layoutSource, pendingLayout])
 
   const result = useMemo(
     () =>
@@ -274,9 +329,10 @@ export default function TilingPage() {
     if (!layout) return
     commit({ ...layout, overrides: { ...layout.overrides, [key]: { ...layout.overrides[key], ...patch } } })
   }
-  const setSeamKind = (id: string, kind: SeamKind, widthMm?: number) => {
+  const setSeam = (id: string, patch: Partial<SeamSetting>) => {
     if (!layout) return
-    commit({ ...layout, seams: { ...layout.seams, [id]: { kind, widthMm } } })
+    const currentSeam = layout.seams[id] ?? { kind: 'overlap' as SeamKind }
+    commit({ ...layout, seams: { ...layout.seams, [id]: { ...currentSeam, ...patch } } })
   }
 
   // Imagem de referência (veículo, fachada): só na tela e no guia.
@@ -380,14 +436,18 @@ export default function TilingPage() {
       materialWidthMm: cfg.materialWidthMm,
       materialLengthMm: cfg.materialLengthMm,
       mode: cfg.settings.mode,
+      columns: cfg.settings.columns ?? 0,
+      rows: cfg.settings.rows ?? 0,
       overlapMm: cfg.settings.overlapMm,
       overlapSide: cfg.settings.overlapSide,
       gapMm: cfg.settings.gapMm,
       nameTemplate: cfg.settings.nameTemplate,
       marks: cfg.marks,
     })
-    setLayout(cfg.layout)
-    setHistory({ past: [], future: [] })
+    // A divisão salva entra quando a arte terminar de carregar.
+    setPendingLayout(cfg.layout)
+    setLayout(null)
+    setLayoutSource('')
     setBackground(project.background)
   }
 
@@ -398,6 +458,8 @@ export default function TilingPage() {
       materialWidthMm: cfg.materialWidthMm,
       materialLengthMm: cfg.materialLengthMm,
       mode: cfg.settings.mode,
+      columns: cfg.settings.columns ?? 0,
+      rows: cfg.settings.rows ?? 0,
       overlapMm: cfg.settings.overlapMm,
       overlapSide: cfg.settings.overlapSide,
       gapMm: cfg.settings.gapMm,
@@ -543,8 +605,19 @@ export default function TilingPage() {
                     </SelectContent>
                   </Select>
                 </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">Colunas</Label>
+                  <Input inputMode="numeric" placeholder="Automático" value={options.columns || ''} onChange={(e) => setOptions((o) => ({ ...o, columns: Math.max(0, Math.round(numberOr(e.target.value, 0))) }))} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">Linhas</Label>
+                  <Input inputMode="numeric" placeholder="Automático" value={options.rows || ''} onChange={(e) => setOptions((o) => ({ ...o, rows: Math.max(0, Math.round(numberOr(e.target.value, 0))) }))} />
+                </div>
+                <p className="col-span-2 text-xs text-muted-foreground">
+                  Vazio = o sistema calcula pelo material. Com número, a arte é dividida em partes iguais.
+                </p>
                 <div className="col-span-2 space-y-1.5">
-                  <Label className="text-xs text-muted-foreground">Divisão</Label>
+                  <Label className="text-xs text-muted-foreground">Divisão automática</Label>
                   <Select value={options.mode} onValueChange={(v) => setOptions((o) => ({ ...o, mode: v as 'equal' | 'max' }))}>
                     <SelectTrigger>
                       <SelectValue />
@@ -568,20 +641,22 @@ export default function TilingPage() {
                   <Input inputMode="decimal" value={options.gapMm} onChange={(e) => setOptions((o) => ({ ...o, gapMm: numberOr(e.target.value, 0) }))} />
                 </div>
                 <div className="col-span-2 space-y-1.5">
-                  <Label className="text-xs text-muted-foreground">Quem imprime a sobreposição</Label>
-                  <Select value={options.overlapSide} onValueChange={(v) => setOptions((o) => ({ ...o, overlapSide: v as 'next' | 'split' }))}>
+                  <Label className="text-xs text-muted-foreground">Quem imprime a sobreposição (padrão)</Label>
+                  <Select value={options.overlapSide} onValueChange={(v) => setOptions((o) => ({ ...o, overlapSide: v as OverlapSide }))}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="next">O painel seguinte (direita / de cima cobre o outro)</SelectItem>
-                      <SelectItem value="split">Metade para cada painel</SelectItem>
+                      <SelectItem value="next">Painel da direita / de cima</SelectItem>
+                      <SelectItem value="previous">Painel da esquerda / de baixo</SelectItem>
+                      <SelectItem value="split">Metade em cada painel</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
                 <p className="col-span-2 text-xs text-muted-foreground">
-                  Clique numa linha de divisão para trocá-la por fresta (a arte que cai na fresta, entre portas por
-                  exemplo, não é impressa) ou emenda topo a topo. Arraste a linha para mudar a posição.
+                  Clique numa linha de divisão para mudar só aquela emenda: lado e largura da sobreposição, fresta
+                  (a arte que cai na fresta, entre portas por exemplo, não é impressa) ou topo a topo. Arraste a linha
+                  para mudar a posição.
                 </p>
                 <Button className="col-span-2" variant="outline" onClick={regenerate}>
                   <RotateCcw className="h-4 w-4" />
@@ -695,7 +770,7 @@ export default function TilingPage() {
             </p>
           ) : !layout ? (
             <p className="rounded-lg border border-dashed border-border p-10 text-center text-sm text-muted-foreground">
-              Informe a largura útil do material para gerar os painéis.
+              Abrindo a arte…
             </p>
           ) : (
             <>
@@ -829,28 +904,51 @@ export default function TilingPage() {
                     <p className="font-medium text-foreground">
                       Emenda {seam.orientation === 'vertical' ? 'vertical' : 'horizontal'} em {Math.round(seam.position)} mm
                     </p>
-                    <Select value={seam.kind} onValueChange={(v) => setSeamKind(seam.id, v as SeamKind, v === 'gap' ? options.gapMm : undefined)}>
+                    <Select value={seam.kind} onValueChange={(v) => setSeam(seam.id, { kind: v as SeamKind, widthMm: v === 'gap' ? options.gapMm : undefined, side: undefined })}>
                       <SelectTrigger className="h-8">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="overlap">Sobreposição ({options.overlapMm} mm)</SelectItem>
+                        <SelectItem value="overlap">Sobreposição</SelectItem>
                         <SelectItem value="gap">Fresta (a arte da fresta não é impressa)</SelectItem>
                         <SelectItem value="butt">Topo a topo (sem sobreposição)</SelectItem>
                       </SelectContent>
                     </Select>
+                    {seam.kind === 'overlap' && (
+                      <Select value={seam.side ?? options.overlapSide} onValueChange={(v) => setSeam(seam.id, { side: v as OverlapSide })}>
+                        <SelectTrigger className="h-8">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {(['next', 'previous', 'split'] as const).map((side) => (
+                            <SelectItem key={side} value={side}>
+                              {SIDE_LABELS[seam.orientation][side]}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
                     <div className="grid grid-cols-2 gap-2">
                       <div className="space-y-1">
                         <Label className="text-xs text-muted-foreground">Posição (mm)</Label>
                         <Input className="h-8" inputMode="decimal" value={Math.round(seam.position)} onChange={(e) => commit(moveLine(layout, seam.id, numberOr(e.target.value, seam.position)))} />
                       </div>
-                      {seam.kind === 'gap' && (
+                      {seam.kind !== 'butt' && (
                         <div className="space-y-1">
-                          <Label className="text-xs text-muted-foreground">Largura da fresta (mm)</Label>
-                          <Input className="h-8" inputMode="decimal" value={seam.widthMm} onChange={(e) => setSeamKind(seam.id, 'gap', Math.max(0, numberOr(e.target.value, 0)))} />
+                          <Label className="text-xs text-muted-foreground">
+                            {seam.kind === 'gap' ? 'Largura da fresta (mm)' : 'Sobreposição (mm)'}
+                          </Label>
+                          <Input className="h-8" inputMode="decimal" value={seam.widthMm} onChange={(e) => setSeam(seam.id, { widthMm: Math.max(0, numberOr(e.target.value, 0)) })} />
                         </div>
                       )}
                     </div>
+                    <Button size="sm" variant="ghost" className="w-full" onClick={() => {
+                      const current = layout.seams[seam.id] ?? { kind: seam.kind }
+                      const all = Object.fromEntries(result.seams.map((s) => [s.id, { ...current }]))
+                      commit({ ...layout, seams: all })
+                    }}>
+                      Aplicar a todas as emendas
+                    </Button>
                   </div>
                 )}
               </div>

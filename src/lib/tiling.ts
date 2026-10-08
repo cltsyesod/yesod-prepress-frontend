@@ -17,10 +17,19 @@ export interface Rect {
 
 export type SeamKind = 'overlap' | 'gap' | 'butt'
 
+/**
+ * Quem imprime a faixa de sobreposição de uma emenda:
+ * "next" = o painel da direita (emenda vertical) ou de cima (horizontal);
+ * "previous" = o da esquerda ou de baixo; "split" = metade para cada um.
+ */
+export type OverlapSide = 'next' | 'previous' | 'split'
+
 export interface SeamSetting {
   kind: SeamKind
-  /** Largura da fresta (só para "gap"). */
+  /** Largura da fresta ("gap") ou da sobreposição desta emenda ("overlap"). */
   widthMm?: number
+  /** Só para sobreposição: quem imprime a faixa nesta emenda (padrão: o geral). */
+  side?: OverlapSide
 }
 
 export interface TilingLayout {
@@ -48,10 +57,13 @@ export interface TilingSettings {
   maxHeightMm: number
   mode: 'equal' | 'max'
   overlapMm: number
-  /** "next": o painel seguinte cobre o anterior; "split": metade para cada lado. */
-  overlapSide: 'next' | 'split'
+  /** Padrão de todas as emendas; cada emenda pode ter o seu. */
+  overlapSide: OverlapSide
   gapMm: number
   nameTemplate: string
+  /** Colunas e linhas pedidas pelo operador (0 = automático pelo material). */
+  columns?: number
+  rows?: number
 }
 
 export interface Tile {
@@ -75,6 +87,7 @@ export interface Seam {
   end: number
   kind: SeamKind
   widthMm: number
+  side?: OverlapSide
 }
 
 const EPS = 0.01
@@ -120,24 +133,21 @@ export function autoCuts(
 }
 
 export function newLayout(settings: TilingSettings): TilingLayout {
-  // "next": o painel seguinte (direita / de cima) imprime a sobreposição; "split": metade cada.
-  const split = settings.overlapSide === 'split'
-  const before = split ? settings.overlapMm / 2 : settings.overlapMm
-  const after = split ? settings.overlapMm / 2 : 0
+  // Quanto cada painel imprime além do que cobre, antes e depois de cada emenda.
+  const w = settings.overlapMm
+  const before = settings.overlapSide === 'split' ? w / 2 : settings.overlapSide === 'next' ? w : 0
+  const after = settings.overlapSide === 'split' ? w / 2 : settings.overlapSide === 'previous' ? w : 0
   const b = settings.bleedMm
-  const xs = autoCuts(
-    settings.artWidthMm,
-    settings.maxWidthMm,
-    { start: b.left, end: b.right, before, after },
-    settings.mode,
-  )
-  // Na vertical o painel de cima cobre o de baixo: a extensão fica "antes" de quem está acima.
-  const ys = autoCuts(
-    settings.artHeightMm,
-    settings.maxHeightMm,
-    { start: b.bottom, end: b.top, before, after },
-    settings.mode,
-  )
+  const even = (length: number, n: number) => Array.from({ length: n + 1 }, (_, i) => (length * i) / n)
+  // Colunas/linhas digitadas pelo operador têm prioridade sobre o cálculo pelo material.
+  const xs =
+    settings.columns && settings.columns > 0
+      ? even(settings.artWidthMm, Math.round(settings.columns))
+      : autoCuts(settings.artWidthMm, settings.maxWidthMm, { start: b.left, end: b.right, before, after }, settings.mode)
+  const ys =
+    settings.rows && settings.rows > 0
+      ? even(settings.artHeightMm, Math.round(settings.rows))
+      : autoCuts(settings.artHeightMm, settings.maxHeightMm, { start: b.bottom, end: b.top, before, after }, settings.mode)
   return { xs, ys, merged: [], removed: [], seams: {}, overrides: {} }
 }
 
@@ -183,11 +193,14 @@ export function computeTiles(
     const seam = seamSetting(layout, id)
     return seam.kind === 'gap' ? (seam.widthMm ?? settings.gapMm) : 0
   }
+  // isNext: este painel está à direita (emenda vertical) ou acima (horizontal) da emenda.
   const overlapExtend = (id: string, isNext: boolean) => {
     const seam = seamSetting(layout, id)
-    if (seam.kind !== 'overlap' || settings.overlapMm <= 0) return 0
-    if (settings.overlapSide === 'split') return settings.overlapMm / 2
-    return isNext ? settings.overlapMm : 0
+    const width = seam.widthMm ?? settings.overlapMm
+    if (seam.kind !== 'overlap' || width <= 0) return 0
+    const side = seam.side ?? settings.overlapSide
+    if (side === 'split') return width / 2
+    return (side === 'next') === isNext ? width : 0
   }
 
   const visibleTiles = raw.filter((t) => !t.cells.some((cell) => removed.has(cell)))
@@ -248,7 +261,8 @@ export function computeTiles(
       start: 0,
       end: settings.artHeightMm,
       kind: s.kind,
-      widthMm: s.kind === 'gap' ? (s.widthMm ?? settings.gapMm) : s.kind === 'overlap' ? settings.overlapMm : 0,
+      widthMm: seamWidth(s, settings),
+      side: s.kind === 'overlap' ? (s.side ?? settings.overlapSide) : undefined,
     })
   }
   for (let i = 1; i < ys.length - 1; i++) {
@@ -260,10 +274,17 @@ export function computeTiles(
       start: 0,
       end: settings.artWidthMm,
       kind: s.kind,
-      widthMm: s.kind === 'gap' ? (s.widthMm ?? settings.gapMm) : s.kind === 'overlap' ? settings.overlapMm : 0,
+      widthMm: seamWidth(s, settings),
+      side: s.kind === 'overlap' ? (s.side ?? settings.overlapSide) : undefined,
     })
   }
   return { tiles: tiles.sort((a, b) => a.number - b.number), seams }
+}
+
+function seamWidth(s: SeamSetting, settings: TilingSettings): number {
+  if (s.kind === 'gap') return s.widthMm ?? settings.gapMm
+  if (s.kind === 'overlap') return s.widthMm ?? settings.overlapMm
+  return 0
 }
 
 /** "{trabalho}_PAINEL_{nn}" → "Fachada_PAINEL_03". */
