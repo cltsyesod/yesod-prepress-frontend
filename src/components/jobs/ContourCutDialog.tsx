@@ -93,8 +93,11 @@ export function ContourCutDialog({
             <p className="text-xs text-muted-foreground">No tamanho final. 0 = na borda da arte.</p>
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="contour-name">Cor especial da faca</Label>
+            <Label htmlFor="contour-name">Nome da faca no RIP</Label>
             <Input id="contour-name" value={name} onChange={(e) => setName(e.target.value)} />
+            <p className="text-xs text-muted-foreground">
+              Nome da separação que o RIP/plotter reconhece como corte (ex.: CutContour).
+            </p>
           </div>
         </div>
         <DialogFooter>

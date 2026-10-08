@@ -335,8 +335,9 @@ export default function NestingPage() {
                 />
               </div>
               <div className="space-y-1.5">
-                <Label className="text-xs text-muted-foreground">Cor da faca</Label>
+                <Label className="text-xs text-muted-foreground">Nome da faca no RIP</Label>
                 <Input
+                  title="Nome da separação (cor especial) que o RIP/plotter reconhece como corte, ex.: CutContour"
                   value={params.cutLines.name}
                   onChange={(e) =>
                     setParams((p) => ({ ...p, cutLines: { ...p.cutLines, name: e.target.value || 'CutContour' } }))
