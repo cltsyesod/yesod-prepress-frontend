@@ -16,7 +16,10 @@ import { jobsService, type Job } from '@/services/jobsService'
 import {
   NESTING_ACTIVE,
   nestingService,
+  offcutService,
+  type MaterialOffcut,
   type NestingItem,
+  type NestingMarks,
   type NestingParams,
   type NestingRun,
 } from '@/services/nestingService'
@@ -24,6 +27,7 @@ import { profileService } from '@/services/profileService'
 
 const ROTATIONS = [
   { value: '0', label: 'Sem giro' },
+  { value: '180', label: 'Só 180° (mantém o sentido do material)' },
   { value: '90', label: 'A cada 90°' },
   { value: '45', label: 'A cada 45°' },
   { value: '22.5', label: 'A cada 22,5°' },
@@ -32,16 +36,31 @@ const ROTATIONS = [
 
 const STORAGE_KEY = 'yesod.nesting.params'
 
+/** Faixa de identificação montada na hora do envio (trabalhos, material, data). */
+const AUTO_SLUG = 'auto'
+
+const NO_MARKS: NestingMarks = {
+  registration: 'none',
+  shape: 'square',
+  sizeMm: 3,
+  distanceMm: 5,
+  spacingMm: 500,
+  cropMarks: false,
+  slug: '',
+}
+
 // Último material usado: conveniência local do operador (nada é fixo no sistema).
 function loadParams(): NestingParams {
   const empty: NestingParams = {
     material: { widthMm: 0, marginMm: 0, gapMm: 0 },
     rotation: { allow: true, stepDegrees: 90 },
     cutLines: { add: true, name: 'CutContour' },
+    marks: NO_MARKS,
   }
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null')
-    return saved ? { ...empty, ...saved } : empty
+    // O retalho escolhido vale só para aquela montagem.
+    return saved ? { ...empty, ...saved, marks: { ...NO_MARKS, ...saved.marks }, offcutId: undefined } : empty
   } catch {
     return empty
   }
@@ -63,6 +82,18 @@ export default function NestingPage() {
   const [currentId, setCurrentId] = useState<string | null>(null)
   const [outputUrl, setOutputUrl] = useState('')
   const [page, setPage] = useState(1)
+  const [offcuts, setOffcuts] = useState<MaterialOffcut[]>([])
+
+  const loadOffcuts = useCallback(() => {
+    offcutService.listAvailable().then(setOffcuts).catch(() => setOffcuts([]))
+  }, [])
+  useEffect(loadOffcuts, [loadOffcuts])
+
+  const marks = params.marks ?? NO_MARKS
+  const setMarks = (patch: Partial<NestingMarks>) =>
+    setParams((p) => ({ ...p, marks: { ...(p.marks ?? NO_MARKS), ...patch } }))
+  const setCut = (patch: Partial<NestingParams['cutLines']>) =>
+    setParams((p) => ({ ...p, cutLines: { ...p.cutLines, ...patch } }))
 
   const loadRuns = useCallback(async () => {
     try {
@@ -90,7 +121,12 @@ export default function NestingPage() {
   }, [current?.id, current?.status]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const setMaterial = (patch: Partial<NestingParams['material']>) =>
-    setParams((p) => ({ ...p, material: { ...p.material, ...patch } }))
+    setParams((p) => ({
+      ...p,
+      material: { ...p.material, ...patch },
+      // Medidas digitadas à mão deixam de ser as do retalho escolhido.
+      offcutId: 'widthMm' in patch || 'lengthMm' in patch ? undefined : p.offcutId,
+    }))
 
   const chosen = useMemo(() => jobs.filter((job) => selected[job.id]), [jobs, selected])
   const problem = materialProblem(params, isSheet)
@@ -102,6 +138,7 @@ export default function NestingPage() {
       const finalParams: NestingParams = {
         ...params,
         material: { ...params.material, lengthMm: isSheet ? params.material.lengthMm : undefined },
+        offcutId: isSheet ? params.offcutId : undefined,
       }
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(finalParams))
@@ -126,7 +163,20 @@ export default function NestingPage() {
         })
       }
       const name = chosen.map((job) => job.name).join(', ').slice(0, 120)
+      if (finalParams.marks?.slug === AUTO_SLUG) {
+        // Identificação automática: trabalhos, material e data.
+        const size = `${params.material.widthMm}${isSheet ? ` × ${params.material.lengthMm}` : ''} mm`
+        finalParams.marks = {
+          ...finalParams.marks,
+          slug: [name, size, new Date().toLocaleDateString('pt-BR')].join(' · ').slice(0, 200),
+        }
+      }
       const id = await nestingService.create(name, finalParams, items)
+      if (finalParams.offcutId) {
+        await offcutService.markUsed(finalParams.offcutId).catch(() => null)
+        setParams((p) => ({ ...p, offcutId: undefined }))
+        loadOffcuts()
+      }
       setCurrentId(id)
       await loadRuns()
     } catch (err) {
@@ -236,6 +286,40 @@ export default function NestingPage() {
                 ))}
               </div>
             </div>
+            {offcuts.length > 0 && (
+              <div className="col-span-2 space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Usar retalho do estoque</Label>
+                <Select
+                  value={params.offcutId ?? 'none'}
+                  onValueChange={(value) => {
+                    const offcut = offcuts.find((o) => o.id === value)
+                    if (!offcut) {
+                      setParams((p) => ({ ...p, offcutId: undefined }))
+                      return
+                    }
+                    setIsSheet(true)
+                    setParams((p) => ({
+                      ...p,
+                      offcutId: offcut.id,
+                      material: { ...p.material, widthMm: Number(offcut.width_mm), lengthMm: Number(offcut.length_mm) },
+                    }))
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Material novo</SelectItem>
+                    {offcuts.map((offcut) => (
+                      <SelectItem key={offcut.id} value={offcut.id}>
+                        {Math.round(offcut.width_mm)} × {Math.round(offcut.length_mm)} mm
+                        {offcut.name ? ` · ${offcut.name}` : ''}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <div className="space-y-1.5">
               <Label className="text-xs text-muted-foreground">Largura útil (mm)</Label>
               <Input
@@ -344,8 +428,122 @@ export default function NestingPage() {
                   }
                 />
               </div>
+              <label className="col-span-3 flex items-start gap-2 text-sm">
+                <Checkbox
+                  checked={!!params.cutLines.cutHoles}
+                  onCheckedChange={(v) => setCut({ cutHoles: v === true })}
+                  className="mt-0.5"
+                />
+                <span>
+                  Cortar os vazados internos
+                  <span className="block text-xs text-muted-foreground">
+                    O miolo sem impressão de uma peça também é cortado, e peças menores podem ser encaixadas
+                    dentro dele.
+                  </span>
+                </span>
+              </label>
+              <label className="col-span-3 flex items-start gap-2 text-sm">
+                <Checkbox
+                  checked={params.cutLines.whiteBackground === 'keep'}
+                  onCheckedChange={(v) => setCut({ whiteBackground: v === true ? 'keep' : 'ignore' })}
+                  className="mt-0.5"
+                />
+                <span>
+                  O fundo branco faz parte da peça
+                  <span className="block text-xs text-muted-foreground">
+                    Desligado: um retângulo branco atrás da arte é ignorado e a faca segue a arte.
+                  </span>
+                </span>
+              </label>
             </div>
           )}
+
+          <div className="space-y-3">
+            <Label>Marcas</Label>
+            <Select
+              value={marks.registration}
+              onValueChange={(value) => setMarks({ registration: value as NestingMarks['registration'] })}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Sem marcas de registro do plotter</SelectItem>
+                <SelectItem value="sides">Marcas de registro nas laterais (estilo OPOS)</SelectItem>
+                <SelectItem value="corners">Marcas de registro nos 4 cantos (estilo ARMS)</SelectItem>
+              </SelectContent>
+            </Select>
+            {marks.registration !== 'none' && (
+              <>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">Formato</Label>
+                    <Select
+                      value={marks.shape}
+                      onValueChange={(value) => setMarks({ shape: value as NestingMarks['shape'] })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="square">Quadrado</SelectItem>
+                        <SelectItem value="circle">Círculo</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">Tamanho da marca (mm)</Label>
+                    <Input
+                      inputMode="decimal"
+                      value={marks.sizeMm}
+                      onChange={(e) => setMarks({ sizeMm: numberOr(e.target.value, 3) })}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">Distância das peças (mm)</Label>
+                    <Input
+                      inputMode="decimal"
+                      value={marks.distanceMm}
+                      onChange={(e) => setMarks({ distanceMm: numberOr(e.target.value, 0) })}
+                    />
+                  </div>
+                  {marks.registration === 'sides' && (
+                    <div className="space-y-1.5">
+                      <Label className="text-xs text-muted-foreground">Espaço máx. entre marcas (mm)</Label>
+                      <Input
+                        inputMode="decimal"
+                        value={marks.spacingMm}
+                        onChange={(e) => setMarks({ spacingMm: numberOr(e.target.value, 0) })}
+                      />
+                    </div>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Confira formato, tamanho e espaçamento no manual do seu plotter. As peças ficam fora da faixa das
+                  marcas.
+                </p>
+              </>
+            )}
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox checked={marks.cropMarks} onCheckedChange={(v) => setMarks({ cropMarks: v === true })} />
+              Marcas de corte nas peças retangulares
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={!!marks.slug}
+                onCheckedChange={(v) => setMarks({ slug: v === true ? AUTO_SLUG : '' })}
+              />
+              Faixa de identificação
+            </label>
+            {!!marks.slug && (
+              <Input
+                placeholder="Automática: trabalhos · material · data"
+                value={marks.slug === AUTO_SLUG ? '' : marks.slug}
+                maxLength={200}
+                onChange={(e) => setMarks({ slug: e.target.value || AUTO_SLUG })}
+              />
+            )}
+          </div>
 
           {problem && params.material.widthMm > 0 && (
             <p className="text-sm text-amber-700 dark:text-amber-400">{problem}</p>
@@ -368,6 +566,7 @@ export default function NestingPage() {
               page={page}
               onPageChange={setPage}
               onComplete={complete}
+              onOffcutSaved={loadOffcuts}
               busy={submitting}
             />
           )}
@@ -444,6 +643,7 @@ function RunDetail({
   page,
   onPageChange,
   onComplete,
+  onOffcutSaved,
   busy,
 }: {
   run: NestingRun
@@ -451,6 +651,7 @@ function RunDetail({
   page: number
   onPageChange: (page: number) => void
   onComplete: (run: NestingRun, fileId: string, extra: number) => void
+  onOffcutSaved: () => void
   busy: boolean
 }) {
   const result = run.result ?? {}
@@ -460,6 +661,21 @@ function RunDetail({
   const offcut = last?.offcutMm
   const fill = (result.fill ?? []).filter((f) => f.extra > 0)
   const mm = (value: number) => Math.round(value).toLocaleString('pt-BR')
+  const [savedOffcut, setSavedOffcut] = useState('')
+  const saveOffcut = async (source: NestingRun, size: [number, number]) => {
+    try {
+      await offcutService.add({
+        name: `Sobra de ${source.name || 'montagem'}`.slice(0, 120),
+        widthMm: size[0],
+        lengthMm: size[1],
+        sourceRun: source.id,
+      })
+      setSavedOffcut(source.id)
+      onOffcutSaved()
+    } catch (err) {
+      toast({ title: 'Não foi possível guardar o retalho', description: getErrorMessage(err), variant: 'destructive' })
+    }
+  }
   const pct = (value: number) => `${Math.round(value * 100)}%`
 
   if (NESTING_ACTIVE.includes(run.status)) {
@@ -521,14 +737,19 @@ function RunDetail({
         </p>
       )}
       {last && offcut && offcut[1] > 0 && (
-        <p className="rounded-lg border border-border bg-card p-3 text-sm text-foreground">
-          Retalho: cortando a chapa{sheets.length > 1 ? ` da página ${last.index}` : ''} em{' '}
-          <strong>{mm(last.usedLengthMm ?? 0)} mm</strong>, sobram{' '}
-          <strong>
-            {mm(offcut[0])} × {mm(offcut[1])} mm
-          </strong>{' '}
-          para voltar ao estoque.
-        </p>
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-card p-3 text-sm text-foreground">
+          <p className="min-w-0 flex-1">
+            Retalho: cortando a chapa{sheets.length > 1 ? ` da página ${last.index}` : ''} em{' '}
+            <strong>{mm(last.usedLengthMm ?? 0)} mm</strong>, sobram{' '}
+            <strong>
+              {mm(offcut[0])} × {mm(offcut[1])} mm
+            </strong>{' '}
+            para voltar ao estoque.
+          </p>
+          <Button size="sm" variant="outline" disabled={savedOffcut === run.id} onClick={() => saveOffcut(run, offcut)}>
+            {savedOffcut === run.id ? 'No estoque' : 'Guardar no estoque'}
+          </Button>
+        </div>
       )}
       {fill.length > 0 && (
         <div className="space-y-2 rounded-lg border border-border bg-card p-3 text-sm">

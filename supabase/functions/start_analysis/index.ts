@@ -3,7 +3,14 @@ import { corsHeaders } from '../_shared/cors.ts'
 import { signRequest, toAnalyzerProfile } from '../_shared/analyzer.ts'
 
 // Correções que alteram o PDF (as da ficha, como a escala, são tratadas no frontend).
-const FIX_IDS = ['set_page_boxes', 'add_contour_cut', 'add_cut_contour', 'add_crop_marks']
+const FIX_IDS = [
+  'upscale_images',
+  'set_page_boxes',
+  'convert_magenta_die_line',
+  'add_contour_cut',
+  'add_cut_contour',
+  'add_crop_marks',
+]
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), {

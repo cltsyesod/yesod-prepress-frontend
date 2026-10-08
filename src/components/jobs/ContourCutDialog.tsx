@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Dialog,
   DialogContent,
@@ -16,18 +17,28 @@ const STORAGE_KEY = 'yesod.contourCut'
 export interface ContourCutOptions {
   offsetMm: number
   name: string
+  /** Também corta as áreas sem impressão fechadas pela arte (o miolo de um "O"). */
+  cutHoles: boolean
+  /** "ignore": fundo branco não é arte; "keep": o fundo branco faz parte da peça. */
+  whiteBackground: 'ignore' | 'keep'
 }
 
 function remembered(defaultName: string): ContourCutOptions {
+  const base: ContourCutOptions = {
+    offsetMm: 0,
+    name: defaultName || 'CutContour',
+    cutHoles: false,
+    whiteBackground: 'ignore',
+  }
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null')
     if (saved && typeof saved.offsetMm === 'number') {
-      return { offsetMm: saved.offsetMm, name: defaultName || saved.name || 'CutContour' }
+      return { ...base, ...saved, name: defaultName || saved.name || 'CutContour' }
     }
   } catch {
-    /* sem armazenamento local: começa vazio */
+    /* sem armazenamento local: começa com o padrão */
   }
-  return { offsetMm: 0, name: defaultName || 'CutContour' }
+  return base
 }
 
 /**
@@ -47,12 +58,16 @@ export function ContourCutDialog({
 }) {
   const [offset, setOffset] = useState('')
   const [name, setName] = useState('')
+  const [cutHoles, setCutHoles] = useState(false)
+  const [keepWhite, setKeepWhite] = useState(false)
 
   useEffect(() => {
     if (!open) return
     const initial = remembered(defaultName)
     setOffset(String(initial.offsetMm))
     setName(initial.name)
+    setCutHoles(initial.cutHoles)
+    setKeepWhite(initial.whiteBackground === 'keep')
   }, [open, defaultName])
 
   const value = Number(offset.replace(',', '.'))
@@ -60,7 +75,12 @@ export function ContourCutDialog({
 
   const confirm = () => {
     if (!valid) return
-    const options = { offsetMm: value, name: name.trim() }
+    const options: ContourCutOptions = {
+      offsetMm: value,
+      name: name.trim(),
+      cutHoles,
+      whiteBackground: keepWhite ? 'keep' : 'ignore',
+    }
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(options))
     } catch {
@@ -99,6 +119,27 @@ export function ContourCutDialog({
               Nome da separação que o RIP/plotter reconhece como corte (ex.: CutContour).
             </p>
           </div>
+        </div>
+        <div className="space-y-2 text-sm">
+          <label className="flex items-start gap-2">
+            <Checkbox checked={cutHoles} onCheckedChange={(v) => setCutHoles(v === true)} className="mt-0.5" />
+            <span>
+              Cortar os vazados internos
+              <span className="block text-xs text-muted-foreground">
+                Áreas sem impressão fechadas pela arte (o miolo de um "O") também são cortadas.
+              </span>
+            </span>
+          </label>
+          <label className="flex items-start gap-2">
+            <Checkbox checked={keepWhite} onCheckedChange={(v) => setKeepWhite(v === true)} className="mt-0.5" />
+            <span>
+              O fundo branco faz parte da peça
+              <span className="block text-xs text-muted-foreground">
+                Desligado: um retângulo branco atrás da arte é ignorado e a faca segue a arte. Bordas brancas
+                dentro da arte são sempre mantidas.
+              </span>
+            </span>
+          </label>
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={onCancel}>

@@ -98,6 +98,7 @@ Deno.serve(async (req: Request) => {
       material: params.material ?? {},
       rotation: params.rotation ?? {},
       cutLines: params.cutLines ?? {},
+      marks: params.marks ?? {},
       items,
     })
     const timestamp = String(Math.floor(Date.now() / 1000))

@@ -24,6 +24,7 @@ import { IssueChecklist } from '@/components/jobs/IssueChecklist'
 import { JobStateBadge } from '@/components/jobs/JobStateBadge'
 import { JobTicketFields } from '@/components/jobs/JobTicketFields'
 import { ContourCutDialog, type ContourCutOptions } from '@/components/jobs/ContourCutDialog'
+import { CropMarksDialog } from '@/components/jobs/CropMarksDialog'
 import { PdfPreview } from '@/components/jobs/PdfPreview'
 import { useAnalysisJob } from '@/hooks/use-analysis-job'
 import { toast } from '@/hooks/use-toast'
@@ -117,6 +118,7 @@ export default function JobWorkspacePage() {
 
   // A faca pelo contorno depende do afastamento escolhido pelo operador: pergunta antes.
   const [contourFixes, setContourFixes] = useState<FixRequest[] | null>(null)
+  const [cropMarksOpen, setCropMarksOpen] = useState(false)
   const requestFixes = useCallback(
     async (fixes: FixRequest[]) => {
       if (fixes.some((fix) => fix.id === 'add_contour_cut')) {
@@ -309,9 +311,9 @@ export default function JobWorkspacePage() {
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 disabled={applied('add_crop_marks')}
-                onSelect={guardScale(() => applyFixes([{ id: 'set_page_boxes' }, { id: 'add_crop_marks' }]))}
+                onSelect={guardScale(() => setCropMarksOpen(true))}
               >
-                Inserir marcas de corte{applied('add_crop_marks') && ' (já inseridas)'}
+                Inserir marcas de corte…{applied('add_crop_marks') && ' (já inseridas)'}
               </DropdownMenuItem>
               <DropdownMenuItem
                 disabled={applied('add_contour_cut') || applied('add_cut_contour')}
@@ -364,6 +366,15 @@ export default function JobWorkspacePage() {
         defaultName={cutLayerName}
         onCancel={() => setContourFixes(null)}
         onConfirm={confirmContour}
+      />
+      <CropMarksDialog
+        open={cropMarksOpen}
+        defaultSlug={[job.clientName, job.name, new Date().toLocaleDateString('pt-BR')].filter(Boolean).join(' · ')}
+        onCancel={() => setCropMarksOpen(false)}
+        onConfirm={(options) => {
+          setCropMarksOpen(false)
+          applyFixes([{ id: 'set_page_boxes' }, { id: 'add_crop_marks', params: { ...options } }])
+        }}
       />
 
       {editingTicket && (
