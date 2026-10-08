@@ -11,12 +11,16 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import pikepdf
 from shapely.geometry import box
 
 from app.contracts.tiling import Rect, TilingMarks, TilingTile
 from app.core.exceptions import AnalyzerError
+
+if TYPE_CHECKING:
+    from app.tiling.cut import CutPlan
 
 MM = 72 / 25.4
 PDF_MAX_PT = 14_400  # 200 in: the largest page a PDF can describe
@@ -152,10 +156,14 @@ def build_panels(
     title: str = "",
     total: int | None = None,
     sides: dict[int, dict[str, int]] | None = None,
+    cut: CutPlan | None = None,
 ) -> pikepdf.Pdf:
     """A PDF with one page per panel of `tiles` (in the order given)."""
 
+    from app.tiling.cut import cut_ops, cut_resources
+
     out = pikepdf.Pdf.new()
+    cut_shared = cut_resources(out, cut) if cut is not None else None
     src_page = source.pages[page_index]
     form = src_page.as_form_xobject(handle_transformations=False)
     # qpdf clips the form at the TrimBox; the bleed and the overlaps must stay printable.
@@ -210,6 +218,11 @@ def build_panels(
             printed=(px, py, px + pw, py + ph),
             logical=logical,
         )
+        if cut is not None and cut_shared is not None:
+            color = page.add_resource(cut_shared[0], pikepdf.Name.ColorSpace, prefix="Cut")
+            state = page.add_resource(cut_shared[1], pikepdf.Name.ExtGState, prefix="CutGS")
+            drawn, _ = cut_ops(cut, printed, (px, py), geometry.physical, color, state)
+            content.append(drawn)
         if margin >= 2 * MM:
             drawn, blocked = _panel_marks(geometry, marks, sides.get(tile.number, {}))
             content.append(drawn)

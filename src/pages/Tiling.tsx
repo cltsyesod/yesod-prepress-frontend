@@ -95,6 +95,8 @@ import {
   type TilingBackground,
   type TilingConfig,
   type TilingMarksConfig,
+  DEFAULT_CUT,
+  type TilingCutConfig,
   type TilingProject,
   type TilingTemplate,
 } from '@/services/tilingService'
@@ -122,6 +124,7 @@ interface Prefs {
   nameTemplate: string
   request: GridRequest
   marks: TilingMarksConfig
+  cut: TilingCutConfig
 }
 
 // Valores iniciais da tela; o operador ajusta a cada trabalho e o último uso é lembrado.
@@ -139,6 +142,7 @@ const DEFAULT_PREFS: Prefs = {
     labelTop: DEFAULT_LABEL_TOP,
     labelBottom: DEFAULT_LABEL_BOTTOM,
   },
+  cut: DEFAULT_CUT,
 }
 
 function loadPrefs(): Prefs {
@@ -150,6 +154,7 @@ function loadPrefs(): Prefs {
       ...saved,
       constraint: { ...DEFAULT_PREFS.constraint, ...saved.constraint },
       marks: { ...DEFAULT_PREFS.marks, ...saved.marks },
+      cut: { ...DEFAULT_CUT, ...saved.cut },
       request: { mode: saved.request?.mode ?? 'equal' },
     }
   } catch {
@@ -354,7 +359,12 @@ export default function TilingPage() {
     let next: TilingProjectModel
     if (pending) {
       next = fitToPoster(pending.project, poster)
-      setPrefs((p) => ({ ...p, request: pending.request, marks: { ...DEFAULT_PREFS.marks, ...pending.marks } }))
+      setPrefs((p) => ({
+        ...p,
+        request: pending.request,
+        marks: { ...DEFAULT_PREFS.marks, ...pending.marks },
+        cut: { ...DEFAULT_CUT, ...pending.cut },
+      }))
       setPending(null)
     } else {
       next = newProject(
@@ -417,8 +427,11 @@ export default function TilingPage() {
   const dirty = !!project && signature !== savedSignature
   // Exportado e mudado depois: os arquivos baixados já não são deste projeto.
   const hash = useMemo(
-    () => (project ? contentHash({ project, name: projectName, page: pageNumber, marks: prefs.marks, background }) : ''),
-    [project, projectName, pageNumber, prefs.marks, background],
+    () =>
+      project
+        ? contentHash({ project, name: projectName, page: pageNumber, marks: prefs.marks, background, cut: prefs.cut })
+        : '',
+    [project, projectName, pageNumber, prefs.marks, prefs.cut, background],
   )
   const outdated = !!current && current.id === tilingId && current.status === 'completed' && !!exportedHash && exportedHash !== hash
 
@@ -467,6 +480,7 @@ export default function TilingPage() {
           project,
           request: prefs.request,
           marks: prefs.marks,
+          cut: prefs.cut,
           revision: extra.revision ?? revision,
           exportedHash: extra.exportedHash ?? exportedHash,
         }
@@ -574,7 +588,12 @@ export default function TilingPage() {
     if (!cfg || !project) return
     const run = () => {
       commit(fitToPoster({ ...cfg.project, poster: project.poster }, project.poster))
-      setPrefs((p) => ({ ...p, request: cfg.request, marks: cfg.marks }))
+      setPrefs((p) => ({
+        ...p,
+        request: cfg.request,
+        marks: { ...DEFAULT_PREFS.marks, ...cfg.marks },
+        cut: { ...DEFAULT_CUT, ...cfg.cut },
+      }))
       if (template.background) setBackground(template.background)
       toast({ title: `Modelo "${template.name}" aplicado` })
     }
@@ -1154,6 +1173,45 @@ export default function TilingPage() {
                     strong
                   />
                 </Section>
+                <Section title="Faca (linha de corte)">
+                  <p className="text-[11px] text-muted-foreground">
+                    Vai na separação de corte: o RIP manda para a plotter, não imprime.
+                  </p>
+                  <CheckRow checked={prefs.cut.contour} onChange={(contour) => setPrefs((p) => ({ ...p, cut: { ...p.cut, contour } }))}>
+                    <span title="A faca segue o contorno da arte e cada painel recebe só o trecho dele">Pelo contorno da arte</span>
+                  </CheckRow>
+                  {prefs.cut.contour && (
+                    <>
+                      <Field label="Afastamento" hint="Positivo = para fora da arte; negativo = para dentro; 0 = na borda da arte">
+                        <NumberField
+                          value={prefs.cut.offsetMm}
+                          min={-50}
+                          onCommit={(v) => setPrefs((p) => ({ ...p, cut: { ...p.cut, offsetMm: v ?? 0 } }))}
+                        />
+                      </Field>
+                      <CheckRow checked={prefs.cut.cutHoles} onChange={(cutHoles) => setPrefs((p) => ({ ...p, cut: { ...p.cut, cutHoles } }))}>
+                        Cortar os vazados internos
+                      </CheckRow>
+                      <CheckRow
+                        checked={prefs.cut.whiteBackground === 'keep'}
+                        onChange={(keep) => setPrefs((p) => ({ ...p, cut: { ...p.cut, whiteBackground: keep ? 'keep' : 'ignore' } }))}
+                      >
+                        <span title="Normalmente o fundo branco é papel e não é contornado">Fundo branco faz parte da arte</span>
+                      </CheckRow>
+                    </>
+                  )}
+                  <CheckRow checked={prefs.cut.panelEdge} onChange={(panelEdge) => setPrefs((p) => ({ ...p, cut: { ...p.cut, panelEdge } }))}>
+                    <span title="Retângulo de corte na borda do painel físico, para soltar cada painel do rolo">Em volta de cada painel</span>
+                  </CheckRow>
+                  {(prefs.cut.contour || prefs.cut.panelEdge) && (
+                    <Field label="Nome da separação" hint="Como o RIP/plotter reconhece a faca (ex.: CutContour, Thru-cut)">
+                      <TextField
+                        value={prefs.cut.name}
+                        onCommit={(name) => setPrefs((p) => ({ ...p, cut: { ...p.cut, name: name.trim() || 'CutContour' } }))}
+                      />
+                    </Field>
+                  )}
+                </Section>
                 <Section title="Marcas">
                   <Field label="Margem técnica" hint="Faixa em volta de cada painel onde ficam as marcas e a etiqueta. Também gasta mídia.">
                     <NumberField value={prefs.marks.marginMm} onCommit={(v) => setPrefs((p) => ({ ...p, marks: { ...p.marks, marginMm: v ?? 0 } }))} />
@@ -1303,6 +1361,10 @@ export default function TilingPage() {
                     fills={leftTab === 'instalacao' ? areaFills : undefined}
                     showOrder={leftTab === 'instalacao'}
                     onSelectTile={selectTile}
+                    onSelectMany={(keys, additive) => {
+                      setSelectedSeam(null)
+                      setSelected((s) => (additive ? [...new Set([...s, ...keys])] : keys))
+                    }}
                     onSelectSeam={(id) => {
                       setSelectedSeam(id)
                       if (id) setSelected([])
@@ -1402,7 +1464,7 @@ export default function TilingPage() {
                   />
                 </Section>
                 <div className="space-y-1.5 px-3 py-3 text-[11px] text-muted-foreground">
-                  <p>Clique num painel para ajustar; Shift + clique escolhe vários.</p>
+                  <p>Clique num painel para ajustar; Shift + clique ou arrastar um retângulo escolhe vários.</p>
                   <p>Clique numa linha para a fresta; arraste a linha para mover a divisão.</p>
                   <p>Esc limpa a seleção · Ctrl+Z desfaz · Ctrl+S salva.</p>
                 </div>
@@ -1707,6 +1769,25 @@ function ExportPanel({
         <p className="flex items-start gap-2 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-amber-800 dark:text-amber-300">
           <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0" />
           O projeto mudou depois desta exportação: os arquivos estão desatualizados. Exportar de novo gera a {nextRevision}.
+        </p>
+      )}
+      {current.result.cut && (current.result.cut.contour || current.result.cut.panelEdge) && (
+        <p className="text-muted-foreground">
+          Faca ({current.result.cut.name}):{' '}
+          {[current.result.cut.contour && 'contorno da arte', current.result.cut.panelEdge && 'em volta de cada painel']
+            .filter(Boolean)
+            .join(' e ')}
+          .
+        </p>
+      )}
+      {current.result.imageCrop && current.result.imageCrop.cropped + current.result.imageCrop.kept > 0 && (
+        <p className="text-muted-foreground" title="Só imagens sem perda são recortadas; o recorte copia os pixels, sem reamostrar">
+          Arquivos por painel: {current.result.imageCrop.cropped} imagem(ns) recortada(s) no painel
+          {current.result.imageCrop.kept > 0 &&
+            `, ${current.result.imageCrop.kept} mantida(s) inteira(s)${
+              current.result.imageCrop.keptBecause.length ? ` (${current.result.imageCrop.keptBecause.join(', ')})` : ''
+            }`}
+          .
         </p>
       )}
       {current.result.warnings?.map((w) => (

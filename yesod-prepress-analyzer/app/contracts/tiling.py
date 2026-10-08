@@ -129,6 +129,35 @@ class TilingMarks(BaseModel):
         return self.crop_marks if self.overlap_marks is None else self.overlap_marks
 
 
+class TilingCut(BaseModel):
+    """Cut lines on the cut separation (the cutter follows them; they are not printed)."""
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    contour: bool = False
+    """Die line around the artwork, cut inside each panel's print window."""
+    offset_mm: float = Field(
+        default=0, ge=-50, le=200, validation_alias=AliasChoices("offsetMm", "offset_mm")
+    )
+    """Positive = outward from the art, negative = inward."""
+    cut_holes: bool = Field(default=False, validation_alias=AliasChoices("cutHoles", "cut_holes"))
+    white_background: Literal["ignore", "keep"] = Field(
+        default="ignore", validation_alias=AliasChoices("whiteBackground", "white_background")
+    )
+    panel_edge: bool = Field(
+        default=False, validation_alias=AliasChoices("panelEdge", "panel_edge")
+    )
+    """A cut around each physical panel (to cut it off the roll)."""
+    name: str = Field(default="CutContour", min_length=1, max_length=60)
+    line_width_pt: float = Field(
+        default=0.25, gt=0, le=5, validation_alias=AliasChoices("lineWidthPt", "line_width_pt")
+    )
+
+    @property
+    def active(self) -> bool:
+        return self.contour or self.panel_edge
+
+
 class TilingOutputs(BaseModel):
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
@@ -160,6 +189,17 @@ class TilingRequest(BaseModel):
     """The screen's configuration, saved next to the panels for reuse."""
     revision: int = Field(default=0, ge=0, le=10_000)
     """File revision (R1, R2…); 0 = take it from the configuration."""
+    cut: TilingCut | None = None
+    """Cut lines; None = take them from the configuration."""
+
+    @property
+    def cut_settings(self) -> TilingCut:
+        if self.cut is not None:
+            return self.cut
+        try:
+            return TilingCut.model_validate(self.config.get("cut") or {})
+        except ValueError:
+            return TilingCut()
 
     @property
     def revision_number(self) -> int:

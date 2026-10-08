@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { calculateProject, newProject, zeroEdges } from '@/domain/tiling'
-import { contentHash, exportPayload, isOutdated, type TilingProject } from '../tilingService'
+import { contentHash, DEFAULT_CUT, exportPayload, isOutdated, type TilingProject } from '../tilingService'
 
 vi.mock('@/lib/supabase/client', () => ({ default: {} }))
 
@@ -19,6 +19,11 @@ describe('exportação desatualizada', () => {
     const shuffled = { ...values, project: { ...project, poster: { ...project.poster, width: 2000.0001 } } }
     expect(contentHash(shuffled)).toBe(contentHash(values))
     expect(contentHash({ ...values, name: 'Outra' })).not.toBe(contentHash(values))
+  })
+
+  it('faca desligada não muda a impressão digital; ligada, muda', () => {
+    expect(contentHash({ ...values, cut: DEFAULT_CUT })).toBe(contentHash(values))
+    expect(contentHash({ ...values, cut: { ...DEFAULT_CUT, panelEdge: true } })).not.toBe(contentHash(values))
   })
 
   it('exportado e alterado depois = desatualizado', () => {

@@ -22,6 +22,8 @@ interface TilingCanvasProps {
   /** Mostra a ordem de instalação em cada painel. */
   showOrder?: boolean
   onSelectTile: (key: string, additive: boolean) => void
+  /** Seleção por área: arrastar na prancheta escolhe os painéis tocados pelo retângulo. */
+  onSelectMany: (keys: string[], additive: boolean) => void
   onSelectSeam: (id: string | null) => void
   onMoveSeam: (id: string, position: number) => void
   onMoveEnd: () => void
@@ -42,6 +44,7 @@ export function TilingCanvas({
   fills,
   showOrder,
   onSelectTile,
+  onSelectMany,
   onSelectSeam,
   onMoveSeam,
   onMoveEnd,
@@ -49,6 +52,9 @@ export function TilingCanvas({
   const svgRef = useRef<SVGSVGElement>(null)
   const [dragging, setDragging] = useState<string | null>(null)
   const moved = useRef(false)
+  // Seleção: começa num painel (ou fora dele); vira retângulo se o ponteiro andar.
+  const press = useRef<{ x: number; y: number; key: string | null; additive: boolean } | null>(null)
+  const [band, setBand] = useState<Rect | null>(null)
   const { tiles, seams, overlaps } = geometry
 
   const extent = useMemo(() => {
@@ -97,23 +103,71 @@ export function TilingCanvas({
     setDragging(null)
   }
 
+  const startPress = (event: React.PointerEvent, key: string | null) => {
+    const point = toMm(event)
+    if (!point || event.button !== 0) return
+    press.current = { ...point, key, additive: event.shiftKey || event.ctrlKey || event.metaKey }
+    svgRef.current?.setPointerCapture?.(event.pointerId)
+  }
+
+  const finishPress = () => {
+    const start = press.current
+    press.current = null
+    if (!start) return
+    if (band) {
+      const hit = tiles.filter(
+        (t) =>
+          t.logical.x < band.x + band.w &&
+          t.logical.x + t.logical.w > band.x &&
+          t.logical.y < band.y + band.h &&
+          t.logical.y + t.logical.h > band.y,
+      )
+      setBand(null)
+      onSelectMany(
+        hit.map((t) => t.key),
+        start.additive,
+      )
+    } else if (start.key) {
+      onSelectTile(start.key, start.additive)
+    } else {
+      onSelectSeam(null)
+    }
+  }
+
   return (
     <svg
       ref={svgRef}
       className="h-full w-full touch-none select-none"
       viewBox={`${extent.x0} ${extent.y0} ${extent.x1 - extent.x0} ${extent.y1 - extent.y0}`}
       preserveAspectRatio="xMidYMid meet"
+      onPointerDown={(event) => startPress(event, null)}
       onPointerMove={(event) => {
-        if (!dragging) return
         const point = toMm(event)
         if (!point) return
-        moved.current = true
-        onMoveSeam(dragging, dragging.startsWith('v') ? point.x : point.y)
+        if (dragging) {
+          moved.current = true
+          onMoveSeam(dragging, dragging.startsWith('v') ? point.x : point.y)
+          return
+        }
+        const start = press.current
+        // Só vira retângulo depois de andar um pouco: um clique continua sendo clique.
+        if (start && (band || Math.hypot(point.x - start.x, point.y - start.y) > unit * 1.5)) {
+          setBand({
+            x: Math.min(start.x, point.x),
+            y: Math.min(start.y, point.y),
+            w: Math.abs(point.x - start.x),
+            h: Math.abs(point.y - start.y),
+          })
+        }
       }}
-      onPointerUp={finishDrag}
-      onPointerLeave={finishDrag}
-      onClick={(event) => {
-        if (event.target === svgRef.current) onSelectSeam(null)
+      onPointerUp={() => {
+        finishDrag()
+        finishPress()
+      }}
+      onPointerCancel={() => {
+        finishDrag()
+        press.current = null
+        setBand(null)
       }}
     >
       <g transform={flip}>
@@ -170,9 +224,9 @@ export function TilingCanvas({
 
         {tiles.map((t) => {
           const isSelected = selected.includes(t.key)
-          const select = (event: React.MouseEvent) => {
+          const select = (event: React.PointerEvent) => {
             event.stopPropagation()
-            onSelectTile(t.key, event.shiftKey || event.ctrlKey || event.metaKey)
+            startPress(event, t.key)
           }
           if (!t.enabled) {
             return (
@@ -188,7 +242,7 @@ export function TilingCanvas({
                 strokeDasharray="3 3"
                 vectorEffect="non-scaling-stroke"
                 className="cursor-pointer"
-                onClick={select}
+                onPointerDown={select}
               />
             )
           }
@@ -205,10 +259,25 @@ export function TilingCanvas({
               strokeWidth={isSelected ? 3 : 1.5}
               vectorEffect="non-scaling-stroke"
               className="cursor-pointer"
-              onClick={select}
+              onPointerDown={select}
             />
           )
         })}
+
+        {band && (
+          <rect
+            x={band.x}
+            y={band.y}
+            width={band.w}
+            height={band.h}
+            fill="#2563eb"
+            fillOpacity={0.08}
+            stroke="#2563eb"
+            strokeDasharray="4 3"
+            vectorEffect="non-scaling-stroke"
+            style={{ pointerEvents: 'none' }}
+          />
+        )}
 
         {/* Linhas de divisão: arraste para mover, clique para escolher a emenda. */}
         {seams.map((s) => {

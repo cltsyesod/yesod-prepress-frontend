@@ -13,6 +13,8 @@ import pikepdf
 from PIL import Image
 
 from app.contracts.tiling import TilingRequest
+from app.tiling.crop import CropStats, ImageCache, cropped_source
+from app.tiling.cut import plan_cut
 from app.tiling.export import (
     TilingError,
     art_frame,
@@ -54,11 +56,12 @@ def build_package(
         frame = art_frame(pdf.pages[index], request.file_scale)
         # The screen validates too; no file leaves here from a layout that cannot be printed.
         check_constraint(tiles, frame, request.constraint)
+        cut = plan_cut(source, index, frame, request.cut_settings)
 
         # All panels in one PDF: the artwork is stored once (ideal to send to the RIP).
-        build_panels(pdf, index, frame, tiles, request.marks, request.title, total, sides).save(
-            pdf_path
-        )
+        build_panels(
+            pdf, index, frame, tiles, request.marks, request.title, total, sides, cut
+        ).save(pdf_path)
 
         guide = build_guide(
             source,
@@ -75,6 +78,8 @@ def build_package(
         guide.save(guide_path)
 
         used: set[str] = set()
+        decoded = ImageCache()
+        crop_stats = CropStats()
         with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_STORED) as archive:
             for tile in tiles:
                 name = safe_file_name(tile.name)
@@ -82,8 +87,17 @@ def build_package(
                 while unique.casefold() in used:
                     unique, n = f"{name}_{n}", n + 1
                 used.add(unique.casefold())
+                # One file per panel: its images keep only the pixels the panel shows.
+                art, art_index = pdf, index
+                try:
+                    art = cropped_source(
+                        pdf, index, frame, printed_area(tile, frame), decoded, crop_stats
+                    )
+                    art_index = 0
+                except (ValueError, pikepdf.PdfError):
+                    art, art_index = pdf, index
                 single = build_panels(
-                    pdf, index, frame, [tile], request.marks, request.title, total, sides
+                    art, art_index, frame, [tile], request.marks, request.title, total, sides, cut
                 )
                 target = workdir / f"{unique}.pdf"
                 single.save(target)
@@ -130,7 +144,22 @@ def build_package(
         pdf=pdf_path,
         zip=zip_path,
         guide=guide_path,
-        summary={"panels": total, "revision": revision, "files": files},
+        summary={
+            "panels": total,
+            "revision": revision,
+            "files": files,
+            "cut": {
+                "contour": bool(cut and cut.contour is not None),
+                "panelEdge": bool(cut and cut.panel_edge),
+                "name": cut.name if cut else "",
+            },
+            "imageCrop": {
+                "cropped": crop_stats.cropped,
+                "dropped": crop_stats.dropped,
+                "kept": crop_stats.kept,
+                "keptBecause": sorted(crop_stats.reasons),
+            },
+        },
     )
 
 

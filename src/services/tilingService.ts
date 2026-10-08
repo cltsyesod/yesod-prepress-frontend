@@ -39,8 +39,30 @@ export interface TilingMarksConfig {
   labelBottom?: string
 }
 
+/** Linhas de corte (separação de corte, não impressa): faca pelo contorno e/ou em volta do painel. */
+export interface TilingCutConfig {
+  contour: boolean
+  /** Positivo = para fora da arte; negativo = para dentro. */
+  offsetMm: number
+  cutHoles: boolean
+  whiteBackground: 'ignore' | 'keep'
+  panelEdge: boolean
+  /** Nome da separação de corte que o RIP/plotter reconhece. */
+  name: string
+}
+
+export const DEFAULT_CUT: TilingCutConfig = {
+  contour: false,
+  offsetMm: 0,
+  cutHoles: false,
+  whiteBackground: 'ignore',
+  panelEdge: false,
+  name: 'CutContour',
+}
+
 /** O que fica salvo: o projeto do motor + o que é só desta tela. */
 export interface TilingConfig {
+  cut?: TilingCutConfig
   version: 2
   page: number
   project: TilingProjectModel
@@ -72,8 +94,11 @@ export function contentHash(values: {
   page: number
   marks: TilingMarksConfig
   background: TilingBackground | null
+  cut?: TilingCutConfig
 }): string {
-  const text = stable([values.project, values.name, values.page, values.marks, values.background])
+  // Sem corte ligado, o texto é o mesmo das versões anteriores (exportações antigas seguem em dia).
+  const cut = values.cut && (values.cut.contour || values.cut.panelEdge) ? values.cut : undefined
+  const text = stable([values.project, values.name, values.page, values.marks, values.background, ...(cut ? [cut] : [])])
   let hash = 0x811c9dc5
   for (let i = 0; i < text.length; i++) {
     hash ^= text.charCodeAt(i)
@@ -92,6 +117,7 @@ export function isOutdated(row: TilingProject): boolean {
       page: row.config.page || 1,
       marks: row.config.marks,
       background: row.background,
+      cut: row.config.cut,
     }) !== row.config.exportedHash
   )
 }
@@ -108,6 +134,9 @@ export interface TilingResult {
     rotation?: number
   }[]
   revision?: number
+  cut?: { contour: boolean; panelEdge: boolean; name: string }
+  /** Imagens recortadas nos arquivos por painel (as demais seguem inteiras). */
+  imageCrop?: { cropped: number; dropped: number; kept: number; keptBecause: string[] }
   sizes?: { pdf: number; guide: number; zip: number }
   warnings?: string[]
 }

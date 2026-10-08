@@ -6,6 +6,7 @@ import {
   calculateProject,
   defaultMedia,
   fillLabel,
+  fitToPoster,
   hasErrors,
   mergeTiles,
   migrateLegacy,
@@ -349,6 +350,32 @@ describe('áreas e ordem de instalação', () => {
     expect(tile(p, 'L1C1').number).toBe(2)
     p = resetSequence(p)
     expect(tile(p, 'L1C2').number).toBe(2)
+  })
+})
+
+describe('precisão em 1000 mm', () => {
+  it('7 × 3 sem número redondo: os painéis se encostam sem folga nem sobra', () => {
+    const p = project(1000, 1000, 7, 3, { overlap: edges({ left: 20, bottom: 20 }) })
+    const tiles = calculateProject(p).tiles
+    for (let row = 1; row <= 3; row++) {
+      const line = tiles.filter((t) => t.row === row).sort((a, b) => a.column - b.column)
+      expect(line[0].logical.x).toBe(0)
+      for (let i = 1; i < line.length; i++) {
+        expect(Math.abs(line[i].logical.x - (line[i - 1].logical.x + line[i - 1].logical.w))).toBeLessThan(1e-9)
+        // A sobreposição sai exatamente da borda lógica.
+        expect(Math.abs(line[i].print.x - (line[i].logical.x - 20))).toBeLessThan(1e-9)
+      }
+      const last = line[line.length - 1]
+      expect(Math.abs(last.logical.x + last.logical.w - 1000)).toBeLessThan(1e-9)
+    }
+    const area = tiles.reduce((sum, t) => sum + t.logical.w * t.logical.h, 0)
+    expect(Math.abs(area - 1_000_000)).toBeLessThan(1e-6)
+  })
+
+  it('mudar a arte para 1000,5 mm mantém a grade cobrindo tudo', () => {
+    const p = fitToPoster(project(1000, 1000, 3, 1), { width: 1000.5, height: 1000, scale: 1, availableBleed: edges() })
+    expect(p.grid.xs[p.grid.xs.length - 1]).toBeCloseTo(1000.5, 9)
+    expect(hasErrors(calculateProject(p).issues)).toBe(false)
   })
 })
 
