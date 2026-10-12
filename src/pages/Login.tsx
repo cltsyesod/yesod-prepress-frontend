@@ -72,14 +72,6 @@ export default function LoginPage() {
             {loading ? 'Entrando...' : 'Entrar'}
           </Button>
         </form>
-
-        <div className="mt-6 p-3 bg-slate-50 rounded-lg border border-slate-100">
-          <p className="text-xs text-slate-500 text-center">
-            <strong>Credenciais de demonstração:</strong>
-            <br />
-            camilimag@gmail.com / Skip@Pass
-          </p>
-        </div>
       </div>
     </div>
   )

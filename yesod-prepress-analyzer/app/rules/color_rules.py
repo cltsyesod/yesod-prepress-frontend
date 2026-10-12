@@ -4,6 +4,17 @@ from app.analyzer.context import DocumentContext
 from app.contracts.issue import AnalysisIssue
 from app.rules.base import Rule
 
+# Untagged RGB gets sRGB assigned (values kept); offered only when the RIP converts RGB.
+ASSIGN_SRGB_FIX = {
+    "id": "assign_rgb_profile",
+    "target": "pdf",
+    "label": "Atribuir perfil sRGB",
+    "preview": (
+        "Declara o RGB sem perfil como sRGB; os valores de cor não mudam e o RIP converte "
+        "sempre do mesmo jeito."
+    ),
+}
+
 
 class RgbContentRule(Rule):
     code = "COLOR_RGB_CONTENT"
@@ -32,9 +43,11 @@ class RgbContentRule(Rule):
                 recommendation=(
                     "Converta as cores com o perfil ICC de destino e confira provas."
                     if cmyk_only
-                    else "Confirme que o perfil RGB padrão do RIP é o esperado ou reexporte "
-                    "com perfil incorporado."
+                    else "Atribua o perfil sRGB (os valores não mudam) ou confirme que o perfil "
+                    "RGB padrão do RIP é o esperado."
                 ),
+                can_auto_correct=not cmyk_only,
+                fix=None if cmyk_only else ASSIGN_SRGB_FIX,
             )
         ]
 

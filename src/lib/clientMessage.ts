@@ -17,6 +17,10 @@ export function buildClientMessage(jobName: string, clientName: string, issues: 
 
   const lines = items.map((issue, index) => {
     const where = issue.page > 0 ? ` (página ${issue.page})` : ''
+    // Devolvido com pedido escrito pelo operador: o pedido é a instrução ao cliente.
+    if (issue.status === 'rejected' && issue.decision_reason) {
+      return `${index + 1}. ${issue.title}${where}: ${issue.decision_reason}`
+    }
     const found = issue.found_value ? ` Encontramos: ${issue.found_value}.` : ''
     const expected = issue.expected_value ? ` Precisamos de: ${issue.expected_value}.` : ''
     return `${index + 1}. ${issue.title}${where}.${found}${expected}`

@@ -25,12 +25,14 @@ from app.fixes.geometry import MM, Box, describe_mm, expand, intersect, target_t
 from app.fixes.image_pdf import image_to_pdf
 from app.fixes.magenta import convert_magenta_strokes
 from app.fixes.paths import circle, pdf_path
+from app.fixes.rgb_profile import assign_srgb
 from app.fixes.upscale import upscale_images
 
 # Order matters: boxes first, because the die line and the marks use the TrimBox; a
 # magenta die line converted to the cut separation counts as the die line afterwards.
 _ORDER = (
     "upscale_images",
+    "assign_rgb_profile",
     "set_page_boxes",
     "add_bleed",
     "convert_magenta_die_line",
@@ -187,6 +189,26 @@ def _add_bleed(pdf: pikepdf.Pdf, profile: ProductionProfile, params: dict) -> Ap
     how_label = "por espelhamento" if method == bleed.MIRROR else "esticando a borda"
     label = f"Sangria gerada {how_label}"
     return AppliedFix(id="add_bleed", label=label, details=details)
+
+
+def _assign_rgb_profile(pdf: pikepdf.Pdf, profile: ProductionProfile, params: dict) -> AppliedFix:
+    """Untagged RGB declared as sRGB; colour values are kept, nothing is converted."""
+
+    report = assign_srgb(pdf)
+    details: list[str] = []
+    if report.operators:
+        details.append(f"{report.operators} cor(es) de vetores e textos marcadas como sRGB")
+    if report.images:
+        details.append(f"{report.images} imagem(ns) marcada(s) como sRGB, pixels inalterados")
+    if report.shadings:
+        details.append(f"{report.shadings} degradê(s) marcado(s) como sRGB")
+    if report.inline_images:
+        details.append(
+            f"{report.inline_images} imagem(ns) embutida(s) no conteúdo ficaram sem perfil"
+        )
+    return AppliedFix(
+        id="assign_rgb_profile", label="Perfil sRGB atribuído ao RGB sem perfil", details=details
+    )
 
 
 def _add_cut_contour(pdf: pikepdf.Pdf, profile: ProductionProfile, params: dict) -> AppliedFix:
@@ -466,6 +488,7 @@ _FIXES = {
     "upscale_images": _upscale,
     "set_page_boxes": _set_page_boxes,
     "add_bleed": _add_bleed,
+    "assign_rgb_profile": _assign_rgb_profile,
     "convert_magenta_die_line": _convert_magenta,
     "add_cut_contour": _add_cut_contour,
     "add_crop_marks": _add_crop_marks,

@@ -43,6 +43,7 @@ import {
   analysisJobsService,
   type AnalysisIssue,
   type FixRequest,
+  type IssueFix,
 } from '@/services/analysisJobsService'
 import { profileService } from '@/services/profileService'
 import { isImageFile, projectFilesService } from '@/services/projectFilesService'
@@ -171,11 +172,13 @@ export default function JobWorkspacePage() {
   const bleedDefault = Number(bleedFixes?.find((fix) => fix.id === 'add_bleed')?.params?.bleedMm) || 0
 
   const fixIssue = useCallback(
-    async (issue: AnalysisIssue) => {
-      if (!issue.fix || !job) return
-      if (issue.fix.target === 'ticket') {
+    async (issue: AnalysisIssue, chosen?: IssueFix) => {
+      // A correção escolhida em "Como resolver"; sem escolha, a que a ocorrência traz.
+      const fix = chosen ?? issue.fix
+      if (!fix || !job) return
+      if (fix.target === 'ticket') {
         // Ex.: escala — o PDF está certo, a ficha é que precisa mudar.
-        const next = { ...ticket, ...(issue.fix.params as JobTicket) }
+        const next = { ...ticket, ...(fix.params as JobTicket) }
         setTicket(next)
         try {
           await jobsService.updateTicket(job.id, next, profileId)
@@ -186,7 +189,7 @@ export default function JobWorkspacePage() {
         }
         return
       }
-      await requestFixes([{ id: issue.fix.id, params: issue.fix.params }])
+      await requestFixes([{ id: fix.id, params: fix.params }])
     },
     [job, ticket, profileId, analysis, loadJob, requestFixes],
   )

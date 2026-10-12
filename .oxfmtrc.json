@@ -10,7 +10,6 @@
     ".pnpm-store",
     ".pnpm",
     ".oxfmtrc.json",
-    ".skip.config.json",
     "components.json",
     ".oxlintrc.json",
     "index.html",

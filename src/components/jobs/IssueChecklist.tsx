@@ -1,9 +1,22 @@
 import { useEffect, useRef, useState } from 'react'
-import { Check, ChevronDown, CircleAlert, Info, OctagonX, RotateCcw, Undo2, Wand2 } from 'lucide-react'
+import {
+  Check,
+  ChevronDown,
+  CircleAlert,
+  Info,
+  Loader2,
+  OctagonX,
+  Send,
+  ShieldCheck,
+  Undo2,
+  Wand2,
+  type LucideIcon,
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
-import type { AnalysisIssue } from '@/services/analysisJobsService'
+import { solutionsFor, type Solution } from '@/lib/issue-solutions'
+import type { AnalysisIssue, IssueFix } from '@/services/analysisJobsService'
 
 // Níveis do manual de preflight: bloqueante, decisão do operador e informação.
 const GROUPS = [
@@ -34,12 +47,25 @@ const DECISIONS: Record<string, string> = {
   rejected: 'Devolvido ao cliente',
 }
 
+// Cada tipo de saída tem a sua cor e o seu verbo, iguais em todas as ocorrências.
+const KIND: Record<Solution['kind'], { icon: LucideIcon; action: string; tone: string }> = {
+  fix: { icon: Wand2, action: 'Aplicar', tone: 'bg-primary/10 text-primary' },
+  client: { icon: Send, action: 'Pedir ao cliente', tone: 'bg-amber-500/10 text-amber-600 dark:text-amber-400' },
+  accept: { icon: ShieldCheck, action: 'Aceitar', tone: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' },
+}
+
+// Sem catálogo para a regra: as saídas de sempre, sem texto pronto.
+const GENERIC: Solution[] = [
+  { kind: 'client', title: 'Pedir ao cliente', text: 'Devolve o ponto com o pedido abaixo.', request: '' },
+  { kind: 'accept', title: 'Aceitar como exceção', text: 'Segue assim, com o motivo registrado.', reason: '' },
+]
+
 interface IssueChecklistProps {
   issues: AnalysisIssue[]
   onDecide: (issueId: string, status: string, reason?: string) => Promise<void>
   onShowPage: (page: number) => void
-  /** Aplica a correção automática oferecida pela ocorrência. */
-  onFix: (issue: AnalysisIssue) => Promise<void>
+  /** Aplica uma correção (a da ocorrência ou uma do catálogo). */
+  onFix: (issue: AnalysisIssue, fix?: IssueFix) => Promise<void>
   fixing: boolean
   /** Ocorrência escolhida no raio-x: abre e rola até ela. */
   focusId?: string | null
@@ -121,17 +147,16 @@ function IssueItem({
     setOpen(true)
     ref.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
   }, [focused])
-  const [askReason, setAskReason] = useState(false)
-  const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
   const decided = issue.status !== 'pending'
+  const catalogue = solutionsFor(issue)
+  const solutions = informational ? catalogue.filter((s) => s.kind === 'fix') : catalogue.length ? catalogue : GENERIC
+  const hasFix = solutions.some((s) => s.kind === 'fix')
 
   const decide = async (status: string, why?: string) => {
     setBusy(true)
     try {
       await onDecide(issue.id, status, why)
-      setAskReason(false)
-      setReason('')
     } finally {
       setBusy(false)
     }
@@ -141,7 +166,7 @@ function IssueItem({
     <li
       ref={ref}
       className={cn(
-        'rounded-md border border-border bg-card transition-opacity',
+        'rounded-lg border border-border bg-card transition-opacity',
         decided && 'opacity-60',
         focused && 'ring-2 ring-primary/50',
       )}
@@ -154,14 +179,17 @@ function IssueItem({
         <div className="min-w-0 flex-1">
           <p className="flex items-center gap-2 font-medium text-foreground">
             {issue.title}
-            {issue.fix && !decided && (
-              <Wand2 className="h-3.5 w-3.5 shrink-0 text-primary" aria-label="Correção automática disponível" />
+            {hasFix && !decided && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
+                <Wand2 className="h-3 w-3" />
+                corrigível
+              </span>
             )}
           </p>
           <p className="text-sm text-muted-foreground">
             {issue.found_value}
             {issue.expected_value && !informational && (
-              <span className="text-content-muted"> · esperado: {issue.expected_value}</span>
+              <span className="text-muted-foreground/80"> · esperado: {issue.expected_value}</span>
             )}
           </p>
           {decided && (
@@ -192,75 +220,133 @@ function IssueItem({
 
       {open && (
         <div className="space-y-3 border-t border-border px-3 py-3 text-sm">
-          {issue.description && <p className="text-content">{issue.description}</p>}
-          {issue.recommendation && (
-            <p className="text-foreground">
-              <span className="font-medium">Como resolver: </span>
-              {issue.recommendation}
-            </p>
+          {issue.description && <p className="text-muted-foreground">{issue.description}</p>}
+          {informational && !solutions.length && issue.recommendation && (
+            <p className="text-foreground">{issue.recommendation}</p>
           )}
 
-          {issue.fix && !decided && (
-            <div className="flex flex-col gap-2 rounded-md bg-primary/5 p-2.5 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-xs text-muted-foreground">
-                {issue.fix.preview ||
-                  (issue.fix.target === 'pdf'
-                    ? 'Gera uma versão corrigida; o original fica guardado.'
-                    : 'Atualiza a ficha do trabalho e reanalisa.')}
-              </p>
-              <Button size="sm" className="shrink-0" disabled={busy || fixing} onClick={() => onFix(issue)}>
-                <Wand2 className="h-4 w-4" />
-                {issue.fix.label}
-              </Button>
-            </div>
-          )}
-
-          {!informational &&
-            (decided ? (
-              <Button size="sm" variant="ghost" disabled={busy} onClick={() => decide('pending')}>
-                <Undo2 className="h-4 w-4" />
-                Desfazer decisão
-              </Button>
-            ) : askReason ? (
+          {decided ? (
+            <Button size="sm" variant="ghost" disabled={busy} onClick={() => decide('pending')}>
+              <Undo2 className="h-4 w-4" />
+              Desfazer decisão
+            </Button>
+          ) : (
+            solutions.length > 0 && (
               <div className="space-y-2">
-                <Textarea
-                  autoFocus
-                  rows={2}
-                  value={reason}
-                  onChange={(e) => setReason(e.target.value)}
-                  placeholder="Por que aceitar? Ex.: painel visto a 15 m, 120 ppi é suficiente"
-                />
-                <div className="flex gap-2">
-                  <Button
-                    size="sm"
-                    disabled={busy || !reason.trim()}
-                    onClick={() => decide('approved', reason.trim())}
-                  >
-                    Registrar exceção
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={() => setAskReason(false)}>
-                    Cancelar
-                  </Button>
-                </div>
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Como resolver</p>
+                <ol className="space-y-2">
+                  {solutions.map((solution, index) => (
+                    <SolutionRow
+                      key={`${solution.kind}-${index}`}
+                      solution={solution}
+                      disabled={busy || fixing}
+                      onFix={(fix) => onFix(issue, fix)}
+                      onDecide={decide}
+                    />
+                  ))}
+                </ol>
+                {!informational && (
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pt-1 text-xs text-muted-foreground">
+                    <button type="button" disabled={busy} onClick={() => decide('corrected')} className="hover:text-foreground">
+                      <Check className="mr-1 inline h-3.5 w-3.5" />
+                      Já corrigi fora do sistema
+                    </button>
+                    <button type="button" disabled={busy} onClick={() => decide('ignored')} className="hover:text-foreground">
+                      Ignorar este ponto
+                    </button>
+                  </div>
+                )}
               </div>
-            ) : (
-              <div className="flex flex-wrap gap-2">
-                <Button size="sm" variant="outline" disabled={busy} onClick={() => decide('corrected')}>
-                  <Check className="h-4 w-4" />
-                  Corrigido
-                </Button>
-                <Button size="sm" variant="outline" disabled={busy} onClick={() => setAskReason(true)}>
-                  Aceitar como exceção
-                </Button>
-                <Button size="sm" variant="outline" disabled={busy} onClick={() => decide('rejected')}>
-                  <RotateCcw className="h-4 w-4" />
-                  Devolver ao cliente
-                </Button>
-                <Button size="sm" variant="ghost" disabled={busy} onClick={() => decide('ignored')}>
-                  Ignorar
-                </Button>
-              </div>
-            ))}
+            )
+          )}
+        </div>
+      )}
+    </li>
+  )
+}
+
+/** Uma saída: o que faz, e o botão. Pedir e aceitar abrem o texto pronto para editar. */
+function SolutionRow({
+  solution,
+  disabled,
+  onFix,
+  onDecide,
+}: {
+  solution: Solution
+  disabled: boolean
+  onFix: (fix: IssueFix) => Promise<void>
+  onDecide: (status: string, why?: string) => Promise<void>
+}) {
+  const [editing, setEditing] = useState(false)
+  const [text, setText] = useState('')
+  const [running, setRunning] = useState(false)
+  const style = KIND[solution.kind]
+  const Icon = style.icon
+
+  const start = async () => {
+    if (solution.kind === 'fix') {
+      setRunning(true)
+      try {
+        await onFix(solution.fix)
+      } finally {
+        setRunning(false)
+      }
+      return
+    }
+    setText(solution.kind === 'client' ? solution.request : solution.reason)
+    setEditing(true)
+  }
+
+  const confirm = async () => {
+    await onDecide(solution.kind === 'client' ? 'rejected' : 'approved', text.trim())
+    setEditing(false)
+  }
+
+  return (
+    <li className="rounded-md border border-border bg-background/40 p-2.5">
+      <div className="flex items-start gap-3">
+        <span className={cn('mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md', style.tone)}>
+          <Icon className="h-3.5 w-3.5" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="font-medium text-foreground">{solution.title}</p>
+          <p className="text-xs text-muted-foreground">{solution.text}</p>
+        </div>
+        {!editing && (
+          <Button
+            size="sm"
+            variant={solution.kind === 'fix' ? 'default' : 'outline'}
+            className="shrink-0"
+            disabled={disabled}
+            onClick={start}
+          >
+            {running && <Loader2 className="h-4 w-4 animate-spin" />}
+            {style.action}
+          </Button>
+        )}
+      </div>
+      {editing && (
+        <div className="mt-2 space-y-2 pl-10">
+          <Textarea
+            autoFocus
+            rows={2}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder={solution.kind === 'client' ? 'O que o cliente precisa fazer' : 'Por que aceitar'}
+          />
+          <p className="text-[11px] text-muted-foreground">
+            {solution.kind === 'client'
+              ? 'Este pedido entra na mensagem ao cliente.'
+              : 'O motivo fica registrado no trabalho.'}
+          </p>
+          <div className="flex gap-2">
+            <Button size="sm" disabled={disabled || !text.trim()} onClick={confirm}>
+              {solution.kind === 'client' ? 'Devolver ao cliente' : 'Registrar exceção'}
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>
+              Cancelar
+            </Button>
+          </div>
         </div>
       )}
     </li>

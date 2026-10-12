@@ -3,6 +3,7 @@ from __future__ import annotations
 from app.analyzer.context import DocumentContext
 from app.contracts.issue import AnalysisIssue
 from app.rules.base import Rule
+from app.rules.color_rules import ASSIGN_SRGB_FIX
 
 
 def _is_unmanaged_rgb(color_space: str) -> bool:
@@ -113,9 +114,11 @@ class ImageRgbRule(Rule):
                     "dele, e a cor pode mudar entre equipamentos."
                 ),
                 recommendation=(
-                    "Exporte incorporando o perfil de origem (ex.: sRGB). A conversão para "
-                    "CMYK continua a cargo do RIP; convertê-la aqui é opcional."
+                    "Atribua o perfil sRGB (os pixels não mudam) ou peça a imagem exportada "
+                    "com o perfil de origem. A conversão para CMYK continua a cargo do RIP."
                 ),
+                can_auto_correct=True,
+                fix=ASSIGN_SRGB_FIX,
             )
             for image in context.images
             if _is_unmanaged_rgb(image.color_space)

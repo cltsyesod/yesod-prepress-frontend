@@ -1,6 +1,6 @@
 {
-  "name": "skip-react-template",
-  "description": "A frontend React Vite TypeScript Shadcn UI template for Skip projects",
+  "name": "yesod-prepress-frontend",
+  "description": "Yesod Prepress AI: pré-impressão (análise, correções, montagem e painéis)",
   "private": true,
   "version": "0.0.30",
   "type": "module",

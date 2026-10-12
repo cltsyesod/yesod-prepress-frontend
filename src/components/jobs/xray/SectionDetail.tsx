@@ -6,14 +6,14 @@ import { SECTION_ICON, sectionTone, type View } from '@/components/jobs/xray/XRa
 import { cn } from '@/lib/utils'
 import { SECTIONS, TONE_CLASS, TONE_LABEL, type FileProfile } from '@/lib/xray'
 import { advisoryOf, factsOf } from '@/lib/xray-facts'
-import type { AnalysisIssue } from '@/services/analysisJobsService'
+import type { AnalysisIssue, IssueFix } from '@/services/analysisJobsService'
 
 type AppliedFix = { id: string; label: string; details: string[] }
 
 interface DecisionProps {
   onDecide: (issueId: string, status: string, reason?: string) => Promise<void>
   onShowPage: (page: number) => void
-  onFix: (issue: AnalysisIssue) => Promise<void>
+  onFix: (issue: AnalysisIssue, fix?: IssueFix) => Promise<void>
   fixing: boolean
   focusId?: string | null
 }
