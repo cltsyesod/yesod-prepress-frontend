@@ -10,6 +10,7 @@ FixId = Literal[
     "image_to_pdf",
     "upscale_images",
     "set_page_boxes",
+    "add_bleed",
     "convert_magenta_die_line",
     "add_contour_cut",
     "add_cut_contour",

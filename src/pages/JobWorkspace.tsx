@@ -24,6 +24,7 @@ import {
 import { Progress } from '@/components/ui/progress'
 import { JobStateBadge } from '@/components/jobs/JobStateBadge'
 import { JobTicketFields } from '@/components/jobs/JobTicketFields'
+import { BleedDialog, type BleedOptions } from '@/components/jobs/BleedDialog'
 import { ContourCutDialog, type ContourCutOptions } from '@/components/jobs/ContourCutDialog'
 import { CropMarksDialog } from '@/components/jobs/CropMarksDialog'
 import { JobMetricsLine } from '@/components/jobs/JobMetricsLine'
@@ -137,8 +138,14 @@ export default function JobWorkspacePage() {
   // A faca pelo contorno depende do afastamento escolhido pelo operador: pergunta antes.
   const [contourFixes, setContourFixes] = useState<FixRequest[] | null>(null)
   const [cropMarksOpen, setCropMarksOpen] = useState(false)
+  // A sangria gerada também: o operador escolhe esticar ou espelhar a borda.
+  const [bleedFixes, setBleedFixes] = useState<FixRequest[] | null>(null)
   const requestFixes = useCallback(
     async (fixes: FixRequest[]) => {
+      if (fixes.some((fix) => fix.id === 'add_bleed' && !fix.params?.method)) {
+        setBleedFixes(fixes)
+        return
+      }
       if (fixes.some((fix) => fix.id === 'add_contour_cut')) {
         setContourFixes(fixes)
         return
@@ -154,6 +161,14 @@ export default function JobWorkspacePage() {
     setContourFixes(null)
     await applyFixes(fixes)
   }
+  const confirmBleed = async (options: BleedOptions) => {
+    const fixes = (bleedFixes ?? []).map((fix) =>
+      fix.id === 'add_bleed' ? { ...fix, params: { ...fix.params, ...options } } : fix,
+    )
+    setBleedFixes(null)
+    await requestFixes(fixes)
+  }
+  const bleedDefault = Number(bleedFixes?.find((fix) => fix.id === 'add_bleed')?.params?.bleedMm) || 0
 
   const fixIssue = useCallback(
     async (issue: AnalysisIssue) => {
@@ -335,6 +350,15 @@ export default function JobWorkspacePage() {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-72">
               <DropdownMenuLabel className="text-xs text-muted-foreground">Inserir no arquivo</DropdownMenuLabel>
+              <DropdownMenuItem
+                disabled={applied('add_bleed') || applied('add_crop_marks') || running || fixing}
+                onSelect={guardScale(() =>
+                  requestFixes([{ id: 'add_bleed', params: { bleedMm: deliveredProfile?.targets?.minBleedMm ?? 0 } }]),
+                )}
+              >
+                <Wand2 className="h-4 w-4" />
+                Gerar sangria…{applied('add_bleed') && ' (já gerada)'}
+              </DropdownMenuItem>
               <DropdownMenuItem disabled={applied('add_crop_marks') || running || fixing} onSelect={guardScale(() => setCropMarksOpen(true))}>
                 <Wand2 className="h-4 w-4" />
                 Marcas de corte…{applied('add_crop_marks') && ' (já inseridas)'}
@@ -383,6 +407,12 @@ export default function JobWorkspacePage() {
         </div>
       </header>
 
+      <BleedDialog
+        open={!!bleedFixes}
+        defaultMm={bleedDefault}
+        onCancel={() => setBleedFixes(null)}
+        onConfirm={confirmBleed}
+      />
       <ContourCutDialog
         open={!!contourFixes}
         defaultName={cutLayerName}

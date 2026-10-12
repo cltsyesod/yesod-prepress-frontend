@@ -1,8 +1,9 @@
 """Automatic corrections applied to a copy of the client PDF.
 
 Every fix is conservative: it never converts colours or moves artwork. It writes
-page boxes and adds new, clearly separated objects (die line, crop marks). The one
-exception that touches pixels is upscaling, which the operator requests explicitly.
+page boxes and adds new, clearly separated objects (die line, crop marks). Generated
+bleed repeats the artwork's own edge only outside what the file already printed. The
+one exception that touches pixels is upscaling, which the operator requests explicitly.
 The original file is kept by the caller; the corrected copy is analysed again so
 the operator sees the result measured, not assumed.
 """
@@ -18,6 +19,7 @@ from app.analyzer.page_inspector import inspect_pages
 from app.contracts.fix import AppliedFix, FixRequest
 from app.contracts.production_profile import ProductionProfile
 from app.core.exceptions import AnalyzerError
+from app.fixes import bleed
 from app.fixes.contour import artwork_silhouette, contour_die_line
 from app.fixes.geometry import MM, Box, describe_mm, expand, intersect, target_trim, visible_box
 from app.fixes.image_pdf import image_to_pdf
@@ -30,6 +32,7 @@ from app.fixes.upscale import upscale_images
 _ORDER = (
     "upscale_images",
     "set_page_boxes",
+    "add_bleed",
     "convert_magenta_die_line",
     "add_contour_cut",
     "add_cut_contour",
@@ -121,6 +124,69 @@ def _set_page_boxes(pdf: pikepdf.Pdf, profile: ProductionProfile, params: dict) 
         if changes:
             details.append(f"Página {info.number}: " + "; ".join(changes))
     return AppliedFix(id="set_page_boxes", label="TrimBox e BleedBox definidos", details=details)
+
+
+def _add_bleed(pdf: pikepdf.Pdf, profile: ProductionProfile, params: dict) -> AppliedFix:
+    """Missing bleed generated from the artwork's own edge (stretched or mirrored)."""
+
+    method = str(params.get("method") or bleed.STRETCH)
+    if method not in bleed.METHODS:
+        raise FixError(f"unknown bleed method: {method}")
+    scale = profile.file_scale
+    bleed_mm = _param(params, "bleedMm", profile.minimum_bleed_mm) or profile.minimum_bleed_mm
+    if bleed_mm <= 0:
+        raise FixError("the job asks for no bleed")
+    bleed_pt = bleed_mm / scale * MM
+    slice_pt = 0.1 / scale * MM  # last 0.1 mm of the artwork, at final size
+
+    details: list[str] = []
+    for info, page in zip(inspect_pages(pdf, profile.cut_layer_names), pdf.pages, strict=True):
+        if info.die_line_box is not None:
+            details.append(f"Página {info.number}: peça com faca, a sangria segue a faca")
+            continue
+        if _already_applied(page, "add_crop_marks"):
+            # The marks live outside the old bleed and would be hidden by the new strips.
+            details.append(
+                f"Página {info.number}: já tem marcas de corte; gere a sangria antes delas"
+            )
+            continue
+        trim, how = target_trim(info, profile)
+        visible = visible_box(info)
+        # What the client's file already prints around the trim (at least the trim).
+        base = intersect(info.bleed_box, visible) if info.bleed_box else trim
+        base = (
+            min(base[0], trim[0]),
+            min(base[1], trim[1]),
+            max(base[2], trim[2]),
+            max(base[3], trim[3]),
+        )
+        wanted = expand(trim, bleed_pt)
+        if not bleed.extend_page(pdf, page, base, wanted, visible, method, slice_pt):
+            details.append(f"Página {info.number}: já tinha {bleed_mm:g} mm de sangria")
+            continue
+        outer = (
+            min(wanted[0], base[0]),
+            min(wanted[1], base[1]),
+            max(wanted[2], base[2]),
+            max(wanted[3], base[3]),
+        )
+        page.obj.TrimBox = _array(trim)
+        page.obj.BleedBox = _array(outer)
+        if any(o < v - 0.01 for o, v in zip(outer[:2], visible[:2], strict=True)) or any(
+            o > v + 0.01 for o, v in zip(outer[2:], visible[2:], strict=True)
+        ):
+            page.obj.MediaBox = _array(outer)
+            if "/CropBox" in page.obj:
+                page.obj.CropBox = _array(outer)
+        _record(page, "add_bleed")
+        details.append(
+            f"Página {info.number}: {bleed_mm:g} mm de sangria "
+            f"{'espelhando' if method == bleed.MIRROR else 'esticando'} a borda da arte "
+            f"(formato final {describe_mm(trim, scale)}, {how})"
+        )
+    how_label = "por espelhamento" if method == bleed.MIRROR else "esticando a borda"
+    label = f"Sangria gerada {how_label}"
+    return AppliedFix(id="add_bleed", label=label, details=details)
 
 
 def _add_cut_contour(pdf: pikepdf.Pdf, profile: ProductionProfile, params: dict) -> AppliedFix:
@@ -399,6 +465,7 @@ def _slug(
 _FIXES = {
     "upscale_images": _upscale,
     "set_page_boxes": _set_page_boxes,
+    "add_bleed": _add_bleed,
     "convert_magenta_die_line": _convert_magenta,
     "add_cut_contour": _add_cut_contour,
     "add_crop_marks": _add_crop_marks,

@@ -87,7 +87,22 @@ class BleedRule(Rule):
                         found_value=" / ".join(f"{value:.2f} mm" for value in margins) + suffix,
                         expected_value=f"Ao menos {minimum:g} mm em todos os lados",
                         description="A BleedBox não cobre a sangria mínima definida no perfil.",
-                        recommendation="Amplie a arte e reexporte com a sangria correta.",
+                        recommendation=(
+                            "Peça ao cliente a arte com sangria ou gere a sangria a partir da "
+                            "borda da arte (esticando ou espelhando); o que está dentro do "
+                            "formato final não muda."
+                        ),
+                        can_auto_correct=True,
+                        fix={
+                            "id": "add_bleed",
+                            "target": "pdf",
+                            "label": f"Gerar {minimum:g} mm de sangria",
+                            "preview": (
+                                "Estende a borda da arte para fora do formato final; confira "
+                                "o resultado na pré-visualização."
+                            ),
+                            "params": {"bleedMm": minimum},
+                        },
                     )
                 )
         return issues

@@ -1,4 +1,5 @@
 import { Gauge } from 'lucide-react'
+import { fileSize } from '@/lib/xray-facts'
 import type { JobMetrics } from '@/services/analysisJobsService'
 
 const STEP_LABELS: Record<string, string> = {
@@ -10,7 +11,7 @@ const STEP_LABELS: Record<string, string> = {
 }
 
 const seconds = (value: number) => `${value.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} s`
-const megabytes = (bytes: number) => `${(bytes / 1_048_576).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} MB`
+const megabytes = fileSize
 
 /** Desempenho de um processamento: tempo total e por etapa, tamanhos e memória. */
 export function JobMetricsLine({ metrics, className }: { metrics?: JobMetrics | null; className?: string }) {
