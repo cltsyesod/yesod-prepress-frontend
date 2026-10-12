@@ -1,5 +1,6 @@
 import { cn } from '@/lib/utils'
-import { finalSize, megabytes, minBleed, num, type FileProfile } from '@/lib/xray'
+import { finalSize, minBleed, num, type FileProfile } from '@/lib/xray'
+import { fileSize } from '@/lib/xray-facts'
 
 type Row = { label: string; value: (p: FileProfile) => string }
 
@@ -33,8 +34,17 @@ const ROWS: Row[] = [
   { label: 'Cor dos vetores', value: (p) => (p.colors ? `CMYK ${p.colors.cmykOperators} · RGB ${p.colors.rgbOperators}` : '—') },
   { label: 'Perfil de saída', value: (p) => p.colors?.outputIntent || 'não declarado' },
   { label: 'Fontes não incorporadas', value: (p) => String(p.fonts?.notEmbedded ?? 0) },
-  { label: 'Tamanho do arquivo', value: (p) => megabytes(p.document?.fileBytes) },
+  { label: 'Tamanho do arquivo', value: (p) => fileSize(p.document?.fileBytes) },
 ]
+
+/** Cada característica antes (cliente) e depois (produção). */
+export function compareRows(client: FileProfile, delivered: FileProfile) {
+  return ROWS.map((row) => {
+    const before = row.value(client)
+    const after = row.value(delivered)
+    return { label: row.label, before, after, changed: before !== after }
+  })
+}
 
 /** O arquivo do cliente ao lado do que vai para a produção; o que mudou aparece destacado. */
 export function CompareTable({ client, delivered }: { client: FileProfile; delivered: FileProfile }) {

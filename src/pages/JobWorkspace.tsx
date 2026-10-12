@@ -6,6 +6,7 @@ import {
   ClipboardCopy,
   Download,
   Loader2,
+  MoreHorizontal,
   RefreshCw,
   SlidersHorizontal,
   Undo2,
@@ -16,22 +17,21 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Progress } from '@/components/ui/progress'
-import { IssueChecklist } from '@/components/jobs/IssueChecklist'
 import { JobStateBadge } from '@/components/jobs/JobStateBadge'
 import { JobTicketFields } from '@/components/jobs/JobTicketFields'
 import { ContourCutDialog, type ContourCutOptions } from '@/components/jobs/ContourCutDialog'
 import { CropMarksDialog } from '@/components/jobs/CropMarksDialog'
 import { JobMetricsLine } from '@/components/jobs/JobMetricsLine'
 import { PdfPreview } from '@/components/jobs/PdfPreview'
-import { CompareTable } from '@/components/jobs/xray/CompareTable'
-import { DeliveryFlow } from '@/components/jobs/xray/DeliveryFlow'
-import { VerdictBar } from '@/components/jobs/xray/VerdictBar'
-import { XRayPanel } from '@/components/jobs/xray/XRayPanel'
-import { cn } from '@/lib/utils'
+import { compareRows } from '@/components/jobs/xray/CompareTable'
+import { SectionDetail } from '@/components/jobs/xray/SectionDetail'
+import { StatusHero } from '@/components/jobs/xray/StatusHero'
+import { XRayTiles, type View } from '@/components/jobs/xray/XRayTiles'
 import { hasProfile, type FileProfile } from '@/lib/xray'
 import { useAnalysisJob } from '@/hooks/use-analysis-job'
 import { toast } from '@/hooks/use-toast'
@@ -67,8 +67,8 @@ export default function JobWorkspacePage() {
   // O arquivo como o cliente enviou e o raio-x dele (para comparar com o que vai à produção).
   const [original, setOriginal] = useState<ProjectFile | null>(null)
   const [clientProfile, setClientProfile] = useState<FileProfile | null>(null)
-  const [tab, setTab] = useState<'xray' | 'issues' | 'compare'>('xray')
-  const [focusIssue, setFocusIssue] = useState<string | null>(null)
+  // O que aparece ao lado da arte: o que precisa de decisão, uma seção do raio-x ou a entrega.
+  const [view, setView] = useState<View>('pending')
 
   // Durante uma correção, a análise acompanhada é a da cópia corrigida.
   const analysis = useAnalysisJob(correction?.id ?? file?.id ?? null)
@@ -286,102 +286,100 @@ export default function JobWorkspacePage() {
     )
   }
 
+
   const liveJob: Job = analysis.job
     ? { ...job, ...summarizeIssues(analysis.issues), latestAnalysis: analysis.job }
     : job
 
-  // Análise concluída (não está rodando nem falhou): mostra veredito, raio-x e ocorrências.
+  // Análise concluída (não está rodando nem falhou): mostra situação, raio-x e decisões.
   const done = !!analysis.job && !running && analysis.job.status !== 'failed' && analysis.job.status !== 'cancelled'
-  const pendingCount = analysis.issues.filter((i) => i.status === 'pending' && i.severity !== 'informational').length
-  const deliveredProfile = (analysis.job?.file_profile ?? null) as FileProfile | null
-  const canCompare = !!file?.derived_from && hasProfile(clientProfile) && hasProfile(deliveredProfile)
+  const deliveredProfile = hasProfile(analysis.job?.file_profile) ? (analysis.job!.file_profile as FileProfile) : null
+  const changes = canCompareCount(clientProfile, deliveredProfile)
+  const profileName = profiles.find((p) => p.id === job.profileId)?.name
 
   return (
-    <div className="space-y-4">
-      <BackLink />
-
-      <header className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div className="min-w-0">
-          <div className="flex items-center gap-3">
-            <h1 className="truncate text-2xl font-semibold text-foreground">{job.name}</h1>
-            <JobStateBadge job={liveJob} />
-          </div>
-          <p className="text-sm text-muted-foreground">
-            {[job.clientName, profiles.find((p) => p.id === job.profileId)?.name, file?.original_name]
-              .filter(Boolean)
-              .join(' · ')}
+    <div className="space-y-5">
+      {/* ---- Cabeçalho: quem, o quê e as ações do trabalho ---- */}
+      <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div className="min-w-0 space-y-1">
+          <BackLink />
+          <h1 className="truncate text-2xl font-semibold tracking-tight text-foreground">{job.name}</h1>
+          <p className="flex flex-wrap items-center gap-x-2 text-sm text-muted-foreground">
+            {[job.clientName, profileName].filter(Boolean).map((part, i) => (
+              <span key={i} className="flex items-center gap-2">
+                {i > 0 && <span className="h-1 w-1 rounded-full bg-muted-foreground/50" />}
+                {part}
+              </span>
+            ))}
+            {!done && <JobStateBadge job={liveJob} />}
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={copyMessage} disabled={running || !analysis.job}>
-            <ClipboardCopy className="h-4 w-4" />
-            Mensagem ao cliente
-          </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" disabled={running || fixing || !file}>
-                <Wand2 className="h-4 w-4" />
-                Correções
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-72">
-              <DropdownMenuItem
-                disabled={!pendingPdfFixes.length}
-                onSelect={guardScale(() => requestFixes(pendingPdfFixes))}
-              >
-                Corrigir tudo que for automático
-                {pendingPdfFixes.length > 0 && ` (${pendingPdfFixes.length})`}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                disabled={applied('add_crop_marks')}
-                onSelect={guardScale(() => setCropMarksOpen(true))}
-              >
-                Inserir marcas de corte…{applied('add_crop_marks') && ' (já inseridas)'}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                disabled={applied('add_contour_cut') || applied('add_cut_contour')}
-                onSelect={guardScale(() =>
-                  requestFixes([
-                    { id: 'add_contour_cut', params: cutLayerName ? { name: cutLayerName } : {} },
-                  ]),
-                )}
-              >
-                Faca pelo contorno da arte…
-                {applied('add_contour_cut') && ' — já inserida'}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                disabled={applied('add_cut_contour') || applied('add_contour_cut')}
-                onSelect={guardScale(() =>
-                  applyFixes([
-                    { id: 'set_page_boxes' },
-                    { id: 'add_cut_contour', params: cutLayerName ? { name: cutLayerName } : {} },
-                  ]),
-                )}
-              >
-                Inserir faca retangular{cutLayerName ? ` (${cutLayerName})` : ''}
-                {applied('add_cut_contour') && ' — já inserida'}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+        <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" onClick={() => setEditingTicket((v) => !v)}>
             <SlidersHorizontal className="h-4 w-4" />
             Ficha do trabalho
+          </Button>
+          <Button variant="outline" onClick={copyMessage} disabled={running || !analysis.job}>
+            <ClipboardCopy className="h-4 w-4" />
+            Mensagem ao cliente
           </Button>
           <Button onClick={reanalyze} disabled={running || fixing || analysis.starting || !file}>
             <RefreshCw className="h-4 w-4" />
             {analysis.job ? 'Reanalisar' : 'Analisar'}
           </Button>
-          {pdfUrl && (
-            <Button variant="ghost" size="icon" asChild title="Baixar PDF">
-              <a href={pdfUrl} target="_blank" rel="noreferrer" aria-label="Baixar PDF">
-                <Download className="h-4 w-4" />
-              </a>
-            </Button>
-          )}
-          <Button variant="ghost" size="icon" onClick={archive} title="Arquivar trabalho" aria-label="Arquivar">
-            <Archive className="h-4 w-4" />
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" aria-label="Mais ações" disabled={!file}>
+                <MoreHorizontal className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-72">
+              <DropdownMenuLabel className="text-xs text-muted-foreground">Inserir no arquivo</DropdownMenuLabel>
+              <DropdownMenuItem disabled={applied('add_crop_marks') || running || fixing} onSelect={guardScale(() => setCropMarksOpen(true))}>
+                <Wand2 className="h-4 w-4" />
+                Marcas de corte…{applied('add_crop_marks') && ' (já inseridas)'}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                disabled={applied('add_contour_cut') || applied('add_cut_contour') || running || fixing}
+                onSelect={guardScale(() =>
+                  requestFixes([{ id: 'add_contour_cut', params: cutLayerName ? { name: cutLayerName } : {} }]),
+                )}
+              >
+                <Wand2 className="h-4 w-4" />
+                Faca pelo contorno da arte…{applied('add_contour_cut') && ' (já inserida)'}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                disabled={applied('add_cut_contour') || applied('add_contour_cut') || running || fixing}
+                onSelect={guardScale(() =>
+                  applyFixes([{ id: 'set_page_boxes' }, { id: 'add_cut_contour', params: cutLayerName ? { name: cutLayerName } : {} }]),
+                )}
+              >
+                <Wand2 className="h-4 w-4" />
+                Faca retangular{cutLayerName ? ` (${cutLayerName})` : ''}
+                {applied('add_cut_contour') && ' (já inserida)'}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              {pdfUrl && (
+                <DropdownMenuItem asChild>
+                  <a href={pdfUrl} target="_blank" rel="noreferrer">
+                    <Download className="h-4 w-4" />
+                    Baixar o arquivo atual
+                  </a>
+                </DropdownMenuItem>
+              )}
+              {file?.derived_from && !correction && appliedFixes[0]?.id !== 'image_to_pdf' && (
+                <DropdownMenuItem onSelect={restoreOriginal} disabled={running}>
+                  <Undo2 className="h-4 w-4" />
+                  Voltar ao arquivo do cliente
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={archive} className="text-destructive focus:text-destructive">
+                <Archive className="h-4 w-4" />
+                Arquivar trabalho
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </header>
 
@@ -402,7 +400,7 @@ export default function JobWorkspacePage() {
       />
 
       {editingTicket && (
-        <section className="space-y-4 rounded-lg border border-border bg-card p-4">
+        <section className="space-y-4 rounded-xl border border-border bg-card p-5">
           <JobTicketFields
             ticket={ticket}
             onChange={setTicket}
@@ -421,32 +419,34 @@ export default function JobWorkspacePage() {
         </section>
       )}
 
+      {/* ---- Andamento, erro ou falha ---- */}
       {running && analysis.job && (
-        <div className="space-y-2 rounded-lg border border-border bg-card p-4">
-          <div className="flex items-center justify-between text-sm">
-            <span className="flex items-center gap-2 text-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              {analysis.job.current_step || 'Na fila do analisador'}
+        <section className="space-y-3 rounded-xl border border-border bg-card p-5">
+          <div className="flex items-center justify-between gap-3">
+            <span className="flex items-center gap-3 text-foreground">
+              <Loader2 className="h-5 w-5 animate-spin text-primary" />
+              <span>
+                <span className="block font-medium">{analysis.job.current_step || 'Na fila do analisador'}</span>
+                <span className="text-xs text-muted-foreground">O raio-x aparece assim que a análise terminar.</span>
+              </span>
             </span>
-            <span className="flex items-center gap-3 text-muted-foreground">
+            <span className="flex items-center gap-3 text-sm text-muted-foreground">
               {analysis.job.progress}%
               <Button size="sm" variant="ghost" onClick={analysis.cancelAnalysis}>
                 Cancelar
               </Button>
             </span>
           </div>
-          <Progress value={analysis.job.progress} />
-        </div>
+          <Progress value={analysis.job.progress} className="h-1.5" />
+        </section>
       )}
 
       {analysis.error && (
-        <p className="rounded-lg border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
-          {analysis.error}
-        </p>
+        <p className="rounded-xl border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">{analysis.error}</p>
       )}
 
       {analysis.job?.status === 'failed' && (
-        <div className="flex flex-col gap-3 rounded-lg border border-destructive/40 bg-destructive/5 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <section className="flex flex-col gap-3 rounded-xl border border-destructive/40 bg-destructive/5 p-5 sm:flex-row sm:items-center sm:justify-between">
           <div className="text-sm">
             <p className="font-medium text-destructive">A análise falhou</p>
             <p className="text-muted-foreground">{analysis.job.error_message || 'Sem detalhes.'}</p>
@@ -454,36 +454,49 @@ export default function JobWorkspacePage() {
           <Button variant="outline" onClick={analysis.retryAnalysis}>
             Tentar de novo
           </Button>
-        </div>
+        </section>
       )}
 
+      {/* ---- Situação + raio-x ---- */}
       {done && (
-        <VerdictBar
+        <StatusHero
           issues={analysis.issues}
           autoFixes={pendingPdfFixes.length}
           fixing={fixing}
+          correcting={!!correction}
+          original={original}
+          delivered={file}
+          fixes={appliedFixes}
+          downloadUrl={pdfUrl}
           onFixAll={guardScale(() => requestFixes(pendingPdfFixes))}
+          onMessage={copyMessage}
+          onShowPending={() => {
+            setView('pending')
+            document.getElementById('detail')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+          }}
         />
       )}
 
-      {file && (
-        <div className="space-y-1.5">
-          <DeliveryFlow original={original} delivered={file} fixes={appliedFixes} correcting={!!correction} />
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            {done && analysis.job?.metrics ? <JobMetricsLine metrics={analysis.job.metrics} /> : <span />}
-            {/* Original em imagem: voltar a ele não serve (tudo trabalha sobre o PDF). */}
-            {file.derived_from && !correction && appliedFixes[0]?.id !== 'image_to_pdf' && (
-              <Button size="sm" variant="ghost" onClick={restoreOriginal} disabled={running}>
-                <Undo2 className="h-4 w-4" />
-                Voltar ao arquivo do cliente
-              </Button>
-            )}
-          </div>
-        </div>
+      {done && deliveredProfile && (
+        <XRayTiles
+          profile={deliveredProfile}
+          issues={analysis.issues}
+          view={view}
+          onSelect={setView}
+          delivery={file?.derived_from ? { changes } : null}
+        />
       )}
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,520px)]">
-        <div className="h-[60vh] overflow-hidden rounded-lg border border-border bg-muted lg:sticky lg:top-[72px] lg:h-[calc(100vh-120px)]">
+      {done && !deliveredProfile && (
+        <p className="rounded-xl border border-dashed border-border px-4 py-3 text-sm text-muted-foreground">
+          Esta análise é anterior ao raio-x. Clique em <b className="text-foreground">Reanalisar</b> para ver as características do
+          arquivo (formato, sangria, imagens, cores, fontes e faca) em cartões.
+        </p>
+      )}
+
+      {/* ---- Arte e detalhe lado a lado ---- */}
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,5fr)_minmax(0,6fr)]">
+        <div className="h-[62vh] overflow-hidden rounded-xl border border-border bg-muted xl:sticky xl:top-[72px] xl:h-[calc(100vh-110px)]">
           {pdfUrl && isImageFile(file) ? (
             // Imagem do cliente ainda não convertida: mostra a própria imagem.
             <img src={pdfUrl} alt={file?.original_name ?? ''} className="h-full w-full object-contain" />
@@ -491,121 +504,43 @@ export default function JobWorkspacePage() {
             <PdfPreview url={pdfUrl} page={page} onPageChange={setPage} />
           ) : (
             <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-              {file ? 'Carregando o PDF...' : 'Este trabalho não tem arquivo.'}
+              {file ? 'Carregando o arquivo…' : 'Este trabalho não tem arquivo.'}
             </div>
           )}
         </div>
 
-        <div className="min-w-0">
+        <div id="detail" className="min-w-0 scroll-mt-20 space-y-3">
           {analysis.loading ? (
             <Loader2 className="mx-auto h-6 w-6 animate-spin text-muted-foreground" />
           ) : !analysis.job ? (
-            <p className="rounded-md border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
+            <p className="rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
               Ainda não há análise. Clique em Analisar.
             </p>
-          ) : running ? (
-            <p className="p-6 text-center text-sm text-muted-foreground">
-              O raio-x e as ocorrências aparecem aqui assim que a análise terminar.
-            </p>
-          ) : (
-            <div className="space-y-3">
-              <div className="flex border-b border-border">
-                <TabButton active={tab === 'xray'} onClick={() => setTab('xray')}>
-                  Raio-X do arquivo
-                </TabButton>
-                <TabButton active={tab === 'issues'} onClick={() => setTab('issues')}>
-                  Ocorrências
-                  {pendingCount > 0 && (
-                    <span className="ml-1.5 rounded-full bg-amber-500 px-1.5 text-[11px] font-semibold text-white">{pendingCount}</span>
-                  )}
-                </TabButton>
-                {canCompare && (
-                  <TabButton active={tab === 'compare'} onClick={() => setTab('compare')}>
-                    Cliente × Entrega
-                  </TabButton>
-                )}
-              </div>
-
-              {tab === 'xray' &&
-                (hasProfile(deliveredProfile) ? (
-                  <XRayPanel
-                    profile={deliveredProfile}
-                    issues={analysis.issues}
-                    onOpenIssue={(issue) => {
-                      setFocusIssue(issue.id)
-                      setTab('issues')
-                      if (issue.page > 0) setPage(issue.page)
-                    }}
-                  />
-                ) : (
-                  <div className="space-y-3">
-                    <p className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
-                      Esta análise foi feita antes do raio-x existir. Clique em <b className="text-foreground">Reanalisar</b> para ver
-                      as características completas do arquivo (formato, sangria, imagens, cores, fontes, faca).
-                    </p>
-                    <IssueChecklist issues={analysis.issues} onDecide={decide} onShowPage={setPage} onFix={fixIssue} fixing={fixing} />
-                  </div>
-                ))}
-
-              {tab === 'issues' && (
-                <IssueChecklist
-                  issues={analysis.issues}
-                  onDecide={decide}
-                  onShowPage={setPage}
-                  onFix={fixIssue}
-                  fixing={fixing}
-                  focusId={focusIssue}
-                />
-              )}
-
-              {tab === 'compare' && canCompare && (
-                <div className="space-y-3">
-                  <CompareTable client={clientProfile} delivered={deliveredProfile} />
-                  {appliedFixes.length > 0 && (
-                    <div className="rounded-lg border border-border bg-card p-3">
-                      <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        Correções aplicadas, em ordem
-                      </p>
-                      <ol className="space-y-1.5 text-sm">
-                        {appliedFixes.map((fix, index) => (
-                          <li key={`${fix.id}-${index}`} className="flex gap-2">
-                            <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[11px] font-semibold text-primary">
-                              {index + 1}
-                            </span>
-                            <span>
-                              <span className="font-medium text-foreground">{fix.label}</span>
-                              {fix.details.length > 0 && (
-                                <span className="block text-xs text-muted-foreground">{fix.details.join(' · ')}</span>
-                              )}
-                            </span>
-                          </li>
-                        ))}
-                      </ol>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
+          ) : done ? (
+            <SectionDetail
+              view={view}
+              profile={deliveredProfile}
+              issues={analysis.issues}
+              clientProfile={clientProfile}
+              fixes={appliedFixes}
+              onClose={() => setView('pending')}
+              onDecide={decide}
+              onShowPage={setPage}
+              onFix={fixIssue}
+              fixing={fixing}
+            />
+          ) : null}
+          {done && analysis.job?.metrics && <JobMetricsLine metrics={analysis.job.metrics} />}
         </div>
       </div>
     </div>
   )
 }
 
-function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        '-mb-px flex items-center border-b-2 px-3 py-2 text-sm transition-colors',
-        active ? 'border-primary font-medium text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground',
-      )}
-    >
-      {children}
-    </button>
-  )
+/** Quantas características mudaram entre o arquivo do cliente e o de produção. */
+function canCompareCount(client: FileProfile | null, delivered: FileProfile | null): number {
+  if (!client || !delivered) return 0
+  return compareRows(client, delivered).filter((row) => row.changed).length
 }
 
 function BackLink() {
