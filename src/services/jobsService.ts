@@ -157,10 +157,14 @@ export const jobsService = {
    * Arquivo principal do trabalho e, se houver, a correção automática em andamento
    * (cópia ainda "pending" cuja análise não terminou).
    */
-  async getFiles(projectId: string): Promise<{ primary: ProjectFile | null; correction: ProjectFile | null }> {
+  async getFiles(
+    projectId: string,
+  ): Promise<{ primary: ProjectFile | null; correction: ProjectFile | null; original: ProjectFile | null }> {
     const files = await projectFilesService.getProjectFiles(projectId)
     const ready = files.filter((f) => f.status !== 'pending' || !f.derived_from)
     const primary = ready.find((f) => f.is_primary) ?? ready[0] ?? null
+    // O arquivo como o cliente enviou (o principal, se nunca foi corrigido).
+    const original = primary?.derived_from ? (files.find((f) => f.id === primary.derived_from) ?? null) : primary
 
     const pending = files.find((f) => f.status === 'pending' && f.derived_from)
     let correction: ProjectFile | null = null
@@ -168,7 +172,7 @@ export const jobsService = {
       const job = await analysisJobsService.getLatestJobForFile(pending.id)
       if (job && ACTIVE.includes(job.status)) correction = pending
     }
-    return { primary, correction }
+    return { primary, correction, original }
   },
 
   /** Volta a usar outra versão (ex.: o original de uma cópia corrigida) como principal. */

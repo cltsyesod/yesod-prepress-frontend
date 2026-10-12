@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Check, ChevronDown, CircleAlert, Info, OctagonX, RotateCcw, Undo2, Wand2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -41,9 +41,11 @@ interface IssueChecklistProps {
   /** Aplica a correção automática oferecida pela ocorrência. */
   onFix: (issue: AnalysisIssue) => Promise<void>
   fixing: boolean
+  /** Ocorrência escolhida no raio-x: abre e rola até ela. */
+  focusId?: string | null
 }
 
-export function IssueChecklist({ issues, onDecide, onShowPage, onFix, fixing }: IssueChecklistProps) {
+export function IssueChecklist({ issues, onDecide, onShowPage, onFix, fixing, focusId }: IssueChecklistProps) {
   if (!issues.length) {
     return (
       <div className="rounded-lg border border-emerald-500/40 bg-emerald-500/5 p-6 text-center">
@@ -84,6 +86,7 @@ export function IssueChecklist({ issues, onDecide, onShowPage, onFix, fixing }: 
                   onShowPage={onShowPage}
                   onFix={onFix}
                   fixing={fixing}
+                  focused={focusId === issue.id}
                 />
               ))}
             </ul>
@@ -101,6 +104,7 @@ function IssueItem({
   onShowPage,
   onFix,
   fixing,
+  focused,
 }: {
   issue: AnalysisIssue
   informational: boolean
@@ -108,8 +112,15 @@ function IssueItem({
   onShowPage: IssueChecklistProps['onShowPage']
   onFix: IssueChecklistProps['onFix']
   fixing: boolean
+  focused?: boolean
 }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(!!focused)
+  const ref = useRef<HTMLLIElement>(null)
+  useEffect(() => {
+    if (!focused) return
+    setOpen(true)
+    ref.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, [focused])
   const [askReason, setAskReason] = useState(false)
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
@@ -128,9 +139,11 @@ function IssueItem({
 
   return (
     <li
+      ref={ref}
       className={cn(
         'rounded-md border border-border bg-card transition-opacity',
         decided && 'opacity-60',
+        focused && 'ring-2 ring-primary/50',
       )}
     >
       <button

@@ -36,6 +36,8 @@ export interface AnalysisJob {
   updated: string
   /** Desempenho medido pelo analisador (vazio até a análise terminar). */
   metrics?: JobMetrics
+  /** Raio-X do arquivo analisado (vazio em análises anteriores a ele). */
+  file_profile?: Record<string, unknown>
 }
 
 /** Tempo por etapa, tamanhos e memória de um processamento no analisador. */
@@ -339,6 +341,20 @@ export const analysisJobsService = {
       .maybeSingle()
     if (error) throw error
     return data ? toJob(data) : null
+  },
+
+  /** Raio-X mais recente de um arquivo (da última análise concluída que o tenha). */
+  async getLatestProfile(fileId: string): Promise<Record<string, unknown> | null> {
+    const { data, error } = await supabase
+      .from('analysis_jobs')
+      .select('file_profile')
+      .eq('file', fileId)
+      .in('status', ['completed', 'completed_with_warnings'])
+      .order('created', { ascending: false })
+      .limit(10)
+    if (error) throw error
+    const found = (data ?? []).find((row) => row.file_profile && Object.keys(row.file_profile).length)
+    return (found?.file_profile as Record<string, unknown>) ?? null
   },
 
   getErrorMessage(error: unknown): string {

@@ -7,7 +7,10 @@ import { cn } from '@/lib/utils'
 export default function Layout() {
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
-  const workspace = useLocation().pathname.startsWith('/paineis')
+  const { pathname } = useLocation()
+  const workspace = pathname.startsWith('/paineis')
+  // A tela do trabalho (pré-visualização + raio-x) aproveita telas largas.
+  const wide = /^\/trabalhos\/[^/]+/.test(pathname)
 
   return (
     <div className="min-h-screen bg-background flex text-foreground font-sans">
@@ -39,7 +42,12 @@ export default function Layout() {
       >
         <AppHeader onOpenMobileMenu={() => setMobileOpen(true)} />
         {/* Áreas de trabalho (painéis) usam a tela inteira, sem margem nem largura máxima. */}
-        <main className={cn('flex-1 w-full', workspace ? 'min-w-0' : 'p-4 sm:p-6 max-w-[1200px] mx-auto')}>
+        <main
+          className={cn(
+            'flex-1 w-full',
+            workspace ? 'min-w-0' : cn('p-4 sm:p-6 mx-auto', wide ? 'max-w-[1600px]' : 'max-w-[1200px]'),
+          )}
+        >
           <Outlet />
         </main>
       </div>

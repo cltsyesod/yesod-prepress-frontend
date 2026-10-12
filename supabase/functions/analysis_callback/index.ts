@@ -141,6 +141,10 @@ Deno.serve(async (req: Request) => {
       if (event === 'completed' && body.summary?.metrics && typeof body.summary.metrics === 'object') {
         patch.metrics = body.summary.metrics
       }
+      // Raio-X do arquivo analisado (características medidas + o que a ficha pede).
+      if (event === 'completed' && body.summary?.fileProfile && typeof body.summary.fileProfile === 'object') {
+        patch.file_profile = body.summary.fileProfile
+      }
 
       // Arquivos e resumo antes do status: a tela recarrega quando o job chega ao fim.
       await settleCorrectedFile(db, job, event, body.summary?.correctedFile)

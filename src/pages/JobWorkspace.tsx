@@ -27,6 +27,12 @@ import { ContourCutDialog, type ContourCutOptions } from '@/components/jobs/Cont
 import { CropMarksDialog } from '@/components/jobs/CropMarksDialog'
 import { JobMetricsLine } from '@/components/jobs/JobMetricsLine'
 import { PdfPreview } from '@/components/jobs/PdfPreview'
+import { CompareTable } from '@/components/jobs/xray/CompareTable'
+import { DeliveryFlow } from '@/components/jobs/xray/DeliveryFlow'
+import { VerdictBar } from '@/components/jobs/xray/VerdictBar'
+import { XRayPanel } from '@/components/jobs/xray/XRayPanel'
+import { cn } from '@/lib/utils'
+import { hasProfile, type FileProfile } from '@/lib/xray'
 import { useAnalysisJob } from '@/hooks/use-analysis-job'
 import { toast } from '@/hooks/use-toast'
 import { buildClientMessage } from '@/lib/clientMessage'
@@ -58,6 +64,11 @@ export default function JobWorkspacePage() {
   const [profileId, setProfileId] = useState('')
   const [correction, setCorrection] = useState<ProjectFile | null>(null)
   const [fixing, setFixing] = useState(false)
+  // O arquivo como o cliente enviou e o raio-x dele (para comparar com o que vai à produção).
+  const [original, setOriginal] = useState<ProjectFile | null>(null)
+  const [clientProfile, setClientProfile] = useState<FileProfile | null>(null)
+  const [tab, setTab] = useState<'xray' | 'issues' | 'compare'>('xray')
+  const [focusIssue, setFocusIssue] = useState<string | null>(null)
 
   // Durante uma correção, a análise acompanhada é a da cópia corrigida.
   const analysis = useAnalysisJob(correction?.id ?? file?.id ?? null)
@@ -73,9 +84,15 @@ export default function JobWorkspacePage() {
       setJob(current)
       setTicket(current.ticket)
       setProfileId(current.profileId)
-      const { primary, correction: pending } = await jobsService.getFiles(id)
+      const { primary, correction: pending, original: client } = await jobsService.getFiles(id)
       setFile(primary)
       setCorrection(pending)
+      setOriginal(client)
+      const profile =
+        client && primary && client.id !== primary.id
+          ? await analysisJobsService.getLatestProfile(client.id).catch(() => null)
+          : null
+      setClientProfile(hasProfile(profile) ? profile : null)
       setPdfUrl(primary ? await projectFilesService.getFileUrl(primary) : '')
     } catch (err) {
       setLoadError(getErrorMessage(err))
@@ -273,6 +290,12 @@ export default function JobWorkspacePage() {
     ? { ...job, ...summarizeIssues(analysis.issues), latestAnalysis: analysis.job }
     : job
 
+  // Análise concluída (não está rodando nem falhou): mostra veredito, raio-x e ocorrências.
+  const done = !!analysis.job && !running && analysis.job.status !== 'failed' && analysis.job.status !== 'cancelled'
+  const pendingCount = analysis.issues.filter((i) => i.status === 'pending' && i.severity !== 'informational').length
+  const deliveredProfile = (analysis.job?.file_profile ?? null) as FileProfile | null
+  const canCompare = !!file?.derived_from && hasProfile(clientProfile) && hasProfile(deliveredProfile)
+
   return (
     <div className="space-y-4">
       <BackLink />
@@ -398,34 +421,6 @@ export default function JobWorkspacePage() {
         </section>
       )}
 
-      {!!file?.derived_from && !correction && (
-        <div className="flex flex-col gap-2 rounded-lg border border-primary/30 bg-primary/5 p-4 text-sm sm:flex-row sm:items-start sm:justify-between">
-          <div className="space-y-1">
-            <p className="flex items-center gap-2 font-medium text-foreground">
-              <Wand2 className="h-4 w-4 text-primary" />
-              {appliedFixes.every((fix) => fix.id === 'image_to_pdf')
-                ? 'Imagem do cliente convertida em PDF'
-                : 'Versão corrigida automaticamente'}
-            </p>
-            <ul className="text-muted-foreground">
-              {appliedFixes.map((fix, index) => (
-                <li key={`${fix.id}-${index}`}>
-                  {fix.label}
-                  {fix.details.length > 0 && <span className="text-xs"> — {fix.details.join(' · ')}</span>}
-                </li>
-              ))}
-            </ul>
-          </div>
-          {/* Original em imagem: voltar a ele não serve (tudo trabalha sobre o PDF). */}
-          {file.derived_from && appliedFixes[0]?.id !== 'image_to_pdf' && (
-            <Button size="sm" variant="ghost" className="shrink-0" onClick={restoreOriginal} disabled={running}>
-              <Undo2 className="h-4 w-4" />
-              Voltar ao original
-            </Button>
-          )}
-        </div>
-      )}
-
       {running && analysis.job && (
         <div className="space-y-2 rounded-lg border border-border bg-card p-4">
           <div className="flex items-center justify-between text-sm">
@@ -443,8 +438,6 @@ export default function JobWorkspacePage() {
           <Progress value={analysis.job.progress} />
         </div>
       )}
-
-      {!running && analysis.job?.metrics && <JobMetricsLine metrics={analysis.job.metrics} />}
 
       {analysis.error && (
         <p className="rounded-lg border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
@@ -464,7 +457,32 @@ export default function JobWorkspacePage() {
         </div>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,440px)]">
+      {done && (
+        <VerdictBar
+          issues={analysis.issues}
+          autoFixes={pendingPdfFixes.length}
+          fixing={fixing}
+          onFixAll={guardScale(() => requestFixes(pendingPdfFixes))}
+        />
+      )}
+
+      {file && (
+        <div className="space-y-1.5">
+          <DeliveryFlow original={original} delivered={file} fixes={appliedFixes} correcting={!!correction} />
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            {done && analysis.job?.metrics ? <JobMetricsLine metrics={analysis.job.metrics} /> : <span />}
+            {/* Original em imagem: voltar a ele não serve (tudo trabalha sobre o PDF). */}
+            {file.derived_from && !correction && appliedFixes[0]?.id !== 'image_to_pdf' && (
+              <Button size="sm" variant="ghost" onClick={restoreOriginal} disabled={running}>
+                <Undo2 className="h-4 w-4" />
+                Voltar ao arquivo do cliente
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,520px)]">
         <div className="h-[60vh] overflow-hidden rounded-lg border border-border bg-muted lg:sticky lg:top-[72px] lg:h-[calc(100vh-120px)]">
           {pdfUrl && isImageFile(file) ? (
             // Imagem do cliente ainda não convertida: mostra a própria imagem.
@@ -487,20 +505,106 @@ export default function JobWorkspacePage() {
             </p>
           ) : running ? (
             <p className="p-6 text-center text-sm text-muted-foreground">
-              As ocorrências aparecem aqui assim que a análise terminar.
+              O raio-x e as ocorrências aparecem aqui assim que a análise terminar.
             </p>
           ) : (
-            <IssueChecklist
-              issues={analysis.issues}
-              onDecide={decide}
-              onShowPage={setPage}
-              onFix={fixIssue}
-              fixing={fixing}
-            />
+            <div className="space-y-3">
+              <div className="flex border-b border-border">
+                <TabButton active={tab === 'xray'} onClick={() => setTab('xray')}>
+                  Raio-X do arquivo
+                </TabButton>
+                <TabButton active={tab === 'issues'} onClick={() => setTab('issues')}>
+                  Ocorrências
+                  {pendingCount > 0 && (
+                    <span className="ml-1.5 rounded-full bg-amber-500 px-1.5 text-[11px] font-semibold text-white">{pendingCount}</span>
+                  )}
+                </TabButton>
+                {canCompare && (
+                  <TabButton active={tab === 'compare'} onClick={() => setTab('compare')}>
+                    Cliente × Entrega
+                  </TabButton>
+                )}
+              </div>
+
+              {tab === 'xray' &&
+                (hasProfile(deliveredProfile) ? (
+                  <XRayPanel
+                    profile={deliveredProfile}
+                    issues={analysis.issues}
+                    onOpenIssue={(issue) => {
+                      setFocusIssue(issue.id)
+                      setTab('issues')
+                      if (issue.page > 0) setPage(issue.page)
+                    }}
+                  />
+                ) : (
+                  <div className="space-y-3">
+                    <p className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
+                      Esta análise foi feita antes do raio-x existir. Clique em <b className="text-foreground">Reanalisar</b> para ver
+                      as características completas do arquivo (formato, sangria, imagens, cores, fontes, faca).
+                    </p>
+                    <IssueChecklist issues={analysis.issues} onDecide={decide} onShowPage={setPage} onFix={fixIssue} fixing={fixing} />
+                  </div>
+                ))}
+
+              {tab === 'issues' && (
+                <IssueChecklist
+                  issues={analysis.issues}
+                  onDecide={decide}
+                  onShowPage={setPage}
+                  onFix={fixIssue}
+                  fixing={fixing}
+                  focusId={focusIssue}
+                />
+              )}
+
+              {tab === 'compare' && canCompare && (
+                <div className="space-y-3">
+                  <CompareTable client={clientProfile} delivered={deliveredProfile} />
+                  {appliedFixes.length > 0 && (
+                    <div className="rounded-lg border border-border bg-card p-3">
+                      <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        Correções aplicadas, em ordem
+                      </p>
+                      <ol className="space-y-1.5 text-sm">
+                        {appliedFixes.map((fix, index) => (
+                          <li key={`${fix.id}-${index}`} className="flex gap-2">
+                            <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[11px] font-semibold text-primary">
+                              {index + 1}
+                            </span>
+                            <span>
+                              <span className="font-medium text-foreground">{fix.label}</span>
+                              {fix.details.length > 0 && (
+                                <span className="block text-xs text-muted-foreground">{fix.details.join(' · ')}</span>
+                              )}
+                            </span>
+                          </li>
+                        ))}
+                      </ol>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           )}
         </div>
       </div>
     </div>
+  )
+}
+
+function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        '-mb-px flex items-center border-b-2 px-3 py-2 text-sm transition-colors',
+        active ? 'border-primary font-medium text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground',
+      )}
+    >
+      {children}
+    </button>
   )
 }
 
