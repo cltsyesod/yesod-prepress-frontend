@@ -1,3 +1,4 @@
+import { useSearchParams } from 'react-router-dom'
 import { useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -82,8 +83,18 @@ export default function TextileAnalysisPage() {
   const [dtgId, setDtgId] = useState(dtgProfiles[0]?.id)
   const dtfProfile = dtfProfiles.find((p) => p.id === dtfId)
   const dtgProfile = dtgProfiles.find((p) => p.id === dtgId)
-  const [order, setOrder] = useState<Order>({ quantity: 0, designs: 1, artWidthMm: 0, artHeightMm: 0, darkGarment: true })
-  const [coveragePct, setCoveragePct] = useState<number | undefined>()
+  // Vindo de um trabalho: tamanho medido da arte, cobertura de tinta e a peça da ficha.
+  const [search] = useSearchParams()
+  const fromJob = (key: string) => (search.get(key) ? Number(search.get(key)) : undefined)
+  const [order, setOrder] = useState<Order>(() => ({
+    quantity: 0,
+    designs: 1,
+    artWidthMm: fromJob('w') ?? 0,
+    artHeightMm: fromJob('h') ?? 0,
+    darkGarment: search.get('dark') !== '0',
+    fabric: search.get('fabric') || undefined,
+  }))
+  const [coveragePct, setCoveragePct] = useState<number | undefined>(() => fromJob('cov'))
   const [dtf, setDtf] = useState<Costs>(() => costsOf(dtfProfile, 'dtf'))
   const [dtg, setDtg] = useState<Costs>(() => costsOf(dtgProfile, 'dtg'))
 

@@ -291,6 +291,18 @@
   body {
     background: white !important;
   }
+  /* Relatório em diálogo: sai do posicionamento fixo e da rolagem para ocupar várias páginas. */
+  [role="dialog"]:has(.report-printable) {
+    position: static !important;
+    transform: none !important;
+    max-height: none !important;
+    overflow: visible !important;
+    box-shadow: none !important;
+    border: 0 !important;
+  }
+  .report-printable img {
+    visibility: visible;
+  }
   body * {
     visibility: hidden;
   }

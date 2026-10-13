@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   Archive,
+  Calculator,
+  FileText,
   ArrowLeft,
   ClipboardCopy,
   Download,
@@ -25,6 +27,7 @@ import { Progress } from '@/components/ui/progress'
 import { JobStateBadge } from '@/components/jobs/JobStateBadge'
 import { JobTicketFields } from '@/components/jobs/JobTicketFields'
 import { DtgPlacementPanel } from '@/components/jobs/DtgPlacementPanel'
+import { TechnicalReport } from '@/components/jobs/TechnicalReport'
 import { JobMetaFields, type JobMeta } from '@/components/jobs/JobMetaFields'
 import { useTeam } from '@/hooks/use-team'
 import { BleedDialog, type BleedOptions } from '@/components/jobs/BleedDialog'
@@ -79,6 +82,7 @@ export default function JobWorkspacePage() {
   const [page, setPage] = useState(1)
   const [loadError, setLoadError] = useState('')
   const [editingTicket, setEditingTicket] = useState(false)
+  const [reportOpen, setReportOpen] = useState(false)
   const [ticket, setTicket] = useState<JobTicket>({})
   const [profileId, setProfileId] = useState('')
   const [correction, setCorrection] = useState<ProjectFile | null>(null)
@@ -405,7 +409,27 @@ export default function JobWorkspacePage() {
   // Análise concluída (não está rodando nem falhou): mostra situação, raio-x e decisões.
   const done = !!analysis.job && !running && analysis.job.status !== 'failed' && analysis.job.status !== 'cancelled'
   const dtgProfile = profiles.find((p) => p.id === profileId && p.technology === 'dtg')
+  const currentProfile = profiles.find((p) => p.id === profileId)
   const deliveredProfile = hasProfile(analysis.job?.file_profile) ? (analysis.job!.file_profile as FileProfile) : null
+  // Leva o tamanho medido da arte, a cobertura e a peça deste trabalho para o cálculo DTF × DTG.
+  const openCosting = () => {
+    const measured = deliveredProfile?.textile?.pages?.find((p) => p.page === page)
+    const q = new URLSearchParams()
+    if (measured?.artSizeMm) {
+      const [w, h] = measured.artSizeMm
+      q.set('w', w.toFixed(1))
+      q.set('h', h.toFixed(1))
+      if (w * h > 0) q.set('cov', Math.min(100, (measured.painted_mm2 / (w * h)) * 100).toFixed(0))
+    }
+    const dtg = ticket.dtg
+    if (dtg?.fabric) q.set('fabric', dtg.fabric)
+    if (dtg?.garmentColor) {
+      const hex = dtg.garmentColor.replace('#', '')
+      const [r, g, b] = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16))
+      q.set('dark', 0.2126 * r + 0.7152 * g + 0.0722 * b < 128 ? '1' : '0')
+    }
+    navigate(`/dtf-dtg?${q.toString()}`)
+  }
   const changes = canCompareCount(clientProfile, deliveredProfile)
   const profileName = profiles.find((p) => p.id === job.profileId)?.name
 
@@ -442,6 +466,16 @@ export default function JobWorkspacePage() {
             <ClipboardCopy className="h-4 w-4" />
             Mensagem ao cliente
           </Button>
+          <Button variant="outline" onClick={() => setReportOpen(true)} disabled={!analysis.job}>
+            <FileText className="h-4 w-4" />
+            Relatório
+          </Button>
+          {currentProfile?.technology && currentProfile.technology !== 'grafica' && (
+            <Button variant="outline" onClick={openCosting}>
+              <Calculator className="h-4 w-4" />
+              Custo DTF × DTG
+            </Button>
+          )}
           <Button onClick={reanalyze} disabled={running || fixing || analysis.starting || !file}>
             <RefreshCw className="h-4 w-4" />
             {analysis.job ? 'Reanalisar' : 'Analisar'}
@@ -574,6 +608,19 @@ export default function JobWorkspacePage() {
               </div>
             </section>
           )}
+
+          <TechnicalReport
+            open={reportOpen}
+            onOpenChange={setReportOpen}
+            job={job}
+            profile={currentProfile}
+            fileName={file?.original_name ?? ''}
+            fileProfile={deliveredProfile}
+            issues={analysis.issues}
+            fixes={appliedFixes}
+            pdfUrl={pdfUrl || null}
+            inspectionUrl={inspectionUrl || null}
+          />
 
           {dtgProfile && (
             <DtgPlacementPanel
