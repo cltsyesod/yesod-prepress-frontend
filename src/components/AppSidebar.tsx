@@ -5,7 +5,6 @@ import {
   Inbox,
   LayoutGrid,
   Settings2,
-  Shirt,
   Cog,
   LogOut,
   ChevronLeft,
@@ -26,7 +25,6 @@ const NAV_ITEMS = [
   { label: 'Fila de trabalho', icon: Inbox, to: '/trabalhos' },
   { label: 'Montagem', icon: LayoutGrid, to: '/montagem' },
   { label: 'Painéis', icon: Grid2x2, to: '/paineis' },
-  { label: 'DTF × DTG', icon: Shirt, to: '/dtf-dtg' },
   { label: 'Perfis de produção', icon: Settings2, to: '/perfis' },
   { label: 'Configurações', icon: Cog, to: '/configuracoes' },
 ]

@@ -13,7 +13,6 @@ import DashboardPage from '@/pages/Dashboard'
 import JobWorkspacePage from '@/pages/JobWorkspace'
 import NestingPage from '@/pages/Nesting'
 import TilingPage from '@/pages/Tiling'
-import TextileAnalysisPage from '@/pages/TextileAnalysis'
 import ProductionProfilesPage from '@/pages/ProductionProfiles'
 import SettingsPage from '@/pages/Settings'
 import NotFoundPage from '@/pages/NotFound'
@@ -40,7 +39,6 @@ const App = () => (
                 <Route path="/trabalhos" element={<QueuePage />} />
                 <Route path="/trabalhos/:id" element={<JobWorkspacePage />} />
                 <Route path="/montagem" element={<NestingPage />} />
-                <Route path="/dtf-dtg" element={<TextileAnalysisPage />} />
                 <Route path="/paineis" element={<TilingPage />} />
                 <Route path="/perfis" element={<ProductionProfilesPage />} />
                 <Route path="/configuracoes" element={<SettingsPage />} />

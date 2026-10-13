@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   Archive,
-  Calculator,
   FileText,
   ArrowLeft,
   ClipboardCopy,
@@ -411,25 +410,6 @@ export default function JobWorkspacePage() {
   const dtgProfile = profiles.find((p) => p.id === profileId && p.technology === 'dtg')
   const currentProfile = profiles.find((p) => p.id === profileId)
   const deliveredProfile = hasProfile(analysis.job?.file_profile) ? (analysis.job!.file_profile as FileProfile) : null
-  // Leva o tamanho medido da arte, a cobertura e a peça deste trabalho para o cálculo DTF × DTG.
-  const openCosting = () => {
-    const measured = deliveredProfile?.textile?.pages?.find((p) => p.page === page)
-    const q = new URLSearchParams()
-    if (measured?.artSizeMm) {
-      const [w, h] = measured.artSizeMm
-      q.set('w', w.toFixed(1))
-      q.set('h', h.toFixed(1))
-      if (w * h > 0) q.set('cov', Math.min(100, (measured.painted_mm2 / (w * h)) * 100).toFixed(0))
-    }
-    const dtg = ticket.dtg
-    if (dtg?.fabric) q.set('fabric', dtg.fabric)
-    if (dtg?.garmentColor) {
-      const hex = dtg.garmentColor.replace('#', '')
-      const [r, g, b] = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16))
-      q.set('dark', 0.2126 * r + 0.7152 * g + 0.0722 * b < 128 ? '1' : '0')
-    }
-    navigate(`/dtf-dtg?${q.toString()}`)
-  }
   const changes = canCompareCount(clientProfile, deliveredProfile)
   const profileName = profiles.find((p) => p.id === job.profileId)?.name
 
@@ -470,12 +450,6 @@ export default function JobWorkspacePage() {
             <FileText className="h-4 w-4" />
             Relatório
           </Button>
-          {currentProfile?.technology && currentProfile.technology !== 'grafica' && (
-            <Button variant="outline" onClick={openCosting}>
-              <Calculator className="h-4 w-4" />
-              Custo DTF × DTG
-            </Button>
-          )}
           <Button onClick={reanalyze} disabled={running || fixing || analysis.starting || !file}>
             <RefreshCw className="h-4 w-4" />
             {analysis.job ? 'Reanalisar' : 'Analisar'}

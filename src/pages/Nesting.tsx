@@ -1093,32 +1093,22 @@ function Stat({ label, value }: { label: string; value: string }) {
 }
 
 /**
- * Consumo de filme da folha (DTF): metros e m² pelo comprimento real montado e, se o
- * perfil DTF tem custos salvos (DTF × DTG), o valor do filme e do pó. Sem custo: só o consumo.
+ * Consumo de filme da folha (DTF): metros e m² pelo comprimento real montado e o
+ * aproveitamento (área das peças ÷ filme usado).
  */
 function FilmUse({ run }: { run: NestingRun }) {
-  const id = run.params.dtfProfileId
-  if (!id) return null
-  const profile = profileService.getProfilesSync().find((p) => p.id === id)
+  if (!run.params.dtfProfileId) return null
   const width = run.result?.widthMm ?? run.params.material.widthMm
   const length = run.result?.totalLengthMm
   if (!length) return null
   const meters = length / 1000
   const area = (width / 1000) * meters
-  const costs = ((profile?.textile as Record<string, unknown> | undefined)?.costs ?? {}) as {
-    filmCostPerM?: number
-    powderCostPerM2?: number
-  }
-  const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-  const parts = [
-    `${meters.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} m de filme (${area.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} m²)`,
-    ...(costs.filmCostPerM !== undefined ? [`filme ${brl(meters * costs.filmCostPerM)}`] : []),
-    ...(costs.powderCostPerM2 !== undefined ? [`pó ${brl(area * costs.powderCostPerM2)}`] : []),
-  ]
+  const sheets = run.result?.sheets ?? []
+  const used = sheets.reduce((s, sh) => s + sh.efficiency * (width / 1000) * (sh.lengthMm / 1000), 0)
+  const fmt = (v: number) => v.toLocaleString('pt-BR', { maximumFractionDigits: 2 })
   return (
     <p className="text-xs text-muted-foreground">
-      DTF{profile ? ` · ${profile.name}` : ''}: {parts.join(' · ')}
-      {costs.filmCostPerM === undefined && ' · cadastre o custo do filme em DTF × DTG para ver o valor'}
+      Filme: {fmt(meters)} m ({fmt(area)} m²) · peças {fmt(used)} m² · desperdício {Math.round((1 - used / area) * 100)}%
     </p>
   )
 }
