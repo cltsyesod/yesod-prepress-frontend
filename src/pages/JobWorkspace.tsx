@@ -49,6 +49,16 @@ import { profileService } from '@/services/profileService'
 import { isImageFile, projectFilesService } from '@/services/projectFilesService'
 import type { ProjectFile } from '@/types'
 
+// Correções que dependem do formato final e da escala (ver `fixBlock`).
+const GEOMETRY_FIXES = new Set([
+  'set_page_boxes',
+  'add_bleed',
+  'add_crop_marks',
+  'add_cut_contour',
+  'add_contour_cut',
+  'upscale_images',
+])
+
 const ACTIVE = ['queued', 'preparing', 'downloading', 'validating', 'extracting', 'analyzing', 'generating_preview']
 
 export default function JobWorkspacePage() {
@@ -121,9 +131,45 @@ export default function JobWorkspacePage() {
     loadJob()
   }, [correctionId, correctionStatus, correctionMessage, loadJob])
 
+  // Correções que medem o arquivo (formato, sangria, marcas, faca, resolução) dependem do
+  // tamanho final e da escala. Sem eles, o sistema teria de supor (página inteira = formato
+  // final, 1:1) e poderia gerar sangria, faca e ppi sobre a premissa errada.
+  const scaleIssue = analysis.issues.find((issue) => issue.status === 'pending' && issue.fix?.id === 'set_scale')
+  const fixBlock = useCallback(
+    (fixes: FixRequest[]): { title: string; description: string } | null => {
+      if (!fixes.some((fix) => GEOMETRY_FIXES.has(fix.id))) return null
+      const saved = job?.ticket ?? {}
+      if (!(Number(saved.finalWidthMm) > 0 && Number(saved.finalHeightMm) > 0)) {
+        return {
+          title: 'Complete a ficha primeiro',
+          description:
+            'Informe o tamanho final (e a escala, se o arquivo não for 1:1) e salve. Sem isso, sangria, marcas, faca e resolução seriam calculadas supondo que a página inteira é o formato final em 1:1.',
+        }
+      }
+      if (scaleIssue?.fix) {
+        return {
+          title: 'Confirme a escala primeiro',
+          description: `O arquivo parece estar em outra escala. Clique em "${scaleIssue.fix.label}" (ou devolva ao cliente) antes de corrigir o formato.`,
+        }
+      }
+      return null
+    },
+    [job?.ticket, scaleIssue],
+  )
+  const blockedBy = useCallback(
+    (fixes: FixRequest[]) => {
+      const block = fixBlock(fixes)
+      if (!block) return false
+      toast(block)
+      if (block.title.startsWith('Complete')) setEditingTicket(true)
+      return true
+    },
+    [fixBlock],
+  )
+
   const applyFixes = useCallback(
     async (fixes: FixRequest[]) => {
-      if (!file || !fixes.length) return
+      if (!file || !fixes.length || blockedBy(fixes)) return
       setFixing(true)
       try {
         await analysisJobsService.startCorrection(file.id, profileId, fixes)
@@ -133,7 +179,7 @@ export default function JobWorkspacePage() {
       }
       setFixing(false)
     },
-    [file, profileId, loadJob],
+    [file, profileId, loadJob, blockedBy],
   )
 
   // A faca pelo contorno depende do afastamento escolhido pelo operador: pergunta antes.
@@ -143,6 +189,8 @@ export default function JobWorkspacePage() {
   const [bleedFixes, setBleedFixes] = useState<FixRequest[] | null>(null)
   const requestFixes = useCallback(
     async (fixes: FixRequest[]) => {
+      // Antes de abrir qualquer janela: não adianta escolher opções de uma correção bloqueada.
+      if (blockedBy(fixes)) return
       if (fixes.some((fix) => fix.id === 'add_bleed' && !fix.params?.method)) {
         setBleedFixes(fixes)
         return
@@ -153,7 +201,7 @@ export default function JobWorkspacePage() {
       }
       await applyFixes(fixes)
     },
-    [applyFixes],
+    [applyFixes, blockedBy],
   )
   const confirmContour = async (options: ContourCutOptions) => {
     const fixes = (contourFixes ?? []).map((fix) =>
@@ -271,19 +319,9 @@ export default function JobWorkspacePage() {
   )
   const applied = (id: string) => appliedFixes.some((fix) => fix.id === id)
 
-  // Marcas e faca são desenhadas no tamanho do arquivo: com uma escala ainda por
-  // confirmar, sairiam N vezes maiores (ou menores) na peça final.
-  const pendingScale = analysis.issues.find(
-    (issue) => issue.status === 'pending' && issue.fix?.id === 'set_scale',
-  )
+  // Janelas que levam a correções de formato (ex.: marcas de corte) checam antes de abrir.
   const guardScale = (run: () => void) => () => {
-    if (pendingScale?.fix) {
-      toast({
-        title: 'Confirme a escala primeiro',
-        description: `O arquivo parece estar em outra escala. Clique em "${pendingScale.fix.label}" (ou devolva ao cliente) antes de inserir marcas ou faca.`,
-      })
-      return
-    }
+    if (blockedBy([{ id: 'add_crop_marks' }])) return
     run()
   }
 

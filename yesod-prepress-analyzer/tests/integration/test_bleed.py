@@ -116,3 +116,24 @@ def test_skips_pages_that_already_have_the_bleed(tmp_path):
         ProductionProfile(id="p", minimum_bleed_mm=0.5),
     )
     assert "já tinha" in applied.details[0]
+
+
+def test_contour_cut_after_generated_bleed_follows_the_trim(tmp_path):
+    """Full-bleed artwork: the die line is the finished format, not the generated bleed,
+    whether the bleed comes in the same request or was generated before."""
+
+    profile = ProductionProfile(id="p", minimum_bleed_mm=5)
+    source = banner(tmp_path / "in.pdf")
+    together = apply_fixes(
+        source,
+        tmp_path / "together.pdf",
+        [FixRequest(id="add_bleed", params={"bleedMm": 5}), FixRequest(id="add_contour_cut")],
+        profile,
+    )
+    apply_fixes(source, tmp_path / "bled.pdf", [FixRequest(id="add_bleed")], profile)
+    [later] = apply_fixes(
+        tmp_path / "bled.pdf", tmp_path / "later.pdf", [FixRequest(id="add_contour_cut")], profile
+    )
+    for contour in (together[-1], later):
+        assert contour.id == "add_contour_cut"
+        assert "formato 106.0 × 56.0 mm" in contour.details[0], contour.details
