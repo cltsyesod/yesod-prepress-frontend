@@ -16,6 +16,7 @@ FixId = Literal[
     "add_contour_cut",
     "add_cut_contour",
     "add_crop_marks",
+    "add_white_underbase",
 ]
 
 

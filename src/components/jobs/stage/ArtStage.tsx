@@ -4,6 +4,7 @@ import {
   ChevronRight,
   Columns2,
   Eye,
+  Shirt,
   FileInput,
   Layers,
   Layers3,
@@ -33,10 +34,12 @@ const GUIDES = {
   trim: { label: 'Formato final', color: '#22c55e' },
 } as const
 
-type Mode = 'production' | 'client' | 'side' | 'curtain' | 'diff' | 'structure' | 'layers3d'
+type Mode = 'production' | 'white' | 'client' | 'side' | 'curtain' | 'diff' | 'structure' | 'layers3d'
+type WhiteView = 'color' | 'white' | 'garment'
 
-const MODES: { id: Mode; label: string; icon: typeof Eye; compare?: boolean; inspect?: boolean; hint: string }[] = [
+const MODES: { id: Mode; label: string; icon: typeof Eye; compare?: boolean; inspect?: boolean; white?: boolean; hint: string }[] = [
   { id: 'production', label: 'Produção', icon: Eye, hint: 'O arquivo que vai para a produção' },
+  { id: 'white', label: 'Base branca', icon: Shirt, white: true, hint: 'DTF/DTG: a cor, só o branco e a estampa na peça' },
   { id: 'client', label: 'Cliente', icon: FileInput, compare: true, hint: 'O arquivo como o cliente enviou' },
   { id: 'side', label: 'Lado a lado', icon: Columns2, compare: true, hint: 'Cliente e produção na mesma escala' },
   { id: 'curtain', label: 'Cortina', icon: SplitSquareHorizontal, compare: true, hint: 'Arraste a linha: cliente à esquerda, produção à direita' },
@@ -96,14 +99,18 @@ export function ArtStage({
   const [curtain, setCurtain] = useState(0.5)
   const [area, setArea] = useState({ width: 0, height: 0 })
   const [fullscreen, setFullscreen] = useState(false)
+  const [whiteView, setWhiteView] = useState<WhiteView>('garment')
+  const [garment, setGarment] = useState('#1f2937')
+  // Camada da base branca gerada pelo sistema ("Branco (<cor>)").
+  const whiteLayer = layers.find((l) => l.name.startsWith('Branco ('))
 
   useEffect(() => setLayers(prod.pdf?.layers ?? []), [prod.pdf])
   // Modo que depende de algo que não existe (arquivo do cliente, inspeção): volta à produção.
   const inspecting = mode === 'structure' || mode === 'layers3d'
   useEffect(() => {
     const spec = MODES.find((m) => m.id === mode)
-    if ((spec?.compare && !comparable) || (spec?.inspect && !insp.inspection)) setMode('production')
-  }, [comparable, insp.inspection, mode])
+    if ((spec?.compare && !comparable) || (spec?.inspect && !insp.inspection) || (spec?.white && !whiteLayer)) setMode('production')
+  }, [comparable, insp.inspection, mode, whiteLayer])
 
   // A área da arte é recriada ao sair das vistas de inspeção: observa de novo.
   useEffect(() => {
@@ -129,7 +136,7 @@ export function ArtStage({
   const layout = useMemo(() => {
     if (!prodPage || !area.width || mode === 'structure' || mode === 'layers3d') return null
     const frames: { key: 'prod' | 'orig'; box: Box }[] = []
-    if (mode === 'production' || !origPage) frames.push({ key: 'prod', box: prodPage.view })
+    if (mode === 'production' || mode === 'white' || !origPage) frames.push({ key: 'prod', box: prodPage.view })
     else if (mode === 'client') frames.push({ key: 'orig', box: origPage.view })
     else if (mode === 'side') frames.push({ key: 'orig', box: origPage.view }, { key: 'prod', box: prodPage.view })
     else frames.push({ key: 'prod', box: union(prodPage.view, origPage.view) })
@@ -158,7 +165,15 @@ export function ArtStage({
       const out: Record<string, HTMLCanvasElement | null> = {}
       const draw = (pdf: LoadedPdf, frame: Box, withLayers: boolean) =>
         renderInto(pdf, current, px, frame, withLayers ? layers : undefined)
-      if (mode === 'curtain' || mode === 'diff') {
+      if (mode === 'white' && whiteLayer) {
+        const frame = layout.frames[0].box
+        const set = (on: boolean) => layers.map((l) => (l.id === whiteLayer.id ? { ...l, visible: on } : l))
+        const [withWhite, color] = await Promise.all([
+          renderPage(prod.pdf!, current, px, set(true), frame, true),
+          renderPage(prod.pdf!, current, px, set(false), frame, true),
+        ])
+        out.prod = composeWhite(withWhite, color, whiteView, garment)
+      } else       if (mode === 'curtain' || mode === 'diff') {
         const frame = layout.frames[0].box
         const [a, b] = await Promise.all([draw(prod.pdf!, frame, true), draw(orig.pdf!, frame, false)])
         if (mode === 'curtain') {
@@ -182,7 +197,7 @@ export function ArtStage({
     return () => {
       cancelled = true
     }
-  }, [layout, prod.pdf, orig.pdf, current, layers, mode])
+  }, [layout, prod.pdf, orig.pdf, current, layers, mode, whiteLayer, whiteView, garment])
 
   // Arrastar para mover a arte ampliada; Ctrl + roda do mouse para o zoom.
   const drag = useRef<{ x: number; y: number; left: number; top: number } | null>(null)
@@ -230,7 +245,7 @@ export function ArtStage({
       {/* Barra da mesa: modo de ver, página, zoom, guias, camadas. */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border px-3 py-2 text-sm">
         <div className="flex items-center rounded-lg bg-muted p-0.5" role="tablist" aria-label="Como ver o arquivo">
-          {MODES.filter((m) => (!m.compare || comparable) && (!m.inspect || (production && !production.image))).map((m) => {
+          {MODES.filter((m) => (!m.white || !!whiteLayer) && (!m.compare || comparable) && (!m.inspect || (production && !production.image))).map((m) => {
             const Icon = m.icon
             // Inspeção ainda não gerada (análise anterior a ela): o botão explica.
             const unavailable = m.inspect && !insp.inspection
@@ -259,6 +274,39 @@ export function ArtStage({
           <span className="text-xs text-muted-foreground">
             {client ? 'Carregando o arquivo do cliente…' : 'Sem correções: este é o arquivo do cliente.'}
           </span>
+        )}
+
+        {mode === 'white' && (
+          <div className="flex items-center gap-2 text-xs">
+            <div className="flex items-center rounded-lg bg-muted p-0.5" role="tablist" aria-label="Vista da base branca">
+              {([
+                ['color', 'Cor'],
+                ['white', 'Branco'],
+                ['garment', 'Na peça'],
+              ] as const).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  role="tab"
+                  aria-selected={whiteView === id}
+                  onClick={() => setWhiteView(id)}
+                  className={cn(
+                    'rounded-md px-2 py-0.5 font-medium',
+                    whiteView === id ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {whiteView !== 'white' && (
+              <label className="flex items-center gap-1.5 text-muted-foreground" title="Cor da peça ou do tecido, só na tela">
+                Peça
+                <input type="color" value={garment} onChange={(e) => setGarment(e.target.value)} className="h-6 w-8 cursor-pointer rounded border border-border bg-transparent" />
+              </label>
+            )}
+            <span className="text-muted-foreground">Prévia de tela; sobreimpressão simulada</span>
+          </div>
         )}
 
         <div className="ml-auto flex items-center gap-1">
@@ -610,4 +658,41 @@ function difference(prod: HTMLCanvasElement, orig: HTMLCanvasElement) {
 
 function minBleedMm(trim: Box, bleed: Box) {
   return Math.max(0, Math.min(trim[0] - bleed[0], trim[1] - bleed[1], bleed[2] - trim[2], bleed[3] - trim[3])) / MM
+}
+
+/**
+ * Prévia da base branca (DTF/DTG). `withWhite` tem a camada do branco por cima (o pdf.js
+ * não simula sobreimpressão: onde há branco, a tela fica branca); `color` é só a arte.
+ * Cor: a arte sobre a peça. Branco: só a placa, em branco sobre cinza escuro. Na peça: a
+ * placa sob a arte, sobre a cor da peça (o choke aparece como borda sem branco).
+ * É uma prévia de tela: o que vale é o arquivo, medido no analisador.
+ */
+function composeWhite(
+  withWhite: HTMLCanvasElement,
+  color: HTMLCanvasElement,
+  view: WhiteView,
+  garment: string,
+): HTMLCanvasElement {
+  const { width, height } = withWhite
+  const out = document.createElement('canvas')
+  out.width = width
+  out.height = height
+  const ctx = out.getContext('2d')!
+  ctx.fillStyle = view === 'white' ? '#3f3f46' : garment
+  ctx.fillRect(0, 0, width, height)
+  if (view !== 'color') {
+    const plate = withWhite.getContext('2d')!.getImageData(0, 0, width, height)
+    const d = plate.data
+    for (let i = 0; i < d.length; i += 4) {
+      const isWhite = d[i + 3] > 0 && d[i] > 250 && d[i + 1] > 250 && d[i + 2] > 250
+      if (!isWhite) d[i + 3] = 0
+    }
+    const layer = document.createElement('canvas')
+    layer.width = width
+    layer.height = height
+    layer.getContext('2d')!.putImageData(plate, 0, 0)
+    ctx.drawImage(layer, 0, 0)
+  }
+  if (view !== 'white') ctx.drawImage(color, 0, 0)
+  return out
 }

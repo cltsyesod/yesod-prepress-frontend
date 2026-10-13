@@ -36,6 +36,8 @@ from app.fixes.magenta import convert_magenta_strokes
 from app.fixes.paths import circle, pdf_path
 from app.fixes.rgb_profile import assign_srgb
 from app.fixes.upscale import upscale_images
+from app.fixes.white import WhiteSettingsMissing, draw_white, white_mask
+from app.fixes.white import settings_for as white_settings
 
 # Order matters: boxes first, because the die line and the marks use the TrimBox; a
 # magenta die line converted to the cut separation counts as the die line afterwards.
@@ -45,6 +47,7 @@ _ORDER = (
     "set_page_boxes",
     "add_bleed",
     "convert_magenta_die_line",
+    "add_white_underbase",
     "add_contour_cut",
     "add_cut_contour",
     "add_crop_marks",
@@ -500,6 +503,38 @@ def _slug(
     return f"q BT {name} {_num(size)} Tf 0 0 0 1 k {at} Td ({safe}) Tj ET Q\n"
 
 
+def _add_white(
+    pdf: pikepdf.Pdf, profile: ProductionProfile, params: dict, rendered: Path
+) -> AppliedFix:
+    try:
+        settings = white_settings(profile, params)
+    except WhiteSettingsMissing as exc:
+        raise FixError(str(exc)) from exc
+    layer = pdf.make_indirect(
+        pikepdf.Dictionary(Type=pikepdf.Name.OCG, Name=f"Branco ({settings.spot_name})")
+    )
+    details = []
+    for index, page in enumerate(pdf.pages):
+        if _already_applied(page, "add_white_underbase"):
+            continue
+        mask, _, box = white_mask(rendered, index, profile, settings)
+        _isolate_existing_content(page)
+        marked = draw_white(pdf, page, mask, box, settings, layer)
+        _record(page, "add_white_underbase")
+        details.append(f"página {index + 1}: {marked} px de branco")
+    _register_layer(pdf, layer)
+    sign = "spread" if settings.offset_mm > 0 else "choke"
+    return AppliedFix(
+        id="add_white_underbase",
+        label=(
+            f"Base branca \"{settings.spot_name}\" gerada ({settings.density_percent:g}%, "
+            f"{sign} {abs(settings.offset_mm):g} mm, a partir de {settings.threshold_percent:g}% "
+            "de opacidade)"
+        ),
+        details=details,
+    )
+
+
 _FIXES = {
     "upscale_images": _upscale,
     "set_page_boxes": _set_page_boxes,
@@ -524,7 +559,19 @@ def apply_fixes(
     try:
         with pikepdf.open(source) as pdf:
             for fix_id in _ORDER:
-                if fix_id == "add_contour_cut" and fix_id in requested:
+                if fix_id == "add_white_underbase" and fix_id in requested:
+                    rendered = source
+                    if applied:
+                        rendered = destination.with_name(f"{destination.stem}_branco.pdf")
+                        pdf.save(rendered)
+                    try:
+                        applied.append(
+                            _add_white(pdf, profile, requested[fix_id].params, rendered)
+                        )
+                    finally:
+                        if rendered != source:
+                            rendered.unlink(missing_ok=True)
+                elif fix_id == "add_contour_cut" and fix_id in requested:
                     # The artwork is rendered from the file as it is at this point, so the
                     # page boxes it is measured against are the ones the render shows
                     # (generated bleed moves the page corner).

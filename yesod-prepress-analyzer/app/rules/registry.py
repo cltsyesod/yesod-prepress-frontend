@@ -21,6 +21,7 @@ from app.rules.textile_rules import (
     TextilePrintAreaRule,
     TextileSemiTransparencyRule,
     TextileThinDetailsRule,
+    TextileWhiteBaseRule,
 )
 
 
@@ -50,6 +51,7 @@ DEFAULT_RULES: tuple[Rule, ...] = (
     TextileSemiTransparencyRule(),
     TextileBackgroundRule(),
     TextileThinDetailsRule(),
+    TextileWhiteBaseRule(),
 )
 
 

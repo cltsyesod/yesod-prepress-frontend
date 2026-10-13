@@ -1,0 +1,178 @@
+"""Base branca (DTF / DTG) gerada numa cópia, a partir da própria arte.
+
+A arte é renderizada com fundo transparente (no estado em que está neste ponto do pedido);
+recebe branco o que tem opacidade a partir do limite do perfil. O branco é então recuado
+(choke) ou expandido (spread) por um disco do raio pedido, em milímetros no tamanho
+final, e gravado como máscara 1 bit na cor especial com o nome que o RIP espera, numa
+camada própria, com sobreimpressão: não apaga nem muda a arte, só soma o canal do branco.
+Nenhum valor é suposto: nome, limite, densidade e choke vêm do perfil ou da ficha.
+"""
+
+from __future__ import annotations
+
+import zlib
+from dataclasses import dataclass
+from pathlib import Path
+
+import numpy as np
+import pikepdf
+import pypdfium2 as pdfium
+
+from app.contracts.production_profile import ProductionProfile
+
+MM_PER_PT = 25.4 / 72
+MAX_PIXELS = 40_000_000
+
+
+class WhiteSettingsMissing(ValueError):
+    """Falta um valor do perfil; a mensagem diz qual."""
+
+
+@dataclass(slots=True)
+class WhiteSettings:
+    spot_name: str
+    threshold_percent: float
+    density_percent: float
+    offset_mm: float
+    """Spread menos choke: negativo recua o branco para dentro da cor."""
+    px_per_mm: float
+
+
+def settings_for(profile: ProductionProfile, params: dict) -> WhiteSettings:
+    t = profile.textile
+    merged = {
+        "spotName": t.white_spot_name,
+        "alphaThreshold": t.alpha_threshold_percent,
+        "whiteDensity": t.white_density_percent,
+        "chokeMm": t.choke_mm,
+        "spreadMm": t.spread_mm,
+        **{k: v for k, v in params.items() if v not in (None, "")},
+    }
+    missing = [
+        label
+        for key, label in (
+            ("spotName", "nome da cor do branco"),
+            ("alphaThreshold", "opacidade mínima para branco"),
+            ("whiteDensity", "densidade do branco"),
+        )
+        if merged.get(key) in (None, "")
+    ]
+    if missing:
+        raise WhiteSettingsMissing("Cadastre no perfil: " + ", ".join(missing))
+    choke = float(merged.get("chokeMm") or 0)
+    spread = float(merged.get("spreadMm") or 0)
+    # Resolução do branco = a mínima pedida para o trabalho (nada fixo aqui).
+    return WhiteSettings(
+        spot_name=str(merged["spotName"]).strip(),
+        threshold_percent=float(merged["alphaThreshold"]),
+        density_percent=float(merged["whiteDensity"]),
+        offset_mm=spread - choke,
+        px_per_mm=profile.minimum_resolution_dpi / 25.4,
+    )
+
+
+def _dilate_disk(mask: np.ndarray, radius: int) -> np.ndarray:
+    """Dilatação por um disco: faixas horizontais de largura variável, uma por linha."""
+
+    if radius <= 0:
+        return mask.copy()
+    h, w = mask.shape
+    out = np.zeros_like(mask)
+    rows: dict[int, np.ndarray] = {}
+    for dy in range(-radius, radius + 1):
+        half = int((radius * radius - dy * dy) ** 0.5)
+        if half not in rows:
+            padded = np.pad(mask, ((0, 0), (half, half)))
+            rows[half] = _hwin(padded, half)
+        row = rows[half]
+        if dy >= 0:
+            out[dy:, :] |= row[: h - dy, :]
+        else:
+            out[: h + dy, :] |= row[-dy:, :]
+    return out
+
+
+def _hwin(padded: np.ndarray, half: int) -> np.ndarray:
+    k = 2 * half + 1
+    s = np.zeros((padded.shape[0], padded.shape[1] + 1), dtype=np.int32)
+    s[:, 1:] = padded.astype(np.int32).cumsum(1)
+    return (s[:, k:] - s[:, :-k]) > 0
+
+
+def offset_mask(mask: np.ndarray, offset_px: int) -> np.ndarray:
+    if offset_px > 0:
+        return _dilate_disk(mask, offset_px)
+    if offset_px < 0:
+        # Fora da página é transparente: o choke também recua na borda.
+        r = -offset_px
+        padded = np.pad(mask, r)
+        return ~_dilate_disk(~padded, r)[r:-r, r:-r]
+    return mask.copy()
+
+
+def white_mask(
+    rendered: Path, index: int, profile: ProductionProfile, settings: WhiteSettings
+) -> tuple[np.ndarray, float, tuple[float, float, float, float]]:
+    """Máscara do branco (linha 0 = topo), pixels por ponto do PDF e a caixa coberta."""
+
+    doc = pdfium.PdfDocument(str(rendered))
+    try:
+        page = doc[index]
+        page.set_rotation(0)  # medido no espaço do PDF, sem o /Rotate de exibição
+        box = tuple(float(v) for v in page.get_cropbox())
+        w_pt, h_pt = box[2] - box[0], box[3] - box[1]
+        px_per_pt = settings.px_per_mm * MM_PER_PT * profile.file_scale
+        if w_pt * h_pt * px_per_pt**2 > MAX_PIXELS:
+            px_per_pt = (MAX_PIXELS / (w_pt * h_pt)) ** 0.5
+        bitmap = page.render(scale=px_per_pt, fill_color=(255, 255, 255, 0), draw_annots=False)
+        alpha = np.asarray(bitmap.to_pil().convert("RGBA"))[:, :, 3]
+    finally:
+        doc.close()
+    mask = alpha >= settings.threshold_percent / 100 * 255
+    px_per_mm = px_per_pt / (MM_PER_PT * profile.file_scale)
+    mask = offset_mask(mask, round(settings.offset_mm * px_per_mm))
+    return mask, px_per_pt, box
+
+
+def draw_white(
+    pdf: pikepdf.Pdf, page: pikepdf.Page, mask: np.ndarray, box, settings: WhiteSettings, layer
+) -> int:
+    """Desenha a máscara por cima, em sobreimpressão, na camada do branco. Pixels marcados."""
+
+    h, w = mask.shape
+    image = pikepdf.Stream(pdf, zlib.compress(np.packbits(mask, axis=1).tobytes()))
+    image.Type, image.Subtype = pikepdf.Name.XObject, pikepdf.Name.Image
+    image.Width, image.Height = w, h
+    image.ImageMask, image.BitsPerComponent = True, 1
+    image.Decode = pikepdf.Array([1, 0])  # 1 = pinta
+    image.Filter = pikepdf.Name.FlateDecode
+    tint = pikepdf.Dictionary(FunctionType=2, Domain=[0, 1], C0=[0, 0, 0, 0], C1=[0, 0, 0, 0], N=1)
+    space = pdf.make_indirect(
+        pikepdf.Array(
+            [pikepdf.Name.Separation, pikepdf.Name("/" + settings.spot_name),
+             pikepdf.Name.DeviceCMYK, tint]
+        )
+    )
+    state = pikepdf.Dictionary(Type=pikepdf.Name.ExtGState, OP=True, op=True, OPM=1)
+    if "/Resources" not in page.obj:
+        page.obj.Resources = pikepdf.Dictionary()
+    resources = page.obj.Resources
+    for kind, key, value in (
+        ("/XObject", "/YesodWhiteIm", pdf.make_indirect(image)),
+        ("/ColorSpace", "/YesodWhiteCS", space),
+        ("/ExtGState", "/YesodWhiteGS", state),
+        ("/Properties", "/YesodWhiteOC", layer),
+    ):
+        if kind not in resources:
+            resources[kind] = pikepdf.Dictionary()
+        resources[kind][key] = value
+    x0, y0, x1, y1 = box
+    density = settings.density_percent / 100
+    page.contents_add(
+        (
+            "\n/OC /YesodWhiteOC BDC q /YesodWhiteGS gs /YesodWhiteCS cs "
+            f"{density:.4f} scn {x1 - x0:.4f} 0 0 {y1 - y0:.4f} {x0:.4f} {y0:.4f} cm "
+            "/YesodWhiteIm Do Q EMC\n"
+        ).encode()
+    )
+    return int(mask.sum())

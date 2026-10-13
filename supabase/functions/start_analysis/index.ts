@@ -14,6 +14,7 @@ const FIX_IDS = [
   'add_contour_cut',
   'add_cut_contour',
   'add_crop_marks',
+  'add_white_underbase',
 ]
 
 const json = (status: number, body: unknown) =>

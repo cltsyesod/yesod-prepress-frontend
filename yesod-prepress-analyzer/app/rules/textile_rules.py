@@ -250,3 +250,94 @@ class TextileThinDetailsRule(Rule):
                 )
             )
         return issues
+
+
+class TextileWhiteBaseRule(Rule):
+    """Como o branco chega ao RIP, conforme o perfil: gerado aqui, vindo na arte ou do RIP."""
+
+    code = "TEXTILE_WHITE_BASE"
+    default_severity = "warning"
+    technologies = TEXTILE
+
+    def evaluate(self, context: DocumentContext) -> list[AnalysisIssue]:
+        t = context.profile.textile
+        if t.white_mode == "rip":
+            return []
+        spots = {name.lower() for name in context.colors.spot_names}
+        name = t.white_spot_name
+        present = bool(name) and name.lower() in spots
+        base = {"category": "Têxtil", "expected_value": f"Base branca ({name or 'cor a definir'})"}
+        if t.white_mode is None:
+            return [
+                self.issue(
+                    context,
+                    severity="informational",
+                    title="Base branca não definida no perfil",
+                    found_value="Modo do branco vazio",
+                    description=(
+                        "O perfil não diz se o branco é gerado aqui, vem na arte ou é do RIP."
+                    ),
+                    recommendation="Defina a base branca no perfil de produção.",
+                    **base,
+                )
+            ]
+        if present:
+            return []
+        if t.white_mode == "from_file":
+            return [
+                self.issue(
+                    context,
+                    severity="critical",
+                    title="A arte não traz a base branca",
+                    found_value="Cores especiais: " + (", ".join(sorted(spots)) or "nenhuma"),
+                    description=(
+                        f"O fluxo deste perfil espera o branco na arte, na cor especial \"{name}\"."
+                    ),
+                    recommendation="Peça a arte com a camada de branco ou mude o fluxo no perfil.",
+                    **base,
+                )
+            ]
+        missing = [
+            label
+            for value, label in (
+                (name, "nome da cor do branco"),
+                (t.alpha_threshold_percent, "opacidade mínima"),
+                (t.white_density_percent, "densidade"),
+            )
+            if value in (None, "")
+        ]
+        if missing:
+            return [
+                self.issue(
+                    context,
+                    severity="informational",
+                    title="Base branca: faltam dados no perfil",
+                    found_value="Falta: " + ", ".join(missing),
+                    description="Sem esses valores o sistema não gera o branco (nada é suposto).",
+                    recommendation="Complete a seção DTF/DTG do perfil de produção.",
+                    **base,
+                )
+            ]
+        offset = (t.spread_mm or 0) - (t.choke_mm or 0)
+        how = f"{'spread' if offset > 0 else 'choke'} {abs(offset):g} mm"
+        return [
+            self.issue(
+                context,
+                title="Base branca a gerar",
+                found_value="Sem branco na arte",
+                description=(
+                    f"O branco é gerado numa cópia, em \"{name}\", onde a arte tem "
+                    f"{t.alpha_threshold_percent:g}% de opacidade ou mais, com {how} e "
+                    f"densidade de {t.white_density_percent:g}%. A arte não muda."
+                ),
+                recommendation="Gere a base branca e confira as vistas Cor / Branco / Na peça.",
+                can_auto_correct=True,
+                fix={
+                    "id": "add_white_underbase",
+                    "target": "pdf",
+                    "label": "Gerar a base branca",
+                    "preview": f"Branco em \"{name}\" ({how}), em camada própria e sobreimpressão",
+                },
+                **base,
+            )
+        ]

@@ -48,6 +48,26 @@ class TextileSettings(BaseModel):
     choke_mm: float | None = Field(
         default=None, ge=0, le=10, validation_alias=AliasChoices("chokeMm", "choke_mm")
     )
+    spread_mm: float | None = Field(
+        default=None, ge=0, le=10, validation_alias=AliasChoices("spreadMm", "spread_mm")
+    )
+    white_mode: Literal["generate", "from_file", "rip"] | None = Field(
+        default=None, validation_alias=AliasChoices("whiteMode", "white_mode")
+    )
+    white_spot_name: str | None = Field(
+        default=None, validation_alias=AliasChoices("whiteSpotName", "white_spot_name")
+    )
+    white_density_percent: float | None = Field(
+        default=None,
+        gt=0,
+        le=100,
+        validation_alias=AliasChoices("whiteDensity", "white_density_percent"),
+    )
+
+    @field_validator("white_mode", "white_spot_name", mode="before")
+    @classmethod
+    def blank_is_none(cls, value: object) -> object:
+        return value.strip() or None if isinstance(value, str) else value
 
 
 class ProductionProfile(BaseModel):
