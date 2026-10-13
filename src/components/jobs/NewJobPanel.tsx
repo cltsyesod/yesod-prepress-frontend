@@ -1,3 +1,4 @@
+import { profileInScope, type Scope } from '@/lib/scope'
 import { useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { FileUp, Loader2, SlidersHorizontal, X } from 'lucide-react'
@@ -15,10 +16,11 @@ import { profileService } from '@/services/profileService'
 import { ARTWORK_ACCEPT, MAX_UPLOAD_BYTES, artworkType } from '@/services/projectFilesService'
 
 /** Soltar a arte do cliente (PDF ou imagem), ajustar a ficha (opcional) e analisar. */
-export function NewJobPanel() {
+export function NewJobPanel({ scope = 'print' }: { scope?: Scope }) {
   const navigate = useNavigate()
   const inputRef = useRef<HTMLInputElement>(null)
-  const profiles = profileService.getProfilesSync()
+  // Só os perfis do módulo (gráfica ou DTF/DTG).
+  const profiles = profileService.getProfilesSync().filter((p) => profileInScope(p, scope))
   const [file, setFile] = useState<File | null>(null)
   const [dragging, setDragging] = useState(false)
   const [showTicket, setShowTicket] = useState(false)

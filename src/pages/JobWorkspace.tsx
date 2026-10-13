@@ -1,3 +1,4 @@
+import { homeOf, isTextile } from '@/lib/scope'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
@@ -366,7 +367,7 @@ export default function JobWorkspacePage() {
   const archive = async () => {
     if (!job) return
     await jobsService.archive(job.id)
-    navigate('/trabalhos')
+    navigate(homeOf(profiles.find((p) => p.id === profileId)?.technology))
   }
 
   const cutLayerName = profiles.find((p) => p.id === profileId)?.cutLayerName?.trim() || ''
@@ -386,7 +387,7 @@ export default function JobWorkspacePage() {
   if (loadError) {
     return (
       <div className="space-y-4">
-        <BackLink />
+        <BackLink technology={profiles.find((p) => p.id === (job?.profileId ?? profileId))?.technology} />
         <p className="text-sm text-destructive">{loadError}</p>
       </div>
     )
@@ -418,7 +419,7 @@ export default function JobWorkspacePage() {
       {/* ---- Cabeçalho: quem, o quê e as ações do trabalho ---- */}
       <header className="flex shrink-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="min-w-0">
-          <BackLink />
+          <BackLink technology={profiles.find((p) => p.id === (job?.profileId ?? profileId))?.technology} />
           <h1 className="truncate text-xl font-semibold tracking-tight text-foreground">{job.name}</h1>
           <p className="flex flex-wrap items-center gap-x-2 text-sm text-muted-foreground">
             {[job.clientName, profileName].filter(Boolean).map((part, i) => (
@@ -568,7 +569,7 @@ export default function JobWorkspacePage() {
               <JobTicketFields
                 ticket={ticket}
                 onChange={setTicket}
-                profiles={profiles}
+                profiles={profiles.filter((p) => isTextile(p.technology) === isTextile(currentProfile?.technology))}
                 profileId={profileId}
                 onProfileChange={setProfileId}
               />
@@ -736,14 +737,15 @@ function canCompareCount(client: FileProfile | null, delivered: FileProfile | nu
   return compareRows(client, delivered).filter((row) => row.changed).length
 }
 
-function BackLink() {
+function BackLink({ technology }: { technology?: string }) {
+  const textile = isTextile(technology)
   return (
     <Link
-      to="/trabalhos"
+      to={homeOf(technology)}
       className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
     >
       <ArrowLeft className="h-4 w-4" />
-      Fila de trabalho
+      {textile ? 'DTF / DTG' : 'Fila de trabalho'}
     </Link>
   )
 }

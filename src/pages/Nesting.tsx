@@ -1,3 +1,4 @@
+import { isTextile, type Scope } from '@/lib/scope'
 import { Link } from 'react-router-dom'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Download, LayoutGrid, Loader2, Trash2 } from 'lucide-react'
@@ -74,7 +75,7 @@ const numberOr = (value: string, fallback: number) => {
   return value.trim() === '' || !Number.isFinite(n) ? fallback : n
 }
 
-export default function NestingPage() {
+export default function NestingPage({ scope = 'print' }: { scope?: Scope }) {
   const profiles = profileService.getProfilesSync()
   const dtfProfiles = profiles.filter((p) => p.technology === 'dtf')
   const [dtfId, setDtfId] = useState<string>()
@@ -102,7 +103,9 @@ export default function NestingPage() {
 
   const loadRuns = useCallback(async () => {
     try {
-      setRuns(await nestingService.listRuns())
+      const all = await nestingService.listRuns()
+      // Folhas de DTF ficam no módulo têxtil; as demais, na Montagem.
+      setRuns(all.filter((run) => (scope === 'textile') === !!run.params?.dtfProfileId))
     } catch (err) {
       toast({ title: 'Não foi possível carregar as montagens', description: getErrorMessage(err), variant: 'destructive' })
     }
@@ -141,7 +144,16 @@ export default function NestingPage() {
   // (quando o perfil diz que é o sistema que gera o branco).
   const [whiteDone, setWhiteDone] = useState<Set<string>>(new Set())
   const profileOf = (job: Job) => profiles.find((p) => p.id === job.profileId)
-  const listed = dtfId ? jobs.filter((job) => profileOf(job)?.technology === 'dtf') : jobs
+  // Cada módulo só vê os seus trabalhos: gráfica aqui, DTF na folha do módulo têxtil.
+  const listed =
+    scope === 'textile'
+      ? jobs.filter((job) => profileOf(job)?.technology === 'dtf')
+      : jobs.filter((job) => !isTextile(profileOf(job)?.technology))
+  // Módulo têxtil: a folha já abre com o primeiro perfil DTF.
+  useEffect(() => {
+    if (scope === 'textile' && !dtfId && dtfProfiles[0]) applyDtf(dtfProfiles[0].id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scope, dtfId, dtfProfiles.length])
   const needsWhite = (job: Job) => profileOf(job)?.textile?.whiteMode === 'generate' && !whiteDone.has(job.id)
   const dtfJobIds = dtfId ? listed.map((job) => job.id).join(',') : ''
   useEffect(() => {
@@ -273,14 +285,58 @@ export default function NestingPage() {
     loadRuns()
   }
 
+  // Folha de DTF: largura, margem, espaçamento e espelho do perfil; peças pelo contorno.
+  const applyDtf = (value: string) => {
+                    const profile = dtfProfiles.find((p) => p.id === value)
+                    setDtfId(profile?.id)
+                    if (!profile) {
+                      setParams((p) => ({ ...p, mirror: false, dtfProfileId: undefined, cutLines: { ...p.cutLines, draw: true } }))
+                      return
+                    }
+                    const t = profile.textile ?? {}
+                    setIsSheet(false)
+                    // Na folha de DTF só entram trabalhos DTF: desmarca os outros.
+                    setSelected((s) =>
+                      Object.fromEntries(
+                        Object.entries(s).filter(([id]) => {
+                          const job = jobs.find((j) => j.id === id)
+                          return job && profileOf(job)?.technology === 'dtf'
+                        }),
+                      ),
+                    )
+                    // Filme em rolo: largura, margem e espaçamento do perfil (o que estiver
+                    // cadastrado); peças pelo contorno da arte, sem desenhar faca; o branco da
+                    // arte é estampa (não é fundo); espelho só se o fluxo do perfil pedir.
+                    setParams((p) => ({
+                      ...p,
+                      mirror: !!t.mirror,
+                      dtfProfileId: profile.id,
+                      material: {
+                        ...p.material,
+                        lengthMm: undefined,
+                        ...(t.printWidthMm ? { widthMm: t.printWidthMm } : {}),
+                        ...(t.marginMm !== undefined ? { marginMm: t.marginMm } : {}),
+                        ...(t.gapMm !== undefined ? { gapMm: t.gapMm } : {}),
+                      },
+                      cutLines: { ...p.cutLines, add: true, draw: false, whiteBackground: 'keep', offsetMm: 0 },
+                    }))
+  }
+
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-semibold text-foreground">Montagem</h1>
-        <p className="text-sm text-muted-foreground">
-          Encaixe os trabalhos no material pelo formato real da faca, com giro e espaçamento definidos por você.
+      {scope === 'print' && (
+        <div>
+          <h1 className="text-2xl font-semibold text-foreground">Montagem</h1>
+          <p className="text-sm text-muted-foreground">
+            Encaixe os trabalhos no material pelo formato real da faca, com giro e espaçamento definidos por você.
+          </p>
+        </div>
+      )}
+      {scope === 'textile' && dtfProfiles.length === 0 && (
+        <p className="rounded-md border border-dashed border-border p-3 text-sm text-muted-foreground">
+          Nenhum perfil DTF cadastrado. Crie um na aba Perfis.
         </p>
-      </div>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,380px)_minmax(0,1fr)]">
         <section className="space-y-5 rounded-lg border border-border bg-card p-4">
@@ -411,52 +467,14 @@ export default function NestingPage() {
                 ))}
               </div>
             </div>
-            {dtfProfiles.length > 0 && (
+            {scope === 'textile' && (
               <div className="col-span-2 space-y-1.5">
-                <Label className="text-xs text-muted-foreground">Folha de DTF (filme)</Label>
-                <Select
-                  value={dtfId ?? 'none'}
-                  onValueChange={(value) => {
-                    const profile = dtfProfiles.find((p) => p.id === value)
-                    setDtfId(profile?.id)
-                    if (!profile) {
-                      setParams((p) => ({ ...p, mirror: false, dtfProfileId: undefined, cutLines: { ...p.cutLines, draw: true } }))
-                      return
-                    }
-                    const t = profile.textile ?? {}
-                    setIsSheet(false)
-                    // Na folha de DTF só entram trabalhos DTF: desmarca os outros.
-                    setSelected((s) =>
-                      Object.fromEntries(
-                        Object.entries(s).filter(([id]) => {
-                          const job = jobs.find((j) => j.id === id)
-                          return job && profileOf(job)?.technology === 'dtf'
-                        }),
-                      ),
-                    )
-                    // Filme em rolo: largura, margem e espaçamento do perfil (o que estiver
-                    // cadastrado); peças pelo contorno da arte, sem desenhar faca; o branco da
-                    // arte é estampa (não é fundo); espelho só se o fluxo do perfil pedir.
-                    setParams((p) => ({
-                      ...p,
-                      mirror: !!t.mirror,
-                      dtfProfileId: profile.id,
-                      material: {
-                        ...p.material,
-                        lengthMm: undefined,
-                        ...(t.printWidthMm ? { widthMm: t.printWidthMm } : {}),
-                        ...(t.marginMm !== undefined ? { marginMm: t.marginMm } : {}),
-                        ...(t.gapMm !== undefined ? { gapMm: t.gapMm } : {}),
-                      },
-                      cutLines: { ...p.cutLines, add: true, draw: false, whiteBackground: 'keep', offsetMm: 0 },
-                    }))
-                  }}
-                >
+                <Label className="text-xs text-muted-foreground">Perfil DTF (filme)</Label>
+                <Select value={dtfId ?? ''} onValueChange={applyDtf}>
                   <SelectTrigger className="h-9">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="none">Não é DTF</SelectItem>
                     {dtfProfiles.map((p) => (
                       <SelectItem key={p.id} value={p.id}>
                         {p.name}
@@ -621,6 +639,7 @@ export default function NestingPage() {
             )}
           </div>
 
+          {scope !== 'textile' && (
           <div className="flex items-start justify-between gap-3">
             <div>
               <Label>Gerar faca pelo contorno da arte</Label>
@@ -634,6 +653,7 @@ export default function NestingPage() {
               onCheckedChange={(add) => setParams((p) => ({ ...p, cutLines: { ...p.cutLines, add, draw: true } }))}
             />
           </div>
+          )}
           {params.cutLines.add && params.cutLines.draw !== false && (
             <div className="grid grid-cols-3 gap-3">
               <div className="space-y-1.5">

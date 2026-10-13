@@ -1,3 +1,5 @@
+import { jobInScope, type Scope } from '@/lib/scope'
+import { profileService } from '@/services/profileService'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { formatDistanceToNow } from 'date-fns'
@@ -24,7 +26,8 @@ const FILTERS: { key: FilterKey; label: string; states: JobState[] }[] = [
   { key: 'all', label: 'Todos', states: [] },
 ]
 
-export default function QueuePage() {
+export default function QueuePage({ scope = 'print' }: { scope?: Scope }) {
+  const profiles = profileService.getProfilesSync()
   const [jobs, setJobs] = useState<Job[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -57,24 +60,27 @@ export default function QueuePage() {
     const q = query.trim().toLowerCase()
     return jobs.filter(
       (job) =>
+        jobInScope(job.profileId, profiles, scope) &&
         (!states.length || states.includes(jobState(job))) &&
         (!mine || job.assigneeId === user?.id) &&
         (!q || `${job.name} ${job.clientName} ${nameOf(job.assigneeId)}`.toLowerCase().includes(q)),
     )
     // nameOf muda quando a equipe carrega
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jobs, filter, query, mine, user?.id])
+  }, [jobs, filter, query, mine, user?.id, scope])
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold text-foreground">Fila de trabalho</h1>
-        <p className="text-sm text-muted-foreground">
-          Envie o arquivo do cliente; o preflight roda sozinho e aponta o que precisa de ação.
-        </p>
-      </div>
+      {scope === 'print' && (
+        <div>
+          <h1 className="text-2xl font-semibold text-foreground">Fila de trabalho</h1>
+          <p className="text-sm text-muted-foreground">
+            Envie o arquivo do cliente; o preflight roda sozinho e aponta o que precisa de ação.
+          </p>
+        </div>
+      )}
 
-      <NewJobPanel />
+      <NewJobPanel scope={scope} />
 
       <section className="space-y-3">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

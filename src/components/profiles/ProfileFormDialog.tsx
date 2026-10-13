@@ -1,3 +1,4 @@
+import type { Scope } from '@/lib/scope'
 import { useState, useEffect } from 'react'
 import {
   Dialog,
@@ -82,9 +83,11 @@ interface Props {
   onOpenChange: (open: boolean) => void
   initialData?: ProductionProfile | null
   onSave: (data: FormData) => void
+  /** Módulo: na gráfica a tecnologia é sempre gráfica; no têxtil, DTF ou DTG. */
+  scope?: Scope
 }
 
-export function ProfileFormDialog({ open, onOpenChange, initialData, onSave }: Props) {
+export function ProfileFormDialog({ open, onOpenChange, initialData, onSave, scope = 'print' }: Props) {
   const [form, setForm] = useState<FormData>(defaultForm())
   const [error, setError] = useState('')
 
@@ -94,7 +97,7 @@ export function ProfileFormDialog({ open, onOpenChange, initialData, onSave }: P
       setForm(
         initialData
           ? { ...initialData, rules: initialData.rules.map((r) => ({ ...r })) }
-          : defaultForm(),
+          : { ...defaultForm(), technology: scope === 'textile' ? 'dtf' : 'grafica' },
       )
     }
   }, [open, initialData])
@@ -144,19 +147,17 @@ export function ProfileFormDialog({ open, onOpenChange, initialData, onSave }: P
                 />
                 {error && <p className="text-[10px] text-red-500 mt-0.5">{error}</p>}
               </div>
+              {scope === 'textile' && (
               <div>
                 <Label className={lbl}>Tecnologia de produção</Label>
                 <Select
-                  value={form.technology ?? 'grafica'}
+                  value={form.technology ?? 'dtf'}
                   onValueChange={(v) => update('technology', v as ProfileTechnology)}
                 >
                   <SelectTrigger className={fieldCls}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="grafica" className="text-xs">
-                      Gráfica / comunicação visual
-                    </SelectItem>
                     <SelectItem value="dtf" className="text-xs">
                       DTF (filme)
                     </SelectItem>
@@ -166,6 +167,7 @@ export function ProfileFormDialog({ open, onOpenChange, initialData, onSave }: P
                   </SelectContent>
                 </Select>
               </div>
+              )}
               <div>
                 <Label className={lbl}>Descrição</Label>
                 <Textarea
@@ -305,6 +307,7 @@ export function ProfileFormDialog({ open, onOpenChange, initialData, onSave }: P
               </div>
             </AccordionContent>
           </AccordionItem>
+          {scope !== 'textile' && (
           <AccordionItem value="format">
             <AccordionTrigger className="text-sm font-semibold">
               Formato e Acabamento
@@ -388,6 +391,7 @@ export function ProfileFormDialog({ open, onOpenChange, initialData, onSave }: P
               )}
             </AccordionContent>
           </AccordionItem>
+          )}
           <AccordionItem value="rules">
             <AccordionTrigger className="text-sm font-semibold">Regras Técnicas</AccordionTrigger>
             <AccordionContent className="pt-1">

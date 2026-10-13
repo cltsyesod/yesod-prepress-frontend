@@ -1,3 +1,4 @@
+import { profileInScope, type Scope } from '@/lib/scope'
 import { useState, useEffect, useMemo } from 'react'
 import { PageHeader } from '@/components/PageHeader'
 import { Button } from '@/components/ui/button'
@@ -20,7 +21,7 @@ import type { ProductionProfile } from '@/types'
 
 type FormData = Omit<ProductionProfile, 'id' | 'createdAt' | 'updatedAt'>
 
-export default function ProductionProfilesPage() {
+export default function ProductionProfilesPage({ scope = 'print' }: { scope?: Scope }) {
   const { toast } = useToast()
   const [profiles, setProfiles] = useState<ProductionProfile[]>([])
   const [search, setSearch] = useState('')
@@ -53,9 +54,9 @@ export default function ProductionProfilesPage() {
     return profiles.filter((p) => {
       const matchSearch = p.name.toLowerCase().includes(search.toLowerCase())
       const matchStatus = statusFilter === 'all' || p.status === statusFilter
-      return matchSearch && matchStatus
+      return matchSearch && matchStatus && profileInScope(p, scope)
     })
-  }, [profiles, search, statusFilter])
+  }, [profiles, search, statusFilter, scope])
 
   const handleCreate = () => {
     setEditingProfile(null)
@@ -126,10 +127,12 @@ export default function ProductionProfilesPage() {
 
   return (
     <div>
-      <PageHeader
-        title="Perfis de Produção"
-        breadcrumbs={[{ label: 'Fila de trabalho', href: '/trabalhos' }, { label: 'Perfis de Produção' }]}
-      />
+      {scope === 'print' && (
+        <PageHeader
+          title="Perfis de Produção"
+          breadcrumbs={[{ label: 'Fila de trabalho', href: '/trabalhos' }, { label: 'Perfis de Produção' }]}
+        />
+      )}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2 flex-1 max-w-md">
           <div className="relative flex-1">
@@ -224,6 +227,7 @@ export default function ProductionProfilesPage() {
         onOpenChange={setFormOpen}
         initialData={editingProfile}
         onSave={handleSave}
+        scope={scope}
       />
       <DeleteProfileDialog
         profile={deleteTarget}
