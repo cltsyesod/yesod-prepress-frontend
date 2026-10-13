@@ -1,6 +1,6 @@
-import { Crop, FileCheck2, ImageIcon, Package, Palette, Ruler, Scissors, Type, type LucideIcon } from 'lucide-react'
+import { Crop, FileCheck2, ImageIcon, Package, Palette, Ruler, Scissors, Shirt, Type, type LucideIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { SECTIONS, TONE_CLASS, TONE_LABEL, toneOf, type FileProfile, type SectionId, type Tone } from '@/lib/xray'
+import { SECTIONS, TONE_CLASS, TONE_LABEL, sectionApplies, toneOf, type FileProfile, type SectionId, type Tone } from '@/lib/xray'
 import { advisoryOf, tileSummary, worse } from '@/lib/xray-facts'
 import type { AnalysisIssue } from '@/services/analysisJobsService'
 
@@ -13,6 +13,7 @@ export const SECTION_ICON: Record<SectionId, LucideIcon> = {
   colors: Palette,
   fonts: Type,
   finishing: Scissors,
+  textile: Shirt,
   structure: FileCheck2,
 }
 
@@ -48,7 +49,7 @@ export function XRayTiles({
         Raio-x do arquivo
       </p>
       <div className="divide-y divide-border">
-      {SECTIONS.map((section) => {
+      {SECTIONS.filter((s) => sectionApplies(s.id, profile)).map((section) => {
         const tone = sectionTone(section.id, profile, issues)
         const summary = tileSummary(section.id, profile)
         const pending = issues.filter(

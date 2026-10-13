@@ -151,6 +151,7 @@ class OutputIntentRule(Rule):
 
 class InkCoverageRule(Rule):
     code = "COLOR_INK_COVERAGE"
+    technologies = ("grafica",)
     default_severity = "warning"
 
     def evaluate(self, context: DocumentContext) -> list[AnalysisIssue]:

@@ -1,13 +1,22 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 import { AppSidebar } from '@/components/AppSidebar'
 import { AppHeader } from '@/components/AppHeader'
 import { cn } from '@/lib/utils'
+import { profileService } from '@/services/profileService'
 
 export default function Layout() {
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
   const { pathname } = useLocation()
+  // Perfis da empresa (banco) antes das telas usarem a cópia local.
+  const [, setProfilesVersion] = useState(0)
+  useEffect(() => {
+    profileService
+      .syncFromServer()
+      .then(() => setProfilesVersion((v) => v + 1))
+      .catch(() => {})
+  }, [])
   // Áreas de trabalho com a arte em destaque (painéis e a tela do trabalho) usam a tela toda.
   const workspace = pathname.startsWith('/paineis') || /^\/trabalhos\/[^/]+/.test(pathname)
 

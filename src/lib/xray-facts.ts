@@ -103,6 +103,14 @@ export function tileSummary(id: SectionId, p: FileProfile): { value: string; sub
         sub: die ? (p.colors?.technicalSpots.join(', ') || 'separação de corte') : t.requiresCutLayer ? 'a ficha exige faca' : 'não exigida',
       }
     }
+    case 'textile': {
+      const tp = p.textile?.pages?.[0]
+      if (!tp) return { value: 'Não medida', sub: p.textile?.error || 'refaça a análise' }
+      return {
+        value: tp.artSizeMm ? size(tp.artSizeMm) : 'sem tinta',
+        sub: tp.partial_share >= 0.005 ? 'com transparência parcial' : 'cores sólidas',
+      }
+    }
     case 'structure': {
       const d = p.document ?? {}
       return {
@@ -230,6 +238,26 @@ export function factsOf(id: SectionId, p: FileProfile, bad: Tone): Fact[] {
         ...(magenta ? [{ label: 'Linhas em 100% magenta', value: `${magenta} (podem ser uma faca)`, tone: 'info' as Tone }] : []),
         { label: 'Camadas', value: p.layers?.length ? p.layers.join(', ') : 'nenhuma' },
       ]
+    }
+    case 'textile': {
+      const all = p.textile?.pages ?? []
+      if (!all.length) return [{ label: 'Medição', value: p.textile?.error || 'não disponível', tone: bad }]
+      const pct = (v: number) => `${(v * 100).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`
+      return all.flatMap((tp) => [
+        ...(all.length > 1 ? [{ label: `Página ${tp.page}`, value: '' }] : []),
+        { label: 'Tamanho da estampa', value: tp.artSizeMm ? `${size(tp.artSizeMm)} (±${num(1 / tp.px_per_mm)} mm)` : 'sem tinta' },
+        { label: 'Área com tinta', value: `${num(tp.painted_mm2 / 100)} cm²` },
+        { label: 'Página opaca', value: pct(tp.opaque_share_of_box), tone: tp.opaque_share_of_box >= 0.98 ? bad : undefined },
+        { label: 'Transparência parcial', value: pct(tp.partial_share), tone: tp.partial_share >= 0.005 ? bad : 'ok' },
+        ...(tp.below_threshold_share !== null
+          ? [{ label: 'Sem branco (abaixo do limite)', value: pct(tp.below_threshold_share) }]
+          : [{ label: 'Limite de opacidade do branco', value: 'não cadastrado no perfil', tone: 'info' as Tone }]),
+        {
+          label: 'Traços abaixo do mínimo',
+          value: tp.thin_measured ? `${num(tp.thin_mm2 ?? 0)} mm²` : 'mínimo não cadastrado ou não medível',
+          tone: tp.thin_measured ? (tp.thin_mm2 ? bad : 'ok') : ('info' as Tone),
+        },
+      ])
     }
     case 'structure': {
       const d = p.document ?? {}

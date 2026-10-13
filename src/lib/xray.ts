@@ -6,7 +6,27 @@
 
 import type { AnalysisIssue } from '@/services/analysisJobsService'
 
+export interface TextilePage {
+  page: number
+  px_per_mm: number
+  box_mm: [number, number]
+  art_mm: [number, number, number, number] | null
+  artSizeMm: [number, number] | null
+  painted_mm2: number
+  opaque_share_of_box: number
+  partial_share: number
+  below_threshold_share: number | null
+  thin_mm2: number | null
+  thin_measured: boolean
+}
+
+/** Seções que valem para a tecnologia do perfil (gráfica: sangria e faca; DTF/DTG: estampa). */
+export const sectionApplies = (id: SectionId, p: FileProfile | null): boolean =>
+  p?.textile ? id !== 'bleed' && id !== 'finishing' : id !== 'textile'
+
 export interface FileProfile {
+  technology?: 'grafica' | 'dtf' | 'dtg'
+  textile?: { pages: TextilePage[]; error: string } | null
   document?: {
     pdfVersion?: string
     pdfx?: string
@@ -112,7 +132,15 @@ export const TONE_CLASS: Record<Tone, { dot: string; text: string; soft: string;
   },
 }
 
-export type SectionId = 'format' | 'bleed' | 'images' | 'colors' | 'fonts' | 'finishing' | 'structure'
+export type SectionId =
+  | 'format'
+  | 'bleed'
+  | 'images'
+  | 'colors'
+  | 'fonts'
+  | 'finishing'
+  | 'textile'
+  | 'structure'
 
 export const SECTIONS: { id: SectionId; title: string; codes: string[] }[] = [
   { id: 'format', title: 'Formato e tamanho', codes: ['PAGE_DIMENSION_MISMATCH', 'PAGE_SIZE_INCONSISTENT'] },
@@ -125,6 +153,17 @@ export const SECTIONS: { id: SectionId; title: string; codes: string[] }[] = [
   },
   { id: 'fonts', title: 'Fontes e textos', codes: ['FONT_NOT_EMBEDDED', 'FONT_PROGRAM_INVALID'] },
   { id: 'finishing', title: 'Faca e acabamento', codes: ['FINISHING_CUT_LAYER', 'FINISHING_MAGENTA_DIE_LINE'] },
+  {
+    id: 'textile',
+    title: 'Estampa e base branca',
+    codes: [
+      'TEXTILE_PRINT_AREA',
+      'TEXTILE_SEMI_TRANSPARENT',
+      'TEXTILE_SOLID_BACKGROUND',
+      'TEXTILE_THIN_DETAILS',
+      'TEXTILE_NOT_MEASURED',
+    ],
+  },
   {
     id: 'structure',
     title: 'Estrutura do PDF',

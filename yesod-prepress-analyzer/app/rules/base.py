@@ -9,8 +9,12 @@ from app.contracts.issue import AnalysisIssue, IssueSeverity
 class Rule(ABC):
     code: str
     default_severity: IssueSeverity
+    technologies: tuple[str, ...] = ("grafica", "dtf", "dtg")
+    """Tecnologias de produção em que a regra faz sentido."""
 
     def enabled(self, context: DocumentContext) -> bool:
+        if context.profile.technology not in self.technologies:
+            return False
         override = context.profile.rule_override(self.code)
         return override.enabled if override else True
 

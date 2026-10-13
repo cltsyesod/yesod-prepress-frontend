@@ -26,7 +26,8 @@ import {
   AccordionContent,
 } from '@/components/ui/accordion'
 import { createDefaultRules } from '@/services/profileService'
-import type { ProductionProfile, TechnicalRule, Severity } from '@/types'
+import type { ProductionProfile, ProfileTechnology, TechnicalRule, Severity } from '@/types'
+import { TextileProfileFields } from '@/components/profiles/TextileProfileFields'
 
 type FormData = Omit<ProductionProfile, 'id' | 'createdAt' | 'updatedAt'>
 
@@ -142,6 +143,28 @@ export function ProfileFormDialog({ open, onOpenChange, initialData, onSave }: P
                 {error && <p className="text-[10px] text-red-500 mt-0.5">{error}</p>}
               </div>
               <div>
+                <Label className={lbl}>Tecnologia de produção</Label>
+                <Select
+                  value={form.technology ?? 'grafica'}
+                  onValueChange={(v) => update('technology', v as ProfileTechnology)}
+                >
+                  <SelectTrigger className={fieldCls}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="grafica" className="text-xs">
+                      Gráfica / comunicação visual
+                    </SelectItem>
+                    <SelectItem value="dtf" className="text-xs">
+                      DTF (filme)
+                    </SelectItem>
+                    <SelectItem value="dtg" className="text-xs">
+                      DTG (direto na peça)
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
                 <Label className={lbl}>Descrição</Label>
                 <Textarea
                   value={form.description}
@@ -202,6 +225,20 @@ export function ProfileFormDialog({ open, onOpenChange, initialData, onSave }: P
               </div>
             </AccordionContent>
           </AccordionItem>
+          {form.technology && form.technology !== 'grafica' && (
+            <AccordionItem value="textile">
+              <AccordionTrigger className="text-sm font-semibold">
+                {form.technology === 'dtf' ? 'DTF: filme, branco e saída' : 'DTG: área, branco e peça'}
+              </AccordionTrigger>
+              <AccordionContent className="pt-1">
+                <TextileProfileFields
+                  technology={form.technology}
+                  value={form.textile ?? {}}
+                  onChange={(v) => update('textile', v)}
+                />
+              </AccordionContent>
+            </AccordionItem>
+          )}
           <AccordionItem value="color">
             <AccordionTrigger className="text-sm font-semibold">Cor e Imagem</AccordionTrigger>
             <AccordionContent className="space-y-3 pt-1">

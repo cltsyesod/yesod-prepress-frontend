@@ -155,6 +155,13 @@ def file_profile(context: DocumentContext) -> dict:
         "fonts": _fonts(context),
         "colors": _colors(context),
         "layers": sorted(context.layers),
+        "technology": profile.technology,
+        "textile": {
+            "pages": [page.to_dict() for page in context.facts.get("textile_pages", [])],
+            "error": context.facts.get("textile_error", ""),
+        }
+        if profile.is_textile
+        else None,
         # O que a ficha/perfil pede, para comparar lado a lado.
         "targets": {
             "scale": scale,

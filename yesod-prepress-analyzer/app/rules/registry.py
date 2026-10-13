@@ -15,6 +15,13 @@ from app.rules.finishing_rules import CutLayerRule, MagentaDieLineRule
 from app.rules.font_rules import EmbeddedFontsRule, FontProgramRule
 from app.rules.image_rules import ImageResolutionRule, ImageRgbRule, ImageTransparencyRule
 from app.rules.page_rules import BleedRule, DimensionRule, PageBoxRule, PageSizeConsistencyRule
+from app.rules.textile_rules import (
+    TextileBackgroundRule,
+    TextileMeasureRule,
+    TextilePrintAreaRule,
+    TextileSemiTransparencyRule,
+    TextileThinDetailsRule,
+)
 
 
 DEFAULT_RULES: tuple[Rule, ...] = (
@@ -38,6 +45,11 @@ DEFAULT_RULES: tuple[Rule, ...] = (
     SpotInventoryRule(),
     CutLayerRule(),
     MagentaDieLineRule(),
+    TextileMeasureRule(),
+    TextilePrintAreaRule(),
+    TextileSemiTransparencyRule(),
+    TextileBackgroundRule(),
+    TextileThinDetailsRule(),
 )
 
 

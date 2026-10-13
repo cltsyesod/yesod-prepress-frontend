@@ -20,6 +20,7 @@ def page_boxes_fix(context: DocumentContext, page: PageInfo) -> dict:
 
 class PageBoxRule(Rule):
     code = "PAGE_TRIMBOX_MISSING"
+    technologies = ("grafica",)
     default_severity = "warning"
 
     def evaluate(self, context: DocumentContext) -> list[AnalysisIssue]:
@@ -43,6 +44,7 @@ class PageBoxRule(Rule):
 
 class BleedRule(Rule):
     code = "PAGE_BLEED_INSUFFICIENT"
+    technologies = ("grafica",)
     default_severity = "critical"
 
     def evaluate(self, context: DocumentContext) -> list[AnalysisIssue]:

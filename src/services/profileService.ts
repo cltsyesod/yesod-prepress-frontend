@@ -1,3 +1,4 @@
+import supabase from '@/lib/supabase/client'
 import type { ProductionProfile, TechnicalRule, Severity, ProfileStatus } from '@/types'
 
 const STORAGE_KEY = 'productionProfiles'
@@ -159,21 +160,86 @@ function generateId(): string {
 
 type FormData = Omit<ProductionProfile, 'id' | 'createdAt' | 'updatedAt'>
 
+/** Perfil guardado: a linha em production_profiles (empresa inteira) vira `dbId`. */
+type Stored = ProductionProfile & { dbId?: string }
+
+const toRow = (p: Stored) => {
+  const { dbId: _db, ...settings } = p
+  return { name: p.name, is_default: !!p.isDefault, settings }
+}
+
+/** Grava no banco da empresa; a cópia local continua para leitura imediata. */
+async function persist(profile: Stored): Promise<Stored> {
+  if (profile.dbId) {
+    const { error } = await supabase
+      .from('production_profiles')
+      .update(toRow(profile))
+      .eq('id', profile.dbId)
+    if (error) throw new Error(`Não foi possível salvar o perfil: ${error.message}`)
+    return profile
+  }
+  const { data, error } = await supabase
+    .from('production_profiles')
+    .insert(toRow(profile))
+    .select('id')
+    .single()
+  if (error) throw new Error(`Não foi possível salvar o perfil: ${error.message}`)
+  return { ...profile, dbId: data.id as string }
+}
+
+function replaceLocal(profile: Stored): void {
+  const profiles = readProfiles() as Stored[]
+  const idx = profiles.findIndex((p) => p.id === profile.id)
+  if (idx === -1) profiles.push(profile)
+  else profiles[idx] = profile
+  saveProfiles(profiles)
+}
+
+let syncing: Promise<ProductionProfile[]> | null = null
+
 export const profileService = {
-  async listProfiles(): Promise<ProductionProfile[]> {
-    await new Promise((r) => setTimeout(r, 150))
-    try {
-      const data = localStorage.getItem(STORAGE_KEY)
-      if (!data) {
-        const s = createSeedProfiles()
-        saveProfiles(s)
-        return s
+  /**
+   * Lê os perfis da empresa. Na primeira vez, se o banco estiver vazio, envia os perfis
+   * deste navegador (mantendo os ids, que os trabalhos já usam).
+   */
+  async syncFromServer(): Promise<ProductionProfile[]> {
+    syncing ??= (async () => {
+      try {
+        const { data, error } = await supabase
+          .from('production_profiles')
+          .select('id, name, is_default, settings')
+          .order('created_at')
+        if (error) throw error
+        if (!data.length) {
+          const uploaded: Stored[] = []
+          for (const local of readProfiles() as Stored[]) {
+            uploaded.push(await persist({ ...local, dbId: undefined }))
+          }
+          saveProfiles(uploaded)
+          return uploaded
+        }
+        const profiles: Stored[] = data.map((row) => ({
+          ...(row.settings as ProductionProfile),
+          id: (row.settings as ProductionProfile)?.id || (row.id as string),
+          name: row.name as string,
+          isDefault: !!row.is_default,
+          rules: (row.settings as ProductionProfile)?.rules ?? createDefaultRules(),
+          dbId: row.id as string,
+        }))
+        saveProfiles(profiles)
+        return profiles
+      } finally {
+        syncing = null
       }
-      const parsed = JSON.parse(data)
-      if (!Array.isArray(parsed)) throw new Error('corrupted')
-      return parsed
+    })()
+    return syncing
+  },
+
+  async listProfiles(): Promise<ProductionProfile[]> {
+    try {
+      return await this.syncFromServer()
     } catch {
-      throw new Error('Erro ao ler perfis do armazenamento local')
+      return readProfiles()
     }
   },
 
@@ -186,37 +252,32 @@ export const profileService = {
   },
 
   async createProfile(data: FormData): Promise<ProductionProfile> {
-    const profiles = readProfiles()
-    const profile: ProductionProfile = {
-      ...data,
-      id: generateId(),
-      createdAt: now(),
-      updatedAt: now(),
-    }
-    profiles.push(profile)
-    saveProfiles(profiles)
+    const profile = await persist({ ...data, id: generateId(), createdAt: now(), updatedAt: now() })
+    replaceLocal(profile)
     return profile
   },
 
   async updateProfile(id: string, data: FormData): Promise<void> {
-    const profiles = readProfiles()
-    const idx = profiles.findIndex((p) => p.id === id)
-    if (idx === -1) throw new Error('Perfil não encontrado')
-    profiles[idx] = { ...profiles[idx], ...data, updatedAt: now() }
-    saveProfiles(profiles)
+    const current = (readProfiles() as Stored[]).find((p) => p.id === id)
+    if (!current) throw new Error('Perfil não encontrado')
+    replaceLocal(await persist({ ...current, ...data, id, dbId: current.dbId, updatedAt: now() }))
   },
 
   async deleteProfile(id: string): Promise<void> {
-    const profiles = readProfiles().filter((p) => p.id !== id)
-    saveProfiles(profiles)
+    const current = (readProfiles() as Stored[]).find((p) => p.id === id)
+    if (current?.dbId) {
+      const { error } = await supabase.from('production_profiles').delete().eq('id', current.dbId)
+      if (error) throw new Error(`Não foi possível excluir o perfil: ${error.message}`)
+    }
+    saveProfiles(readProfiles().filter((p) => p.id !== id))
   },
 
   async duplicateProfile(id: string): Promise<ProductionProfile> {
-    const profiles = readProfiles()
-    const original = profiles.find((p) => p.id === id)
+    const original = (readProfiles() as Stored[]).find((p) => p.id === id)
     if (!original) throw new Error('Perfil não encontrado')
-    const copy: ProductionProfile = {
+    const copy = await persist({
       ...original,
+      dbId: undefined,
       id: generateId(),
       name: `${original.name} (cópia)`,
       status: 'inactive' as ProfileStatus,
@@ -224,21 +285,19 @@ export const profileService = {
       createdAt: now(),
       updatedAt: now(),
       rules: original.rules.map((r) => ({ ...r })),
-    }
-    profiles.push(copy)
-    saveProfiles(profiles)
+    })
+    replaceLocal(copy)
     return copy
   },
 
   async toggleStatus(id: string): Promise<void> {
-    const profiles = readProfiles()
-    const idx = profiles.findIndex((p) => p.id === id)
-    if (idx === -1) throw new Error('Perfil não encontrado')
-    profiles[idx].status = profiles[idx].status === 'active' ? 'inactive' : 'active'
-    profiles[idx].updatedAt = now()
-    saveProfiles(profiles)
+    const current = (readProfiles() as Stored[]).find((p) => p.id === id)
+    if (!current) throw new Error('Perfil não encontrado')
+    const status: ProfileStatus = current.status === 'active' ? 'inactive' : 'active'
+    replaceLocal(await persist({ ...current, status, updatedAt: now() }))
   },
 
+  /** Só limpa a cópia deste navegador; os perfis da empresa ficam no banco. */
   resetProfiles(): void {
     localStorage.removeItem(STORAGE_KEY)
   },

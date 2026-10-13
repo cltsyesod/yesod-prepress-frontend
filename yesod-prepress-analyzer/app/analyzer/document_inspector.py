@@ -7,6 +7,7 @@ from pathlib import Path
 import pikepdf
 import pypdfium2 as pdfium
 
+from app.analyzer.alpha_inspector import inspect_alpha
 from app.analyzer.color_inspector import inspect_colors
 from app.analyzer.context import DocumentContext
 from app.analyzer.font_inspector import inspect_fonts
@@ -112,6 +113,12 @@ def inspect_document(path: Path, profile: ProductionProfile, settings: Settings)
             layers=inspect_layers(pdf),
         )
         context.facts["spot_names"] = sorted(context.colors.spot_names)
+        if profile.is_textile:
+            # Medição do alfa para DTF/DTG; falha vira aviso, nunca derruba a análise.
+            try:
+                context.facts["textile_pages"] = inspect_alpha(path, profile)
+            except Exception as exc:  # noqa: BLE001
+                context.facts["textile_error"] = str(exc)
         return context
     finally:
         pdf.close()

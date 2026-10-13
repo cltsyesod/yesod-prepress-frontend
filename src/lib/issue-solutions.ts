@@ -248,6 +248,62 @@ function catalogue(issue: AnalysisIssue): Solution[] {
         },
       ]
 
+    case 'TEXTILE_SEMI_TRANSPARENT':
+      return [
+        {
+          kind: 'client',
+          title: 'Pedir a arte com cores sólidas',
+          text: 'Sombras, brilhos e degradês para o transparente ficam com a base branca cheia ou cortada.',
+          request:
+            'A arte tem áreas semitransparentes (sombras, brilhos ou degradês até o transparente). Na estampa elas saem com manchas ou contorno duro na base branca. Pode enviar a versão com cores sólidas, ou confirmar que deseja manter o efeito?',
+        },
+        {
+          kind: 'accept',
+          title: 'Manter o efeito',
+          text: 'O cliente aceita o resultado da transparência sobre o branco.',
+          reason: 'Transparência mantida com o aceite do cliente',
+        },
+      ]
+    case 'TEXTILE_SOLID_BACKGROUND':
+      return [
+        {
+          kind: 'client',
+          title: 'Pedir a arte sem fundo',
+          text: 'Com o fundo, a estampa sai como um retângulo cheio.',
+          request:
+            'A arte veio com um fundo cobrindo a página inteira, e ele seria impresso como um retângulo na peça. Pode enviar a arte com o fundo transparente (PNG com transparência ou PDF sem o retângulo de fundo)?',
+        },
+        {
+          kind: 'accept',
+          title: 'O retângulo faz parte da estampa',
+          text: 'O fundo deve mesmo ser impresso.',
+          reason: 'Fundo intencional, confirmado',
+        },
+      ]
+    case 'TEXTILE_THIN_DETAILS':
+      return [
+        {
+          kind: 'client',
+          title: 'Pedir traços mais grossos',
+          text: 'Traços abaixo do mínimo do perfil tendem a falhar ou soltar.',
+          request: `Alguns traços e textos da arte estão mais finos que o mínimo para esta impressão (${issue.expected_value}). Pode engrossá-los?`,
+        },
+        {
+          kind: 'accept',
+          title: 'Aceitar o risco',
+          text: 'Segue assim; o cliente foi avisado de que detalhes finos podem falhar.',
+          reason: 'Detalhes finos aceitos com o risco informado',
+        },
+      ]
+    case 'TEXTILE_PRINT_AREA':
+      return [
+        {
+          kind: 'client',
+          title: 'Confirmar um tamanho menor',
+          text: 'O sistema não reduz a arte sozinho. Com o novo tamanho na ficha, a análise refaz a conta.',
+          request: `A arte (${issue.found_value.replace(/^Arte /, '')}) é maior que a área de impressão (${issue.expected_value}). Podemos reduzi-la para caber, ou prefere dividir em partes?`,
+        },
+      ]
     default:
       return []
   }

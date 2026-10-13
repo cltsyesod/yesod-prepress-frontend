@@ -157,8 +157,45 @@ export interface ProductionProfile {
   specialFinishes: string
   rules: TechnicalRule[]
   isDefault: boolean
+  /** Tecnologia de produção: define quais verificações valem. Vazio = gráfica. */
+  technology?: ProfileTechnology
+  textile?: TextileSettings
   createdAt: string
   updatedAt: string
+}
+
+export type ProfileTechnology = 'grafica' | 'dtf' | 'dtg'
+
+/**
+ * DTF / DTG. Tudo vem do equipamento, do RIP e do fluxo cadastrados pelo operador;
+ * campo vazio = a verificação não roda e o relatório pede o valor.
+ */
+export interface TextileSettings {
+  equipment?: string
+  rip?: string
+  /** DTF: filme; DTG: tinta. */
+  media?: string
+  ink?: string
+  outputFormat?: string
+  /** DTF: largura útil do filme. DTG: largura da área imprimível. */
+  printWidthMm?: number
+  /** DTG: altura da área imprimível. */
+  printHeightMm?: number
+  marginMm?: number
+  gapMm?: number
+  /** Espelhar na saída (só quando o fluxo exige). */
+  mirror?: boolean
+  /** generate: o sistema gera; from_file: a arte traz; rip: o RIP gera (só prévia). */
+  whiteMode?: 'generate' | 'from_file' | 'rip'
+  whiteSpotName?: string
+  whiteDensity?: number
+  chokeMm?: number
+  spreadMm?: number
+  /** Opacidade mínima (%) para receber branco. */
+  alphaThreshold?: number
+  minLineMm?: number
+  pretreatment?: string
+  notes?: string
 }
 
 export interface DashboardMetrics {

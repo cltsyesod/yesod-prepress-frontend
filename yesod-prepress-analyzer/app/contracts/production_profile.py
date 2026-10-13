@@ -19,6 +19,37 @@ class RuleOverride(BaseModel):
         return "informational" if value == "info" else value
 
 
+class TextileSettings(BaseModel):
+    """DTF / DTG: tudo cadastrado no perfil (e ajustável na ficha); nada é suposto.
+
+    Campo vazio = a verificação correspondente não roda e o relatório pede o valor.
+    """
+
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+    print_width_mm: float | None = Field(
+        default=None, gt=0, validation_alias=AliasChoices("printWidthMm", "print_width_mm")
+    )
+    """DTF: largura útil do filme. DTG: largura da área imprimível."""
+    print_height_mm: float | None = Field(
+        default=None, gt=0, validation_alias=AliasChoices("printHeightMm", "print_height_mm")
+    )
+    """DTG: altura da área imprimível (DTF: rolo, sem limite de comprimento)."""
+    min_line_mm: float | None = Field(
+        default=None, gt=0, validation_alias=AliasChoices("minLineMm", "min_line_mm")
+    )
+    alpha_threshold_percent: float | None = Field(
+        default=None,
+        ge=0,
+        le=100,
+        validation_alias=AliasChoices("alphaThreshold", "alpha_threshold_percent"),
+    )
+    """Abaixo desta opacidade o branco não é impresso (definido pelo fluxo do operador)."""
+    choke_mm: float | None = Field(
+        default=None, ge=0, le=10, validation_alias=AliasChoices("chokeMm", "choke_mm")
+    )
+
+
 class ProductionProfile(BaseModel):
     """Production tolerances sent by Skip.
 
@@ -107,6 +138,21 @@ class ProductionProfile(BaseModel):
         ge=0,
         validation_alias=AliasChoices("dimensionToleranceMm", "dimension_tolerance_mm"),
     )
+
+    technology: Literal["grafica", "dtf", "dtg"] = Field(
+        default="grafica",
+        description="grafica: impressão gráfica; dtf: filme; dtg: direto na peça.",
+    )
+    textile: TextileSettings = Field(default_factory=lambda: TextileSettings())
+
+    @field_validator("technology", mode="before")
+    @classmethod
+    def known_technology(cls, value: object) -> object:
+        return value if value in ("dtf", "dtg") else "grafica"
+
+    @property
+    def is_textile(self) -> bool:
+        return self.technology in ("dtf", "dtg")
 
     @field_validator("file_scale", mode="before")
     @classmethod

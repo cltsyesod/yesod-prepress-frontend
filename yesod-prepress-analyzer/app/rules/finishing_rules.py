@@ -7,6 +7,7 @@ from app.rules.base import Rule
 
 class CutLayerRule(Rule):
     code = "FINISHING_CUT_LAYER"
+    technologies = ("grafica",)
     default_severity = "critical"
 
     def evaluate(self, context: DocumentContext) -> list[AnalysisIssue]:
@@ -52,6 +53,7 @@ class MagentaDieLineRule(Rule):
     """A die line drawn in plain 100% magenta prints instead of being cut."""
 
     code = "FINISHING_MAGENTA_DIE_LINE"
+    technologies = ("grafica",)
     default_severity = "warning"
 
     def evaluate(self, context: DocumentContext) -> list[AnalysisIssue]:

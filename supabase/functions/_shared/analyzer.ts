@@ -123,5 +123,11 @@ export function toAnalyzerProfile(id: string, profile: Json, ticket: Json): Json
     finalWidthMm: positive(ticket.finalWidthMm),
     finalHeightMm: positive(ticket.finalHeightMm),
     dimensionToleranceMm: nonNegative(ticket.dimensionToleranceMm),
+    // DTF / DTG: a ficha (ticket.textile) tem prioridade sobre o perfil.
+    technology: ['dtf', 'dtg'].includes(String(profile.technology)) ? profile.technology : 'grafica',
+    textile: {
+      ...((profile.textile as Json) ?? {}),
+      ...((ticket.textile as Json) ?? {}),
+    },
   }
 }
