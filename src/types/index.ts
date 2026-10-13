@@ -1,3 +1,4 @@
+import type { DtgTemplate } from '@/domain/dtg/placement'
 import type { ComponentType } from 'react'
 
 export type ProjectStatus =
@@ -195,6 +196,8 @@ export interface TextileSettings {
   alphaThreshold?: number
   minLineMm?: number
   pretreatment?: string
+  /** DTG: gabaritos de peça (área imprimível por peça e tamanho). */
+  templates?: DtgTemplate[]
   notes?: string
 }
 

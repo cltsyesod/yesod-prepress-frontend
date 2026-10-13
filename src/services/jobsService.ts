@@ -1,7 +1,8 @@
 import supabase from '@/lib/supabase/client'
 import { analysisJobsService, type AnalysisJob, type AnalysisIssue } from '@/services/analysisJobsService'
 import { artworkType, projectFilesService } from '@/services/projectFilesService'
-import type { ProjectFile } from '@/types'
+import type { ProjectFile, TextileSettings } from '@/types'
+import type { DtgPlacement } from '@/domain/dtg/placement'
 
 /**
  * Ficha técnica do trabalho, definida pelo operador para cada pedido.
@@ -17,6 +18,10 @@ export interface JobTicket {
   /** managed: o RIP converte RGB com perfil; cmyk_only: todo RGB é apontado. */
   rgbPolicy?: 'managed' | 'cmyk_only'
   cutLayerRequired?: boolean
+  /** DTF/DTG: sobrepõe o perfil têxtil neste trabalho (ex.: área do gabarito escolhido). */
+  textile?: Partial<TextileSettings>
+  /** DTG: gabarito, posição e peça. */
+  dtg?: DtgPlacement
   notes?: string
 }
 

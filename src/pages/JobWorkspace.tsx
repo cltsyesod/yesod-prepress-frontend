@@ -24,6 +24,7 @@ import {
 import { Progress } from '@/components/ui/progress'
 import { JobStateBadge } from '@/components/jobs/JobStateBadge'
 import { JobTicketFields } from '@/components/jobs/JobTicketFields'
+import { DtgPlacementPanel } from '@/components/jobs/DtgPlacementPanel'
 import { JobMetaFields, type JobMeta } from '@/components/jobs/JobMetaFields'
 import { useTeam } from '@/hooks/use-team'
 import { BleedDialog, type BleedOptions } from '@/components/jobs/BleedDialog'
@@ -403,6 +404,7 @@ export default function JobWorkspacePage() {
 
   // Análise concluída (não está rodando nem falhou): mostra situação, raio-x e decisões.
   const done = !!analysis.job && !running && analysis.job.status !== 'failed' && analysis.job.status !== 'cancelled'
+  const dtgProfile = profiles.find((p) => p.id === profileId && p.technology === 'dtg')
   const deliveredProfile = hasProfile(analysis.job?.file_profile) ? (analysis.job!.file_profile as FileProfile) : null
   const changes = canCompareCount(clientProfile, deliveredProfile)
   const profileName = profiles.find((p) => p.id === job.profileId)?.name
@@ -571,6 +573,21 @@ export default function JobWorkspacePage() {
                 </Button>
               </div>
             </section>
+          )}
+
+          {dtgProfile && (
+            <DtgPlacementPanel
+              profile={dtgProfile}
+              ticket={ticket}
+              pdfUrl={pdfUrl || null}
+              page={page}
+              measured={deliveredProfile?.textile?.pages?.find((p) => p.page === page)}
+              onSave={async (next) => {
+                await jobsService.updateTicket(job.id, next, profileId)
+                setTicket(next)
+                toast({ title: 'Posição salva na ficha', description: 'Reanalise para conferir a área do gabarito.' })
+              }}
+            />
           )}
 
           {running && analysis.job && (
