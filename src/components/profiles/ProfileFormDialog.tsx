@@ -55,7 +55,7 @@ function defaultForm(): FormData {
     name: '',
     description: '',
     status: 'active',
-    category: 'Offset',
+    category: '',
     allowedFormats: ['PDF', 'AI', 'EPS'],
     colorMode: 'CMYK',
     iccProfile: '',
@@ -138,7 +138,7 @@ export function ProfileFormDialog({ open, onOpenChange, initialData, onSave }: P
                   value={form.name}
                   onChange={(e) => update('name', e.target.value)}
                   className={fieldCls}
-                  placeholder="Ex: Offset padrão"
+                  placeholder="Ex.: DTF filme 60 cm, Lona 440 g"
                 />
                 {error && <p className="text-[10px] text-red-500 mt-0.5">{error}</p>}
               </div>
@@ -197,7 +197,7 @@ export function ProfileFormDialog({ open, onOpenChange, initialData, onSave }: P
                   <Label className={lbl}>Categoria</Label>
                   <Select value={form.category} onValueChange={(v) => update('category', v)}>
                     <SelectTrigger className={fieldCls}>
-                      <SelectValue />
+                      <SelectValue placeholder="Escolher" />
                     </SelectTrigger>
                     <SelectContent>
                       {CATEGORIES.map((c) => (

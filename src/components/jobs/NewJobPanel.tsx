@@ -24,7 +24,8 @@ export function NewJobPanel() {
   const [showTicket, setShowTicket] = useState(false)
   const [clientName, setClientName] = useState('')
   const [profileId, setProfileId] = useState(
-    profiles.find((p) => p.isDefault)?.id ?? profiles[0]?.id ?? '',
+    // Só vem escolhido se a empresa marcou um perfil como padrão; nenhum é suposto.
+    profiles.find((p) => p.isDefault)?.id ?? '',
   )
   const [ticket, setTicket] = useState<JobTicket>({})
   const [sending, setSending] = useState(false)
@@ -51,6 +52,11 @@ export function NewJobPanel() {
 
   const submit = async () => {
     if (!file) return
+    if (!profileId) {
+      // Sem perfil não há o que conferir: abre a ficha para escolher.
+      setShowTicket(true)
+      return
+    }
     setSending(true)
     try {
       const profile = profiles.find((p) => p.id === profileId)

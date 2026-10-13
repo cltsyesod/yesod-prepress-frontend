@@ -87,7 +87,6 @@ function createSeedProfiles(): ProductionProfile[] {
   return [
     make('wp-1', 'Gráfica offset', 'Perfil para impressão offset padrão', 'Offset', {
       iccProfile: 'ISO Coated v2 (ECI)',
-      isDefault: true,
     }),
     make('wp-2', 'Impressão digital', 'Perfil para impressão digital', 'Digital', {
       iccProfile: 'sRGB IEC61966-2.1',
