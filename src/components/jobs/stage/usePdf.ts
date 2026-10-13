@@ -104,6 +104,8 @@ export async function renderPage(
   pxPerPt: number,
   layers?: PdfLayer[],
   frame?: Box,
+  /** Sem o papel branco: só o que é pintado (placas da vista 3D). */
+  transparent = false,
 ): Promise<HTMLCanvasElement> {
   const page = await pdf.doc.getPage(pageNumber)
   const view = pdf.pages[pageNumber - 1].view
@@ -116,10 +118,86 @@ export async function renderPage(
   const canvas = document.createElement('canvas')
   canvas.width = Math.max(1, Math.round((box[2] - box[0]) * pxPerPt))
   canvas.height = Math.max(1, Math.round((box[3] - box[1]) * pxPerPt))
+  // O pdf.js pede uma área de desenho opaca (fundo preto onde nada é pintado); criada
+  // antes, com transparência, é a que ele recebe.
+  if (transparent) canvas.getContext('2d', { alpha: true })
   const optional = await pdf.doc.getOptionalContentConfig()
   for (const layer of layers ?? []) optional.setVisibility(layer.id, layer.visible)
-  await page.render({ canvas, viewport, optionalContentConfigPromise: Promise.resolve(optional) }).promise
+  await page.render({
+    canvas,
+    viewport,
+    optionalContentConfigPromise: Promise.resolve(optional),
+    ...(transparent ? { background: 'rgba(0,0,0,0)' } : {}),
+  }).promise
   return canvas
+}
+
+// ---- Arquivo de inspeção: placas por tipo de objeto + mapa de objetos (do analisador) ----
+
+export type ObjectKind = 'image' | 'text' | 'path' | 'shading' | 'cut'
+
+export interface InspectedObject {
+  id: string
+  kind: ObjectKind
+  /** Caixa na página, em pontos do PDF. */
+  box: Box
+  layer?: string
+  // texto
+  text?: string
+  font?: string
+  sizePt?: number
+  embedded?: boolean | null
+  // imagem
+  px?: [number, number]
+  /** Resolução no arquivo; no tamanho final, dividida pela escala. */
+  ppi?: number | null
+  colorSpace?: string
+  bits?: number
+  // vetor e faca (cores como a tela mostra, RGBA)
+  fill?: [number, number, number, number] | null
+  stroke?: [number, number, number, number] | null
+  strokeWidthPt?: number | null
+}
+
+export interface InspectedPage {
+  number: number
+  objects: InspectedObject[]
+  counts: Record<'image' | 'text' | 'path' | 'shading' | 'cut', number>
+  truncated: boolean
+  generatedBleed: boolean
+}
+
+export interface Inspection {
+  pdf: LoadedPdf
+  /** Ordem das placas de cada página no arquivo de inspeção. */
+  plates: Plate[]
+  pages: InspectedPage[]
+}
+
+export type Plate = 'images' | 'text' | 'vectors' | 'cut'
+
+/** Abre o arquivo de inspeção e o mapa de objetos anexado a ele. Sem arquivo: null. */
+export function useInspection(url: string | null) {
+  const { pdf, error } = usePdf(url)
+  const [inspection, setInspection] = useState<Inspection | null>(null)
+  useEffect(() => {
+    setInspection(null)
+    if (!pdf) return
+    let cancelled = false
+    pdf.doc
+      .getAttachments()
+      .then((attachments: Record<string, { content: Uint8Array }> | null) => {
+        const item = attachments?.['objects.json']
+        if (!item || cancelled) return
+        const data = JSON.parse(new TextDecoder().decode(item.content))
+        setInspection({ pdf, plates: data.plates, pages: data.pages })
+      })
+      .catch(() => null)
+    return () => {
+      cancelled = true
+    }
+  }, [pdf])
+  return { inspection, error }
 }
 
 export const union = (a: Box, b: Box): Box => [

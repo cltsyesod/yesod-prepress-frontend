@@ -70,6 +70,8 @@ export default function JobWorkspacePage() {
   const [file, setFile] = useState<ProjectFile | null>(null)
   const [pdfUrl, setPdfUrl] = useState('')
   const [clientUrl, setClientUrl] = useState('')
+  // Inspeção do arquivo de produção (placas + mapa de objetos), gerada pelo analisador.
+  const [inspectionUrl, setInspectionUrl] = useState('')
   const [page, setPage] = useState(1)
   const [loadError, setLoadError] = useState('')
   const [editingTicket, setEditingTicket] = useState(false)
@@ -121,6 +123,24 @@ export default function JobWorkspacePage() {
   useEffect(() => {
     loadJob()
   }, [loadJob])
+
+  // A inspeção fica em <dono>/inspection/<arquivo>.pdf e só existe depois da análise:
+  // procura de novo quando a análise do arquivo termina.
+  const fileId = file?.id
+  const fileOwner = file?.storage_path?.split('/')[0]
+  const finished = analysis.job?.file === fileId && ['completed', 'completed_with_warnings'].includes(analysis.job?.status ?? '')
+  useEffect(() => {
+    setInspectionUrl('')
+    if (!fileId || !fileOwner || !finished) return
+    let cancelled = false
+    projectFilesService
+      .getFileUrl({ storage_path: `${fileOwner}/inspection/${fileId}.pdf` })
+      .then((url) => !cancelled && setInspectionUrl(url))
+      .catch(() => null)
+    return () => {
+      cancelled = true
+    }
+  }, [fileId, fileOwner, finished])
 
   // Correção terminou: a cópia corrigida vira o arquivo principal (ou é descartada).
   const correctionId = correction?.id
@@ -489,6 +509,7 @@ export default function JobWorkspacePage() {
               fileScale={scaleOf(job.ticket.fileScale)}
               changes={appliedFixes}
               correcting={!!correction}
+              inspectionUrl={inspectionUrl || null}
             />
           ) : (
             <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-border text-sm text-muted-foreground">

@@ -8,6 +8,7 @@ from uuid import uuid4
 from redis import Redis
 
 from app.analyzer.engine import AnalyzerEngine
+from app.analyzer.inspection import build_inspection
 from app.contracts.callback import CallbackEvent, CallbackPayload
 from app.contracts.issue import AnalysisIssue
 from app.contracts.job_request import JobRequest
@@ -21,6 +22,9 @@ from app.services.file_uploader import FileUploader
 from app.services.temp_files import job_workspace
 
 logger = logging.getLogger(__name__)
+
+# Above this the inspection file is not uploaded (images are already at screen size).
+_INSPECTION_MAX_BYTES = 30 * 1024 * 1024
 
 
 def _chunks(values: list[AnalysisIssue], size: int = 200) -> Iterable[list[AnalysisIssue]]:
@@ -59,6 +63,27 @@ class JobService:
             },
         )
         self.redis.expire(key, self.settings.operational_ttl_seconds)
+
+    async def _inspection(self, request: JobRequest, pdf_path, workspace, notify) -> dict:
+        """Inspection file for the screen. Never fails the analysis: a problem here only
+        means the operator does not get the structure view for this file."""
+
+        if request.inspection_upload_url is None:
+            return {}
+        await notify("progress", "analyzing", 96, "Preparando a inspeção do arquivo")
+        try:
+            target = workspace / "inspection.pdf"
+            info = build_inspection(pdf_path, target, request.production_profile.cut_layer_names)
+            if info["bytes"] > _INSPECTION_MAX_BYTES:
+                return {**info, "skipped": "too_large"}
+            await self.uploader.upload(str(request.inspection_upload_url), target)
+            return info
+        except Exception as exc:
+            logger.warning(
+                "inspection file not produced",
+                extra={"analysis_id": request.analysis_id, "error": str(exc)[:300]},
+            )
+            return {"error": str(exc)[:300]}
 
     async def run(self, request: JobRequest, external_job_id: str) -> None:
         sequence = 0
@@ -145,6 +170,8 @@ class JobService:
                     await notify(
                         "issues", "analyzing", progress, "Enviando ocorrências", issues=batch
                     )
+                inspection = await self._inspection(request, pdf_path, workspace, notify)
+                clock.lap("inspection")
                 await notify(
                     "completed",
                     result.final_status,
@@ -153,6 +180,7 @@ class JobService:
                     summary={
                         **result.summary,
                         **({"correctedFile": corrected} if corrected else {}),
+                        **({"inspection": inspection} if inspection else {}),
                         "metrics": clock.report(
                             sourceBytes=source_bytes,
                             outputBytes=corrected.get("sizeBytes") if corrected else None,

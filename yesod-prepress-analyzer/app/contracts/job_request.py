@@ -133,6 +133,13 @@ class JobRequest(BaseModel):
         validation_alias=AliasChoices("outputUploadUrl", "output_upload_url"),
     )
 
+    # Where to put the inspection file (plates + object map) of the analysed PDF.
+    inspection_upload_url: AnyHttpUrl | None = Field(
+        default=None,
+        repr=False,
+        validation_alias=AliasChoices("inspectionUploadUrl", "inspection_upload_url"),
+    )
+
     @model_validator(mode="after")
     def require_upload_target_for_fixes(self) -> JobRequest:
         if self.fixes and self.output_upload_url is None:

@@ -6,6 +6,8 @@ import {
   Eye,
   FileInput,
   Layers,
+  Layers3,
+  ListTree,
   Loader2,
   Maximize,
   Minimize,
@@ -18,7 +20,9 @@ import {
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
-import { renderPage, union, usePdf, type Box, type LoadedPdf, type PdfLayer } from './usePdf'
+import { Layers3D } from './Layers3D'
+import { StructureView } from './StructureView'
+import { renderPage, union, useInspection, usePdf, type Box, type LoadedPdf, type PdfLayer } from './usePdf'
 
 const MM = 72 / 25.4
 const MARGIN = 40 // px em volta da arte: guias e medidas ficam aqui, nunca sobre a arte
@@ -29,14 +33,16 @@ const GUIDES = {
   trim: { label: 'Formato final', color: '#22c55e' },
 } as const
 
-type Mode = 'production' | 'client' | 'side' | 'curtain' | 'diff'
+type Mode = 'production' | 'client' | 'side' | 'curtain' | 'diff' | 'structure' | 'layers3d'
 
-const MODES: { id: Mode; label: string; icon: typeof Eye; compare?: boolean; hint: string }[] = [
+const MODES: { id: Mode; label: string; icon: typeof Eye; compare?: boolean; inspect?: boolean; hint: string }[] = [
   { id: 'production', label: 'Produção', icon: Eye, hint: 'O arquivo que vai para a produção' },
   { id: 'client', label: 'Cliente', icon: FileInput, compare: true, hint: 'O arquivo como o cliente enviou' },
   { id: 'side', label: 'Lado a lado', icon: Columns2, compare: true, hint: 'Cliente e produção na mesma escala' },
   { id: 'curtain', label: 'Cortina', icon: SplitSquareHorizontal, compare: true, hint: 'Arraste a linha: cliente à esquerda, produção à direita' },
   { id: 'diff', label: 'O que mudou', icon: ScanSearch, compare: true, hint: 'Em ciano, tudo o que o sistema mudou no arquivo' },
+  { id: 'structure', label: 'Estrutura', icon: ListTree, inspect: true, hint: 'Os objetos do arquivo: selecionar, medir e ver só um tipo' },
+  { id: 'layers3d', label: 'Camadas 3D', icon: Layers3, inspect: true, hint: 'O arquivo desmontado em placas, por tipo de objeto' },
 ]
 
 type AppliedFix = { id: string; label: string; details: string[] }
@@ -62,6 +68,7 @@ export function ArtStage({
   fileScale = 1,
   changes,
   correcting,
+  inspectionUrl,
 }: {
   production: StageFile | null
   /** Arquivo do cliente em PDF, quando difere do de produção. */
@@ -72,12 +79,15 @@ export function ArtStage({
   fileScale?: number
   changes: AppliedFix[]
   correcting: boolean
+  /** Arquivo de inspeção (placas + mapa de objetos) do arquivo de produção, se houver. */
+  inspectionUrl: string | null
 }) {
   const stageRef = useRef<HTMLDivElement>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
   const prod = usePdf(production && !production.image ? production.url : null)
   const orig = usePdf(client && !client.image ? client.url : null)
   const comparable = !!orig.pdf && !!prod.pdf
+  const insp = useInspection(inspectionUrl)
 
   const [mode, setMode] = useState<Mode>('production')
   const [zoom, setZoom] = useState(1)
@@ -88,18 +98,21 @@ export function ArtStage({
   const [fullscreen, setFullscreen] = useState(false)
 
   useEffect(() => setLayers(prod.pdf?.layers ?? []), [prod.pdf])
-  // Sem arquivo do cliente para comparar, volta para a produção.
+  // Modo que depende de algo que não existe (arquivo do cliente, inspeção): volta à produção.
+  const inspecting = mode === 'structure' || mode === 'layers3d'
   useEffect(() => {
-    if (!comparable && mode !== 'production') setMode('production')
-  }, [comparable, mode])
+    const spec = MODES.find((m) => m.id === mode)
+    if ((spec?.compare && !comparable) || (spec?.inspect && !insp.inspection)) setMode('production')
+  }, [comparable, insp.inspection, mode])
 
+  // A área da arte é recriada ao sair das vistas de inspeção: observa de novo.
   useEffect(() => {
     const element = viewportRef.current
     if (!element) return
     const observer = new ResizeObserver(([entry]) => setArea({ width: entry.contentRect.width, height: entry.contentRect.height }))
     observer.observe(element)
     return () => observer.disconnect()
-  }, [])
+  }, [inspecting])
 
   useEffect(() => {
     const onChange = () => setFullscreen(document.fullscreenElement === stageRef.current)
@@ -114,7 +127,7 @@ export function ArtStage({
 
   // Quadros a desenhar (espaço do PDF) e a escala comum que cabe na área.
   const layout = useMemo(() => {
-    if (!prodPage || !area.width) return null
+    if (!prodPage || !area.width || mode === 'structure' || mode === 'layers3d') return null
     const frames: { key: 'prod' | 'orig'; box: Box }[] = []
     if (mode === 'production' || !origPage) frames.push({ key: 'prod', box: prodPage.view })
     else if (mode === 'client') frames.push({ key: 'orig', box: origPage.view })
@@ -198,7 +211,7 @@ export function ArtStage({
     }
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
-  }, [])
+  }, [inspecting])
 
   const toggleFullscreen = useCallback(() => {
     if (document.fullscreenElement) document.exitFullscreen().catch(() => null)
@@ -217,18 +230,22 @@ export function ArtStage({
       {/* Barra da mesa: modo de ver, página, zoom, guias, camadas. */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border px-3 py-2 text-sm">
         <div className="flex items-center rounded-lg bg-muted p-0.5" role="tablist" aria-label="Como ver o arquivo">
-          {MODES.filter((m) => !m.compare || comparable).map((m) => {
+          {MODES.filter((m) => (!m.compare || comparable) && (!m.inspect || (production && !production.image))).map((m) => {
             const Icon = m.icon
+            // Inspeção ainda não gerada (análise anterior a ela): o botão explica.
+            const unavailable = m.inspect && !insp.inspection
             return (
               <button
                 key={m.id}
                 type="button"
                 role="tab"
                 aria-selected={mode === m.id}
-                title={m.hint}
+                disabled={unavailable}
+                title={unavailable ? 'Reanalise o arquivo para ver a estrutura' : m.hint}
                 onClick={() => setMode(m.id)}
                 className={cn(
-                  'flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
+                  'flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors disabled:opacity-40',
+                  m.inspect && 'border-l border-border/60 first-of-type:border-l-0',
                   mode === m.id ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
                 )}
               >
@@ -238,7 +255,7 @@ export function ArtStage({
             )
           })}
         </div>
-        {!comparable && production && !production.image && (
+        {!comparable && !inspecting && production && !production.image && (
           <span className="text-xs text-muted-foreground">
             {client ? 'Carregando o arquivo do cliente…' : 'Sem correções: este é o arquivo do cliente.'}
           </span>
@@ -259,21 +276,27 @@ export function ArtStage({
               <span className="mx-1 h-4 w-px bg-border" />
             </>
           )}
-          <Button size="icon" variant="ghost" className="h-8 w-8" disabled={zoom <= 0.5} onClick={() => setZoom((z) => Math.max(0.5, z / 1.25))} aria-label="Diminuir zoom">
-            <Minus className="h-4 w-4" />
-          </Button>
-          <button className="w-12 text-center text-xs tabular-nums text-muted-foreground hover:text-foreground" onClick={() => setZoom(1)} title="Ajustar à área">
-            {zoom === 1 ? 'Ajustar' : `${Math.round(zoom * 100)}%`}
-          </button>
-          <Button size="icon" variant="ghost" className="h-8 w-8" disabled={zoom >= 8} onClick={() => setZoom((z) => Math.min(8, z * 1.25))} aria-label="Aumentar zoom">
-            <Plus className="h-4 w-4" />
-          </Button>
-          <span className="mx-1 h-4 w-px bg-border" />
-          <label className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground" title="Só na tela: não vão para o PDF">
-            <input type="checkbox" checked={guides} onChange={(e) => setGuides(e.target.checked)} />
-            Guias
-          </label>
-          {layers.length > 0 && (
+          {mode !== 'layers3d' && (
+            <>
+              <Button size="icon" variant="ghost" className="h-8 w-8" disabled={zoom <= 0.5} onClick={() => setZoom((z) => Math.max(0.5, z / 1.25))} aria-label="Diminuir zoom">
+                <Minus className="h-4 w-4" />
+              </Button>
+              <button className="w-12 text-center text-xs tabular-nums text-muted-foreground hover:text-foreground" onClick={() => setZoom(1)} title="Ajustar à área">
+                {zoom === 1 ? 'Ajustar' : `${Math.round(zoom * 100)}%`}
+              </button>
+              <Button size="icon" variant="ghost" className="h-8 w-8" disabled={zoom >= 8} onClick={() => setZoom((z) => Math.min(8, z * 1.25))} aria-label="Aumentar zoom">
+                <Plus className="h-4 w-4" />
+              </Button>
+              <span className="mx-1 h-4 w-px bg-border" />
+            </>
+          )}
+          {!inspecting && (
+            <label className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground" title="Só na tela: não vão para o PDF">
+              <input type="checkbox" checked={guides} onChange={(e) => setGuides(e.target.checked)} />
+              Guias
+            </label>
+          )}
+          {layers.length > 0 && !inspecting && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button size="sm" variant="ghost" className="h-8 gap-1.5 text-xs">
@@ -301,7 +324,16 @@ export function ArtStage({
         </div>
       </div>
 
-      {/* A arte. */}
+      {/* A arte: estrutura e camadas 3D (inspeção) ou a página, inteira ou comparada. */}
+      {inspecting && insp.inspection && prod.pdf ? (
+        <div className="relative min-h-0 flex-1 bg-[hsl(var(--muted))]">
+          {mode === 'structure' ? (
+            <StructureView production={prod.pdf} inspection={insp.inspection} page={current} fileScale={fileScale} zoom={zoom} />
+          ) : (
+            <Layers3D production={prod.pdf} inspection={insp.inspection} page={current} />
+          )}
+        </div>
+      ) : (
       <div
         ref={viewportRef}
         onPointerDown={onPointerDown}
@@ -388,10 +420,18 @@ export function ArtStage({
           </div>
         )}
       </div>
+      )}
 
       {/* Legenda do que está na tela. */}
       <StageFooter>
-        {mode === 'diff' ? (
+        {inspecting ? (
+          <span>
+            Só inspeção: nada aqui altera o arquivo.{' '}
+            {mode === 'structure'
+              ? 'Clique num objeto, na arte ou na lista, para ver o tamanho real e o que importa nele.'
+              : 'Cada placa é um tipo de objeto; passe o mouse no nome para destacar.'}
+          </span>
+        ) : mode === 'diff' ? (
           <span>
             <span className="mr-1.5 inline-block h-2.5 w-2.5 rounded-sm align-middle" style={{ background: `rgb(${DIFF.join(',')})` }} />
             Em ciano: o que mudou em relação ao arquivo do cliente

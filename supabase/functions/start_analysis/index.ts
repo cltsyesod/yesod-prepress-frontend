@@ -172,6 +172,16 @@ Deno.serve(async (req: Request) => {
       return json(500, { error: 'Falha ao gerar URL assinada do PDF para análise' })
     }
 
+    // Arquivo de inspeção (placas por tipo de objeto + mapa de objetos) do PDF analisado,
+    // só para a tela do trabalho. Uma por arquivo: a próxima análise substitui.
+    let inspectionUploadUrl = ''
+    if (analyzerUrl) {
+      const { data: inspection } = await adminDb.storage
+        .from('pdfs')
+        .createSignedUploadUrl(`${user.id}/inspection/${file.id}.pdf`, { upsert: true })
+      inspectionUploadUrl = inspection?.signedUrl ?? ''
+    }
+
     // 5. Enviar o job assinado ao analisador Python (POST /v1/jobs)
     if (analyzerUrl) {
       const inboundSecret = Deno.env.get('ANALYZER_INBOUND_SECRET')
@@ -232,6 +242,7 @@ Deno.serve(async (req: Request) => {
           expectedMimeType: String(source.mime_type || 'application/pdf').toLowerCase(),
         },
         callbackUrl: `${supabaseUrl}/functions/v1/analysis_callback`,
+        ...(inspectionUploadUrl ? { inspectionUploadUrl } : {}),
         ...(fixes.length
           ? {
               fixes: fixes.map((fix: any) => ({ id: fix.id, params: fix.params ?? {} })),
