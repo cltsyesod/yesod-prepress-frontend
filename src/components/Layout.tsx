@@ -8,9 +8,8 @@ export default function Layout() {
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
   const { pathname } = useLocation()
-  const workspace = pathname.startsWith('/paineis')
-  // A tela do trabalho (pré-visualização + raio-x) aproveita telas largas.
-  const wide = /^\/trabalhos\/[^/]+/.test(pathname)
+  // Áreas de trabalho com a arte em destaque (painéis e a tela do trabalho) usam a tela toda.
+  const workspace = pathname.startsWith('/paineis') || /^\/trabalhos\/[^/]+/.test(pathname)
 
   return (
     <div className="min-h-screen bg-background flex text-foreground font-sans">
@@ -45,7 +44,7 @@ export default function Layout() {
         <main
           className={cn(
             'flex-1 w-full',
-            workspace ? 'min-w-0' : cn('p-4 sm:p-6 mx-auto', wide ? 'max-w-[1600px]' : 'max-w-[1200px]'),
+            workspace ? 'min-w-0' : 'p-4 sm:p-6 mx-auto max-w-[1200px]',
           )}
         >
           <Outlet />

@@ -43,8 +43,11 @@ export function XRayTiles({
   delivery: { changes: number } | null
 }) {
   return (
-    // Numa linha só em telas largas (7 ou 8 cartões, sem buraco no fim da grade).
-    <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4 xl:auto-cols-fr xl:grid-flow-col xl:grid-cols-none">
+    <div className="overflow-hidden rounded-xl border border-border bg-card">
+      <p className="border-b border-border px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+        Raio-x do arquivo
+      </p>
+      <div className="divide-y divide-border">
       {SECTIONS.map((section) => {
         const tone = sectionTone(section.id, profile, issues)
         const summary = tileSummary(section.id, profile)
@@ -77,6 +80,7 @@ export function XRayTiles({
           onClick={() => onSelect(view === 'delivery' ? 'pending' : 'delivery')}
         />
       )}
+      </div>
     </div>
   )
 }
@@ -109,40 +113,37 @@ function Tile({
       onClick={onClick}
       aria-pressed={selected}
       className={cn(
-        'group relative flex min-w-0 flex-col gap-2 rounded-xl border bg-card p-3 text-left transition-all',
-        'hover:-translate-y-0.5 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-        selected ? 'border-primary ring-1 ring-primary' : 'border-border',
+        'flex w-full min-w-0 items-center gap-3 px-4 py-2.5 text-left transition-colors',
+        'hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
+        selected && 'bg-primary/10',
       )}
     >
-      <div className="flex items-center justify-between gap-2">
-        <span
-          className={cn(
-            'flex h-8 w-8 items-center justify-center rounded-lg',
-            neutral ? 'bg-primary/10 text-primary' : cn(style.soft, style.text),
-          )}
-        >
-          <Icon className="h-4 w-4" />
-        </span>
-        {badge > 0 && (
-          <span className={cn('rounded-full px-2 py-0.5 text-[11px] font-semibold text-white', tone === 'blocked' ? 'bg-red-500' : 'bg-amber-500')}>
-            {badge}
-          </span>
+      <span
+        className={cn(
+          'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg',
+          neutral ? 'bg-primary/10 text-primary' : cn(style.soft, style.text),
         )}
-      </div>
-      <div className="min-w-0">
-        <p className="truncate text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{title}</p>
-        <p className="truncate text-base font-semibold tabular-nums text-foreground" title={value}>
+      >
+        <Icon className="h-4 w-4" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[11px] uppercase tracking-wide text-muted-foreground">{title}</span>
+        <span className="block truncate text-sm font-semibold tabular-nums text-foreground" title={`${value} · ${sub}`}>
           {value}
-        </p>
-        <p className="truncate text-xs text-muted-foreground" title={sub}>
-          {sub}
-        </p>
-      </div>
-      {!neutral && (
-        <span className={cn('flex items-center gap-1.5 text-[11px] font-medium', style.text)}>
-          <span className={cn('h-1.5 w-1.5 rounded-full', style.dot)} />
-          {TONE_LABEL[tone]}
+          <span className="font-normal text-muted-foreground"> · {sub}</span>
         </span>
+      </span>
+      {badge > 0 ? (
+        <span className={cn('shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold text-white', tone === 'blocked' ? 'bg-red-500' : 'bg-amber-500')}>
+          {badge}
+        </span>
+      ) : (
+        !neutral && (
+          <span className={cn('flex shrink-0 items-center gap-1.5 text-[11px] font-medium', style.text)}>
+            <span className={cn('h-1.5 w-1.5 rounded-full', style.dot)} />
+            {TONE_LABEL[tone]}
+          </span>
+        )
       )}
     </button>
   )

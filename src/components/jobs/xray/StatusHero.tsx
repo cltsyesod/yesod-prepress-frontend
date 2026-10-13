@@ -62,18 +62,18 @@ export function StatusHero({
 
   return (
     <section className="overflow-hidden rounded-xl border border-border bg-card">
-      <div className="flex flex-col gap-5 p-5 lg:flex-row lg:items-center">
-        <div className="flex min-w-0 flex-1 items-start gap-4">
-          <div className={cn('flex h-12 w-12 shrink-0 items-center justify-center rounded-full', style.soft)}>
-            <Icon className={cn('h-6 w-6', style.text)} />
+      <div className="space-y-4 p-4">
+        <div className="flex min-w-0 items-start gap-3">
+          <div className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-full', style.soft)}>
+            <Icon className={cn('h-5 w-5', style.text)} />
           </div>
           <div className="min-w-0 flex-1 space-y-2.5">
             <div>
-              <h2 className="text-xl font-semibold tracking-tight text-foreground">{head.title}</h2>
+              <h2 className="text-lg font-semibold tracking-tight text-foreground">{head.title}</h2>
               <p className="text-sm text-muted-foreground">{head.text}</p>
             </div>
             {actionable.length > 0 && (
-              <div className="max-w-xl space-y-1.5">
+              <div className="space-y-1.5">
                 <div className="flex h-2 gap-1" aria-hidden>
                   {slices.map((issue) => (
                     <span
@@ -97,7 +97,7 @@ export function StatusHero({
         </div>
 
         {/* Próximo passo: o que mais adianta o trabalho agora. */}
-        <div className="flex shrink-0 flex-col gap-2 sm:flex-row lg:flex-col xl:flex-row">
+        <div className="flex flex-col gap-2 [&>*]:w-full">
           {autoFixes > 0 && (
             <Button onClick={onFixAll} disabled={fixing || correcting} className="justify-start">
               {fixing || correcting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
@@ -128,7 +128,7 @@ export function StatusHero({
 
       {/* Caminho do arquivo, numa linha. */}
       {client && (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border bg-muted/40 px-5 py-2.5 text-[13px]">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-border bg-muted/40 px-4 py-2.5 text-xs">
           <span className="text-muted-foreground">Cliente enviou</span>
           <span className="font-medium text-foreground">{client.original_name}</span>
           <span className="text-muted-foreground">{fileSize(client.size_bytes)}</span>

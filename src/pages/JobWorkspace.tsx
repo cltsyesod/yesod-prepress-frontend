@@ -28,7 +28,7 @@ import { BleedDialog, type BleedOptions } from '@/components/jobs/BleedDialog'
 import { ContourCutDialog, type ContourCutOptions } from '@/components/jobs/ContourCutDialog'
 import { CropMarksDialog } from '@/components/jobs/CropMarksDialog'
 import { JobMetricsLine } from '@/components/jobs/JobMetricsLine'
-import { PdfPreview } from '@/components/jobs/PdfPreview'
+import { ArtStage } from '@/components/jobs/stage/ArtStage'
 import { compareRows } from '@/components/jobs/xray/CompareTable'
 import { SectionDetail } from '@/components/jobs/xray/SectionDetail'
 import { StatusHero } from '@/components/jobs/xray/StatusHero'
@@ -69,6 +69,7 @@ export default function JobWorkspacePage() {
   const [job, setJob] = useState<Job | null>(null)
   const [file, setFile] = useState<ProjectFile | null>(null)
   const [pdfUrl, setPdfUrl] = useState('')
+  const [clientUrl, setClientUrl] = useState('')
   const [page, setPage] = useState(1)
   const [loadError, setLoadError] = useState('')
   const [editingTicket, setEditingTicket] = useState(false)
@@ -106,6 +107,12 @@ export default function JobWorkspacePage() {
           : null
       setClientProfile(hasProfile(profile) ? profile : null)
       setPdfUrl(primary ? await projectFilesService.getFileUrl(primary) : '')
+      // Arquivo do cliente em PDF, para comparar na mesa (imagem convertida não compara).
+      setClientUrl(
+        client && primary && client.id !== primary.id && !isImageFile(client)
+          ? await projectFilesService.getFileUrl(client).catch(() => '')
+          : '',
+      )
     } catch (err) {
       setLoadError(getErrorMessage(err))
     }
@@ -354,12 +361,12 @@ export default function JobWorkspacePage() {
   const profileName = profiles.find((p) => p.id === job.profileId)?.name
 
   return (
-    <div className="space-y-5">
+    <div className="flex flex-col gap-3 p-3 sm:p-4 lg:h-[calc(100vh-56px)]">
       {/* ---- Cabeçalho: quem, o quê e as ações do trabalho ---- */}
-      <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-        <div className="min-w-0 space-y-1">
+      <header className="flex shrink-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="min-w-0">
           <BackLink />
-          <h1 className="truncate text-2xl font-semibold tracking-tight text-foreground">{job.name}</h1>
+          <h1 className="truncate text-xl font-semibold tracking-tight text-foreground">{job.name}</h1>
           <p className="flex flex-wrap items-center gap-x-2 text-sm text-muted-foreground">
             {[job.clientName, profileName].filter(Boolean).map((part, i) => (
               <span key={i} className="flex items-center gap-2">
@@ -470,142 +477,162 @@ export default function JobWorkspacePage() {
         }}
       />
 
-      {editingTicket && (
-        <section className="space-y-4 rounded-xl border border-border bg-card p-5">
-          <JobTicketFields
-            ticket={ticket}
-            onChange={setTicket}
-            profiles={profiles}
-            profileId={profileId}
-            onProfileChange={setProfileId}
-          />
-          <div className="flex gap-2">
-            <Button onClick={reanalyze} disabled={running}>
-              Salvar e reanalisar
-            </Button>
-            <Button variant="ghost" onClick={() => setEditingTicket(false)}>
-              Cancelar
-            </Button>
-          </div>
-        </section>
-      )}
-
-      {/* ---- Andamento, erro ou falha ---- */}
-      {running && analysis.job && (
-        <section className="space-y-3 rounded-xl border border-border bg-card p-5">
-          <div className="flex items-center justify-between gap-3">
-            <span className="flex items-center gap-3 text-foreground">
-              <Loader2 className="h-5 w-5 animate-spin text-primary" />
-              <span>
-                <span className="block font-medium">{analysis.job.current_step || 'Na fila do analisador'}</span>
-                <span className="text-xs text-muted-foreground">O raio-x aparece assim que a análise terminar.</span>
-              </span>
-            </span>
-            <span className="flex items-center gap-3 text-sm text-muted-foreground">
-              {analysis.job.progress}%
-              <Button size="sm" variant="ghost" onClick={analysis.cancelAnalysis}>
-                Cancelar
-              </Button>
-            </span>
-          </div>
-          <Progress value={analysis.job.progress} className="h-1.5" />
-        </section>
-      )}
-
-      {analysis.error && (
-        <p className="rounded-xl border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">{analysis.error}</p>
-      )}
-
-      {analysis.job?.status === 'failed' && (
-        <section className="flex flex-col gap-3 rounded-xl border border-destructive/40 bg-destructive/5 p-5 sm:flex-row sm:items-center sm:justify-between">
-          <div className="text-sm">
-            <p className="font-medium text-destructive">A análise falhou</p>
-            <p className="text-muted-foreground">{analysis.job.error_message || 'Sem detalhes.'}</p>
-          </div>
-          <Button variant="outline" onClick={analysis.retryAnalysis}>
-            Tentar de novo
-          </Button>
-        </section>
-      )}
-
-      {/* ---- Situação + raio-x ---- */}
-      {done && (
-        <StatusHero
-          issues={analysis.issues}
-          autoFixes={pendingPdfFixes.length}
-          fixing={fixing}
-          correcting={!!correction}
-          original={original}
-          delivered={file}
-          fixes={appliedFixes}
-          downloadUrl={pdfUrl}
-          onFixAll={guardScale(() => requestFixes(pendingPdfFixes))}
-          onMessage={copyMessage}
-          onShowPending={() => {
-            setView('pending')
-            document.getElementById('detail')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-          }}
-        />
-      )}
-
-      {done && deliveredProfile && (
-        <XRayTiles
-          profile={deliveredProfile}
-          issues={analysis.issues}
-          view={view}
-          onSelect={setView}
-          delivery={file?.derived_from ? { changes } : null}
-        />
-      )}
-
-      {done && !deliveredProfile && (
-        <p className="rounded-xl border border-dashed border-border px-4 py-3 text-sm text-muted-foreground">
-          Esta análise é anterior ao raio-x. Clique em <b className="text-foreground">Reanalisar</b> para ver as características do
-          arquivo (formato, sangria, imagens, cores, fontes e faca) em cartões.
-        </p>
-      )}
-
-      {/* ---- Arte e detalhe lado a lado ---- */}
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,5fr)_minmax(0,6fr)]">
-        <div className="h-[62vh] overflow-hidden rounded-xl border border-border bg-muted xl:sticky xl:top-[72px] xl:h-[calc(100vh-110px)]">
-          {pdfUrl && isImageFile(file) ? (
-            // Imagem do cliente ainda não convertida: mostra a própria imagem.
-            <img src={pdfUrl} alt={file?.original_name ?? ''} className="h-full w-full object-contain" />
-          ) : pdfUrl ? (
-            <PdfPreview url={pdfUrl} page={page} onPageChange={setPage} />
+      {/* ---- A mesa: a arte em destaque, e a coluna de análise e decisões ao lado ---- */}
+      <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[minmax(0,1fr)_400px] 2xl:grid-cols-[minmax(0,1fr)_460px]">
+        <div className="h-[70vh] min-h-0 lg:h-auto">
+          {file ? (
+            <ArtStage
+              production={pdfUrl ? { url: pdfUrl, name: file.original_name, image: isImageFile(file) } : null}
+              client={clientUrl && original ? { url: clientUrl, name: original.original_name } : null}
+              page={page}
+              onPageChange={setPage}
+              fileScale={scaleOf(job.ticket.fileScale)}
+              changes={appliedFixes}
+              correcting={!!correction}
+            />
           ) : (
-            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-              {file ? 'Carregando o arquivo…' : 'Este trabalho não tem arquivo.'}
+            <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-border text-sm text-muted-foreground">
+              Este trabalho não tem arquivo.
             </div>
           )}
         </div>
 
-        <div id="detail" className="min-w-0 scroll-mt-20 space-y-3">
+        <aside id="detail" className="min-h-0 space-y-3 lg:overflow-y-auto lg:pr-1">
+          {editingTicket && (
+            <section className="space-y-4 rounded-xl border border-primary/40 bg-card p-4">
+              <JobTicketFields
+                ticket={ticket}
+                onChange={setTicket}
+                profiles={profiles}
+                profileId={profileId}
+                onProfileChange={setProfileId}
+              />
+              <div className="flex gap-2">
+                <Button onClick={reanalyze} disabled={running}>
+                  Salvar e reanalisar
+                </Button>
+                <Button variant="ghost" onClick={() => setEditingTicket(false)}>
+                  Cancelar
+                </Button>
+              </div>
+            </section>
+          )}
+
+          {running && analysis.job && (
+            <section className="space-y-3 rounded-xl border border-border bg-card p-4">
+              <div className="flex items-center justify-between gap-3">
+                <span className="flex items-center gap-3 text-foreground">
+                  <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                  <span>
+                    <span className="block text-sm font-medium">{analysis.job.current_step || 'Na fila do analisador'}</span>
+                    <span className="text-xs text-muted-foreground">O raio-x aparece assim que a análise terminar.</span>
+                  </span>
+                </span>
+                <span className="flex items-center gap-2 text-sm text-muted-foreground">
+                  {analysis.job.progress}%
+                  <Button size="sm" variant="ghost" onClick={analysis.cancelAnalysis}>
+                    Cancelar
+                  </Button>
+                </span>
+              </div>
+              <Progress value={analysis.job.progress} className="h-1.5" />
+            </section>
+          )}
+
+          {analysis.error && (
+            <p className="rounded-xl border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">{analysis.error}</p>
+          )}
+
+          {analysis.job?.status === 'failed' && (
+            <section className="space-y-3 rounded-xl border border-destructive/40 bg-destructive/5 p-4">
+              <div className="text-sm">
+                <p className="font-medium text-destructive">A análise falhou</p>
+                <p className="text-muted-foreground">{analysis.job.error_message || 'Sem detalhes.'}</p>
+              </div>
+              <Button variant="outline" onClick={analysis.retryAnalysis}>
+                Tentar de novo
+              </Button>
+            </section>
+          )}
+
           {analysis.loading ? (
             <Loader2 className="mx-auto h-6 w-6 animate-spin text-muted-foreground" />
           ) : !analysis.job ? (
             <p className="rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
               Ainda não há análise. Clique em Analisar.
             </p>
-          ) : done ? (
-            <SectionDetail
-              view={view}
+          ) : null}
+
+          {done && (
+            <StatusHero
+              issues={analysis.issues}
+              autoFixes={pendingPdfFixes.length}
+              fixing={fixing}
+              correcting={!!correction}
+              original={original}
+              delivered={file}
+              fixes={appliedFixes}
+              downloadUrl={pdfUrl}
+              onFixAll={guardScale(() => requestFixes(pendingPdfFixes))}
+              onMessage={copyMessage}
+              onShowPending={() => {
+                setView('pending')
+                document.getElementById('issues')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+              }}
+            />
+          )}
+
+          {done && deliveredProfile && (
+            <XRayTiles
               profile={deliveredProfile}
               issues={analysis.issues}
-              clientProfile={clientProfile}
-              fixes={appliedFixes}
-              onClose={() => setView('pending')}
-              onDecide={decide}
-              onShowPage={setPage}
-              onFix={fixIssue}
-              fixing={fixing}
+              view={view}
+              onSelect={(next) => {
+                setView(next)
+                requestAnimationFrame(() =>
+                  document.getElementById('issues')?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+                )
+              }}
+              delivery={file?.derived_from ? { changes } : null}
             />
-          ) : null}
+          )}
+
+          {done && !deliveredProfile && (
+            <p className="rounded-xl border border-dashed border-border px-4 py-3 text-sm text-muted-foreground">
+              Esta análise é anterior ao raio-x. Clique em <b className="text-foreground">Reanalisar</b> para ver as
+              características do arquivo.
+            </p>
+          )}
+
+          {done && (
+            <div id="issues" className="scroll-mt-2">
+              <SectionDetail
+                view={view}
+                profile={deliveredProfile}
+                issues={analysis.issues}
+                clientProfile={clientProfile}
+                fixes={appliedFixes}
+                onClose={() => setView('pending')}
+                onDecide={decide}
+                onShowPage={setPage}
+                onFix={fixIssue}
+                fixing={fixing}
+              />
+            </div>
+          )}
           {done && analysis.job?.metrics && <JobMetricsLine metrics={analysis.job.metrics} />}
-        </div>
+        </aside>
       </div>
     </div>
   )
+}
+
+/** Escala da ficha ("1:10") como fator para o tamanho final (10). */
+function scaleOf(value?: string): number {
+  const match = String(value ?? '').match(/(\d+(?:[.,]\d+)?)\s*:\s*(\d+(?:[.,]\d+)?)/)
+  if (!match) return 1
+  const factor = Number(match[2].replace(',', '.')) / Number(match[1].replace(',', '.'))
+  return Number.isFinite(factor) && factor > 0 ? factor : 1
 }
 
 /** Quantas características mudaram entre o arquivo do cliente e o de produção. */
