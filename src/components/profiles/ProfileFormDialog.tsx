@@ -115,7 +115,7 @@ export function ProfileFormDialog({ open, onOpenChange, initialData, onSave }: P
     onOpenChange(false)
   }
 
-  const lbl = 'text-xs font-medium text-slate-700'
+  const lbl = 'text-xs font-medium text-foreground'
   const fieldCls = 'mt-1 h-8 text-sm'
 
   return (
@@ -392,9 +392,9 @@ export function ProfileFormDialog({ open, onOpenChange, initialData, onSave }: P
               {form.rules.map((rule, i) => (
                 <div
                   key={rule.key}
-                  className="flex items-center justify-between py-1.5 border-b border-slate-100 last:border-0"
+                  className="flex items-center justify-between py-1.5 border-b border-border last:border-0"
                 >
-                  <span className="text-xs text-slate-700">{rule.label}</span>
+                  <span className="text-xs text-foreground">{rule.label}</span>
                   <div className="flex items-center gap-2">
                     <Switch
                       checked={rule.enabled}

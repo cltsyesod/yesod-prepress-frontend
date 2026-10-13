@@ -27,10 +27,10 @@ export function ProfileTable({
   onDelete,
 }: ProfileTableProps) {
   return (
-    <div className="bg-white border border-slate-200 rounded-lg overflow-hidden overflow-x-auto">
+    <div className="bg-card border border-border rounded-lg overflow-hidden overflow-x-auto">
       <table className="w-full text-xs min-w-[700px]">
         <thead>
-          <tr className="bg-slate-50 border-b border-slate-200 text-slate-500">
+          <tr className="bg-muted border-b border-border text-muted-foreground">
             <th className="text-left font-medium px-4 py-2.5">Nome</th>
             <th className="text-left font-medium px-3 py-2.5">Descrição</th>
             <th className="text-left font-medium px-3 py-2.5">Categoria</th>
@@ -41,19 +41,19 @@ export function ProfileTable({
         </thead>
         <tbody>
           {profiles.map((p) => (
-            <tr key={p.id} className="border-b border-slate-100 hover:bg-slate-50/50">
+            <tr key={p.id} className="border-b border-border hover:bg-muted/50">
               <td className="px-4 py-2.5">
-                <span className="font-medium text-slate-800">{p.name}</span>
+                <span className="font-medium text-foreground">{p.name}</span>
                 {p.isDefault && (
                   <Badge variant="secondary" className="ml-2 text-[10px] h-4 px-1">
                     Padrão
                   </Badge>
                 )}
               </td>
-              <td className="px-3 py-2.5 text-slate-500 max-w-[200px] truncate">
+              <td className="px-3 py-2.5 text-muted-foreground max-w-[200px] truncate">
                 {p.description || '—'}
               </td>
-              <td className="px-3 py-2.5 text-slate-600">{p.category}</td>
+              <td className="px-3 py-2.5 text-muted-foreground">{p.category}</td>
               <td className="px-3 py-2.5">
                 <Badge
                   variant="outline"
@@ -61,19 +61,19 @@ export function ProfileTable({
                     'text-[10px] h-5',
                     p.status === 'active'
                       ? 'border-green-200 bg-green-50 text-green-700'
-                      : 'border-slate-200 bg-slate-100 text-slate-500',
+                      : 'border-border bg-muted text-muted-foreground',
                   )}
                 >
                   {p.status === 'active' ? 'Ativo' : 'Inativo'}
                 </Badge>
               </td>
-              <td className="px-3 py-2.5 text-center text-slate-600 font-medium">
+              <td className="px-3 py-2.5 text-center text-muted-foreground font-medium">
                 {p.rules.filter((r) => r.enabled).length}/{p.rules.length}
               </td>
               <td className="px-3 py-2.5">
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-400">
+                    <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground">
                       <MoreHorizontal className="h-4 w-4" />
                     </Button>
                   </DropdownMenuTrigger>

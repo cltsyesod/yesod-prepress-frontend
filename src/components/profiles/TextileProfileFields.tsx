@@ -24,7 +24,7 @@ export function TextileProfileFields({
   onChange: (value: TextileSettings) => void
 }) {
   const set = (patch: Partial<TextileSettings>) => onChange({ ...value, ...patch })
-  const lbl = 'text-xs font-medium text-slate-700'
+  const lbl = 'text-xs font-medium text-foreground'
   const field = 'mt-1 h-8 text-sm'
   const dtf = technology === 'dtf'
 
@@ -42,7 +42,7 @@ export function TextileProfileFields({
           set({ [key]: e.target.value === '' ? undefined : Number(e.target.value) })
         }
       />
-      {hint && <p className="mt-0.5 text-[10px] text-slate-500">{hint}</p>}
+      {hint && <p className="mt-0.5 text-[10px] text-muted-foreground">{hint}</p>}
     </div>
   )
   const text = (key: keyof TextileSettings, label: string, placeholder = '') => (
@@ -59,7 +59,7 @@ export function TextileProfileFields({
 
   return (
     <div className="space-y-3">
-      <p className="text-[11px] text-slate-500">
+      <p className="text-[11px] text-muted-foreground">
         Preencha com os dados do seu equipamento e do fabricante. Campo vazio não é suposto:
         a verificação correspondente não roda e o relatório pede a confirmação.
       </p>

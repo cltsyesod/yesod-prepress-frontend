@@ -49,18 +49,18 @@ export function DeleteProfileDialog({ profile, open, onOpenChange, onConfirm }: 
         </DialogHeader>
         {loading ? (
           <div className="flex justify-center py-4">
-            <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
         ) : isBlocked ? (
           <div className="flex items-start gap-2">
             <AlertTriangle className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" />
-            <p className="text-sm text-slate-600">
+            <p className="text-sm text-muted-foreground">
               Este perfil está em uso por {projectCount}{' '}
               {projectCount === 1 ? 'projeto' : 'projetos'}. Desative-o antes de excluir.
             </p>
           </div>
         ) : (
-          <p className="text-sm text-slate-600">
+          <p className="text-sm text-muted-foreground">
             Tem certeza que deseja excluir o perfil "{profile?.name}"? Esta ação não pode ser
             desfeita.
           </p>
