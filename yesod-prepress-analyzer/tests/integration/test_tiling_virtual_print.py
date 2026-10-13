@@ -25,7 +25,7 @@ def art_pdf(path: Path) -> Path:
     """3000 x 1500 mm at 1:10 with 5 mm of bleed: a grid of random colour blocks, so every
     region of the art is unique and any shift or wrong scale shows up."""
 
-    rng = random.Random(7)
+    rng = random.Random(7)  # noqa: S311 - test colours, not security
     pdf = pikepdf.Pdf.new()
     bleed = BLEED / SCALE * MM
     w, h = 300 * MM, 150 * MM
