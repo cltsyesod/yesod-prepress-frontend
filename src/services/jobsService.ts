@@ -20,6 +20,8 @@ export interface JobTicket {
   cutLayerRequired?: boolean
   /** DTF/DTG: sobrepõe o perfil têxtil neste trabalho (ex.: área do gabarito escolhido). */
   textile?: Partial<TextileSettings>
+  /** DTF: cópias desta estampa na folha. */
+  dtf?: { copies?: number }
   /** DTG: gabarito, posição e peça. */
   dtg?: DtgPlacement
   notes?: string

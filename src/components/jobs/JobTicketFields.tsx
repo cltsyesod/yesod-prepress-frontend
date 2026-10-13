@@ -59,7 +59,7 @@ export function JobTicketFields({
       </div>
 
       <div className="space-y-1.5 sm:col-span-2">
-        <Label>Medida final (L × A, mm)</Label>
+        <Label>{textile ? 'Tamanho da estampa (L × A, mm)' : 'Medida final (L × A, mm)'}</Label>
         <div className="flex items-center gap-2">
           <Input
             inputMode="decimal"
@@ -95,6 +95,18 @@ export function JobTicketFields({
           onChange={(e) => set({ minResolution: numberOrUndefined(e.target.value) })}
         />
       </div>
+
+      {textile && profile?.technology === 'dtf' && (
+        <div className="space-y-1.5">
+          <Label>Cópias na folha DTF</Label>
+          <Input
+            inputMode="numeric"
+            placeholder="1"
+            value={ticket.dtf?.copies ?? ''}
+            onChange={(e) => set({ dtf: { copies: numberOrUndefined(e.target.value) } })}
+          />
+        </div>
+      )}
 
       {!textile && (
         <>

@@ -14,6 +14,7 @@ import JobWorkspacePage from '@/pages/JobWorkspace'
 import NestingPage from '@/pages/Nesting'
 import TilingPage from '@/pages/Tiling'
 import TextileModulePage from '@/pages/TextileModule'
+import TextileJobsPage from '@/pages/TextileJobs'
 import ProductionProfilesPage from '@/pages/ProductionProfiles'
 import SettingsPage from '@/pages/Settings'
 import NotFoundPage from '@/pages/NotFound'
@@ -41,7 +42,7 @@ const App = () => (
                 <Route path="/trabalhos/:id" element={<JobWorkspacePage />} />
                 <Route path="/montagem" element={<NestingPage />} />
                 <Route path="/textil" element={<TextileModulePage />}>
-                  <Route index element={<QueuePage scope="textile" />} />
+                  <Route index element={<TextileJobsPage />} />
                   <Route path="folha" element={<NestingPage scope="textile" />} />
                   <Route path="perfis" element={<ProductionProfilesPage scope="textile" />} />
                 </Route>

@@ -392,7 +392,7 @@ export default function NestingPage({ scope = 'print' }: { scope?: Scope }) {
                       onCheckedChange={(checked) =>
                         setSelected((s) => {
                           const next = { ...s }
-                          if (checked) next[job.id] = s[job.id] ?? (fillOn ? 0 : 1)
+                          if (checked) next[job.id] = s[job.id] ?? (fillOn ? 0 : (job.ticket.dtf?.copies ?? 1))
                           else delete next[job.id]
                           return next
                         })
