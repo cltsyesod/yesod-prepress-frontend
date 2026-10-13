@@ -52,7 +52,7 @@ Deno.serve(async (req: Request) => {
     if (!analyzerUrl || !inboundSecret) return fail('Analisador não configurado')
 
     // Preenchimento automático: o analisador calcula as quantidades que cabem.
-    const autoFill = run.params?.fill?.enabled === true
+    const autoFill = run.params?.fill?.enabled === true && !Array.isArray(run.params?.manual)
     // Cada trabalho: URL assinada do arquivo principal + parâmetros vindos da ficha.
     const items = []
     for (const item of Array.isArray(run.items) ? run.items : []) {
@@ -107,6 +107,8 @@ Deno.serve(async (req: Request) => {
       cutLines: params.cutLines ?? {},
       marks: params.marks ?? {},
       mirror: params.mirror === true,
+      // Folha editada à mão: o analisador confere e monta nessas posições.
+      ...(Array.isArray(params.manual) && params.manual.length ? { manual: params.manual } : {}),
       items,
       ...(autoFill
         ? {

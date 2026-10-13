@@ -28,6 +28,10 @@ export interface NestingParams {
   marks?: NestingMarks
   /** Espelha a folha inteira (DTF no verso do filme), só quando o fluxo pede. */
   mirror?: boolean
+  /** Folha editada à mão: posições que o analisador confere e monta. */
+  manual?: ManualPlacement[]
+  /** Perfil DTF usado (consumo e custo do filme no resultado). */
+  dtfProfileId?: string
   /** Retalho do estoque usado como material (baixado quando a montagem é criada). */
   offcutId?: string
   /**
@@ -83,7 +87,20 @@ export interface NestingSheet {
   offcutMm?: [number, number]
 }
 
+/** Posição de uma peça: canto inferior esquerdo da peça girada, em mm. */
+export interface ManualPlacement {
+  key: string
+  copy: number
+  sheet: number
+  rotation: number
+  xMm: number
+  yMm: number
+}
+
 export interface NestingResult {
+  /** Contorno de cada peça sem giro (mm) e as posições, para editar à mão. */
+  shapes?: Record<string, [number, number][]>
+  placements?: (ManualPlacement & { wMm: number; hMm: number })[]
   widthMm?: number
   sheets?: NestingSheet[]
   totalLengthMm?: number

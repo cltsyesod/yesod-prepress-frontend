@@ -210,3 +210,70 @@ def white_plate_png(page: pikepdf.Page) -> tuple[bytes, list[float]] | None:
     rgba.save(buffer, "PNG", optimize=True)
     box = page.obj.get("/CropBox") or page.obj.get("/MediaBox")
     return buffer.getvalue(), [float(v) for v in box]
+
+
+_STROKES = {"S", "s"}
+
+
+def _is_cut_name(name: str, cut_names: list[str]) -> bool:
+    key = name.lstrip("/").lower()
+    return any(key == n.lower() for n in cut_names) or any(
+        word in key for word in ("cutcontour", "corte", "faca", "kiss")
+    )
+
+
+def _separation_name(spaces, operand) -> str | None:
+    space = spaces.get(operand) if isinstance(operand, pikepdf.Name) else None
+    if isinstance(space, pikepdf.Array) and len(space) >= 2 and space[0] == "/Separation":
+        return str(space[1])
+    return None
+
+
+def _layer_name(props, operand) -> str:
+    layer = props.get(operand) if isinstance(operand, pikepdf.Name) else None
+    return str(layer.get("/Name", "")) if isinstance(layer, pikepdf.Dictionary) else ""
+
+
+def without_cut_lines(source: Path, destination: Path, cut_names: list[str]) -> int:
+    """Cópia (só para medir o branco) sem os traços da faca: contornos na cor especial de
+    corte ou dentro de uma camada de corte. A faca não é estampa e não recebe branco.
+    Devolve quantos traços foram tirados."""
+
+    removed = 0
+    with pikepdf.open(source) as pdf:
+        for page in pdf.pages:
+            resources = page.obj.get("/Resources") or pikepdf.Dictionary()
+            spaces = resources.get("/ColorSpace") or {}
+            props = resources.get("/Properties") or {}
+
+            try:
+                instructions = list(pikepdf.parse_content_stream(page))
+            except Exception:  # noqa: BLE001, S112 - conteúdo ilegível: mede como está
+                continue
+            out, stack, stroke_cut, in_layer = [], [], [False], False
+            for item in instructions:
+                if isinstance(item, pikepdf.ContentStreamInlineImage):
+                    out.append(item)
+                    continue
+                op = str(item.operator)
+                if op == "q":
+                    stack.append(stroke_cut[-1])
+                elif op == "Q" and stack:
+                    stroke_cut.append(stack.pop())
+                elif op == "CS" and item.operands:
+                    name = _separation_name(spaces, item.operands[0])
+                    stroke_cut.append(bool(name) and _is_cut_name(name, cut_names))
+                elif op == "BDC" and len(item.operands) >= 2 and item.operands[0] == "/OC":
+                    name = _layer_name(props, item.operands[1])
+                    in_layer = _is_cut_name(name, cut_names) if name else in_layer
+                elif op == "EMC":
+                    in_layer = False
+                if op in _STROKES and (stroke_cut[-1] or in_layer):
+                    out.append(pikepdf.ContentStreamInstruction([], pikepdf.Operator("n")))
+                    removed += 1
+                    continue
+                out.append(item)
+            if removed:
+                page.obj.Contents = pdf.make_stream(pikepdf.unparse_content_stream(out))
+        pdf.save(destination)
+    return removed

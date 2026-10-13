@@ -17,6 +17,7 @@ from app.nesting.engine import (
 )
 from app.nesting.fill import FillGroup, fill
 from app.nesting.imposition import CutLines, SourcePiece, build_layout
+from app.nesting.manual import ManualPlacement, export_layout, manual_result
 from app.nesting.marks import Marks
 from app.nesting.shapes import contour_pieces, page_pieces, scaled
 
@@ -60,6 +61,8 @@ class PlanOptions:
     marks: Marks = field(default_factory=Marks)
     mirror: bool = False
     max_roll_length_mm: float = 5000.0
+    manual: list[ManualPlacement] | None = None
+    """Folha editada à mão: estas posições, conferidas, no lugar do encaixe automático."""
 
 
 def _rotations_for(piece_is_rectangle: bool, steps: tuple[float, ...]) -> tuple[float, ...]:
@@ -152,7 +155,11 @@ def plan(
                     )
 
         filled = None
-        if auto_fill is not None:
+        outlines = {n.key: n.outline for n in nest_items}
+        if options.manual is not None:
+            labels = {key: source.label for key, source in sources.items()}
+            result = manual_result(options.manual, outlines, labels, material)
+        elif auto_fill is not None:
             if auto_fill.roll_length_mm:
                 # The chosen length of the roll is treated as one sheet of that length.
                 material = replace(material, length=auto_fill.roll_length_mm * MM)
@@ -178,6 +185,7 @@ def plan(
         layout.save(output)
         summary = summarize(result, material, sources)
         summary["fill"] = spare_room(result, material, nest_items, items)
+        summary.update(export_layout(result, outlines))
         if filled is not None:
             summary["autoFill"] = {
                 "quantities": [

@@ -14,6 +14,7 @@ from app.rules.textile_rules import TextileWhiteBaseRule
 from tests.integration.test_textile import context, pdf, rect
 
 PX_PER_MM = 10  # 254 ppi
+MM_PT = 72 / 25.4
 
 
 def profile(**textile) -> ProductionProfile:
@@ -134,3 +135,29 @@ def test_art_stays_visible_and_inspection_carries_the_plate(tmp_path):
     cols = np.flatnonzero(alpha.any(axis=0))
     scale = alpha.shape[1] / 100  # página de 100 mm
     assert abs((cols[-1] - cols[0] + 1) / scale - 48) <= 1 / scale + 0.11
+
+
+def test_die_line_in_the_art_gets_no_white(tmp_path):
+    # Arte 50 × 30 mm e uma faca CutContour 70 × 50 mm em volta (traço de 0,5 pt).
+    doc = pikepdf.Pdf.new()
+    doc.add_blank_page(page_size=(100 * MM_PT, 100 * MM_PT))
+    page = doc.pages[0]
+    tint = pikepdf.Dictionary(FunctionType=2, Domain=[0, 1], C0=[0, 0, 0, 0], C1=[0, 1, 0, 0], N=1)
+    page.obj.Resources = pikepdf.Dictionary(
+        ColorSpace=pikepdf.Dictionary(
+            CS0=pikepdf.Array(
+                [pikepdf.Name.Separation, pikepdf.Name("/CutContour"), pikepdf.Name.DeviceCMYK,
+                 tint]
+            )
+        )
+    )
+    x, w, h = 15 * MM_PT, 70 * MM_PT, 50 * MM_PT
+    die = f"q /CS0 CS 1 SCN 0.5 w {x:.3f} {x:.3f} {w:.3f} {h:.3f} re S Q\n"
+    page.contents_add((rect(25, 25, 50, 30) + die).encode())
+    src = tmp_path / "faca.pdf"
+    doc.save(src)
+    out = tmp_path / "o.pdf"
+    applied = apply_fixes(src, out, [FixRequest(id="add_white_underbase")], profile())
+    w, h = span_mm(white_of(out)[0])
+    assert abs(w - 50) <= 1 / PX_PER_MM + 1e-6 and abs(h - 30) <= 1 / PX_PER_MM + 1e-6, (w, h)
+    assert "faca" in applied[0].details[0]

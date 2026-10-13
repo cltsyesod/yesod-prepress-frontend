@@ -8,6 +8,7 @@ from app.contracts.nesting import NestingCallback, NestingRequest
 from app.core.config import Settings
 from app.core.exceptions import AnalyzerError
 from app.nesting.imposition import CutLines
+from app.nesting.manual import ManualPlacement
 from app.nesting.marks import Marks
 from app.nesting.planner import PlanFill, PlanItem, PlanOptions, plan
 from app.services.callback_client import CallbackClient
@@ -105,6 +106,21 @@ class NestingService:
                         draw=request.cut_lines.draw,
                     ),
                     mirror=request.mirror,
+                    manual=(
+                        [
+                            ManualPlacement(
+                                key=m.key,
+                                copy=m.copy,
+                                sheet=m.sheet,
+                                rotation=m.rotation,
+                                x_mm=m.x_mm,
+                                y_mm=m.y_mm,
+                            )
+                            for m in request.manual
+                        ]
+                        if request.manual is not None
+                        else None
+                    ),
                     marks=Marks(
                         registration=request.marks.registration,
                         shape=request.marks.shape,

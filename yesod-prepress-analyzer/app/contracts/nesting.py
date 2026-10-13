@@ -140,6 +140,19 @@ class NestingFill(BaseModel):
     )
 
 
+class NestingManualPlacement(BaseModel):
+    """Posição de uma peça definida à mão (canto inferior esquerdo da peça girada, mm)."""
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    key: str = Field(min_length=1)
+    copy: int = Field(default=0, ge=0)
+    sheet: int = Field(default=1, ge=1, le=500)
+    rotation: float = Field(default=0.0, ge=-360, le=360)
+    x_mm: float = Field(validation_alias=AliasChoices("xMm", "x_mm"))
+    y_mm: float = Field(validation_alias=AliasChoices("yMm", "y_mm"))
+
+
 class NestingRequest(BaseModel):
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
@@ -157,10 +170,16 @@ class NestingRequest(BaseModel):
     items: list[NestingSource] = Field(min_length=1, max_length=200)
     fill: NestingFill | None = None
     mirror: bool = False
+    manual: list[NestingManualPlacement] | None = Field(default=None, max_length=5000)
+    """Folha editada à mão: posições conferidas no lugar do encaixe automático."""
     """Espelha a folha inteira (DTF impresso no verso do filme), só quando o fluxo pede."""
 
     @model_validator(mode="after")
     def check_fill_target(self) -> NestingRequest:
+        if self.manual is not None:
+            if not self.manual:
+                raise ValueError("a folha editada não tem peças")
+            return self
         if self.fill is None:
             if not any(item.quantity > 0 for item in self.items):
                 raise ValueError("informe a quantidade de ao menos um trabalho")

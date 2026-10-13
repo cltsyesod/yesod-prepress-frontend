@@ -36,7 +36,7 @@ from app.fixes.magenta import convert_magenta_strokes
 from app.fixes.paths import circle, pdf_path
 from app.fixes.rgb_profile import assign_srgb
 from app.fixes.upscale import upscale_images
-from app.fixes.white import WhiteSettingsMissing, draw_white, white_mask
+from app.fixes.white import WhiteSettingsMissing, draw_white, white_mask, without_cut_lines
 from app.fixes.white import settings_for as white_settings
 
 # Order matters: boxes first, because the die line and the marks use the TrimBox; a
@@ -513,15 +513,14 @@ def _add_white(
     layer = pdf.make_indirect(
         pikepdf.Dictionary(Type=pikepdf.Name.OCG, Name=f"Branco ({settings.spot_name})")
     )
-    details = []
-    for index, page in enumerate(pdf.pages):
-        if _already_applied(page, "add_white_underbase"):
-            continue
-        mask, _, box = white_mask(rendered, index, profile, settings)
-        _isolate_existing_content(page)
-        marked = draw_white(pdf, page, mask, box, settings, layer)
-        _record(page, "add_white_underbase")
-        details.append(f"página {index + 1}: {marked} px de branco")
+    # A faca que vem na arte não é estampa: mede o branco numa cópia sem ela.
+    measured = rendered.with_name(f"{rendered.stem}_semfaca.pdf")
+    removed = without_cut_lines(rendered, measured, profile.cut_layer_names)
+    details = [f"{removed} traço(s) de faca sem branco"] if removed else []
+    try:
+        _draw_white_pages(pdf, profile, settings, measured, layer, details)
+    finally:
+        measured.unlink(missing_ok=True)
     _register_layer(pdf, layer)
     sign = "spread" if settings.offset_mm > 0 else "choke"
     return AppliedFix(
@@ -533,6 +532,17 @@ def _add_white(
         ),
         details=details,
     )
+
+
+def _draw_white_pages(pdf, profile, settings, rendered, layer, details) -> None:
+    for index, page in enumerate(pdf.pages):
+        if _already_applied(page, "add_white_underbase"):
+            continue
+        mask, _, box = white_mask(rendered, index, profile, settings)
+        _isolate_existing_content(page)
+        marked = draw_white(pdf, page, mask, box, settings, layer)
+        _record(page, "add_white_underbase")
+        details.append(f"página {index + 1}: {marked} px de branco")
 
 
 _FIXES = {

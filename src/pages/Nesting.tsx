@@ -22,7 +22,9 @@ import {
   type NestingMarks,
   type NestingParams,
   type NestingRun,
+  type ManualPlacement,
 } from '@/services/nestingService'
+import { SheetEditor } from '@/components/nesting/SheetEditor'
 import { profileService } from '@/services/profileService'
 
 const ROTATIONS = [
@@ -220,6 +222,21 @@ export default function NestingPage() {
     setSubmitting(false)
   }
 
+  // Folha editada à mão: nova montagem com as mesmas peças, nas posições do operador.
+  const manual = async (run: NestingRun, placements: ManualPlacement[]) => {
+    setSubmitting(true)
+    try {
+      const { fill: _fill, ...rest } = run.params
+      const id = await nestingService.create(run.name, { ...rest, manual: placements }, run.items)
+      setCurrentId(id)
+      await loadRuns()
+    } catch (err) {
+      toast({ title: 'Não foi possível montar', description: getErrorMessage(err), variant: 'destructive' })
+      await loadRuns()
+    }
+    setSubmitting(false)
+  }
+
   // As quantidades que o preenchimento calculou viram as da lista, para ajustar à mão.
   const useQuantities = (run: NestingRun) => {
     const computed = new Map((run.result?.autoFill?.quantities ?? []).map((q) => [q.key, q.quantity]))
@@ -376,7 +393,7 @@ export default function NestingPage() {
                     const profile = dtfProfiles.find((p) => p.id === value)
                     setDtfId(profile?.id)
                     if (!profile) {
-                      setParams((p) => ({ ...p, mirror: false, cutLines: { ...p.cutLines, draw: true } }))
+                      setParams((p) => ({ ...p, mirror: false, dtfProfileId: undefined, cutLines: { ...p.cutLines, draw: true } }))
                       return
                     }
                     const t = profile.textile ?? {}
@@ -387,6 +404,7 @@ export default function NestingPage() {
                     setParams((p) => ({
                       ...p,
                       mirror: !!t.mirror,
+                      dtfProfileId: profile.id,
                       material: {
                         ...p.material,
                         lengthMm: undefined,
@@ -753,6 +771,7 @@ export default function NestingPage() {
               onOffcutSaved={loadOffcuts}
               busy={submitting}
               onUseQuantities={useQuantities}
+              onManual={manual}
             />
           )}
 
@@ -831,6 +850,7 @@ function RunDetail({
   onOffcutSaved,
   busy,
   onUseQuantities,
+  onManual,
 }: {
   run: NestingRun
   outputUrl: string
@@ -841,6 +861,8 @@ function RunDetail({
   busy: boolean
   /** Leva as quantidades calculadas para a lista (modo "eu defino"). */
   onUseQuantities?: (run: NestingRun) => void
+  /** Gera a folha nas posições editadas à mão. */
+  onManual?: (run: NestingRun, placements: ManualPlacement[]) => void
 }) {
   const result = run.result ?? {}
   const sheets = result.sheets ?? []
@@ -850,6 +872,7 @@ function RunDetail({
   // Preenchida automaticamente, a chapa já está cheia: sem sugestão de completar.
   const fill = result.autoFill ? [] : (result.fill ?? []).filter((f) => f.extra > 0)
   const mm = (value: number) => Math.round(value).toLocaleString('pt-BR')
+  const [editing, setEditing] = useState(false)
   const [savedOffcut, setSavedOffcut] = useState('')
   const saveOffcut = async (source: NestingRun, size: [number, number]) => {
     try {
@@ -991,6 +1014,25 @@ function RunDetail({
         </p>
       )}
 
+      <FilmUse run={run} />
+      {onManual && result.placements?.length && result.shapes ? (
+        editing ? (
+          <SheetEditor
+            run={run}
+            busy={busy}
+            onCancel={() => setEditing(false)}
+            onApply={(placements) => {
+              setEditing(false)
+              onManual(run, placements)
+            }}
+          />
+        ) : (
+          <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
+            Editar a folha à mão (mover, girar, duplicar)
+          </Button>
+        )
+      ) : null}
+      {!editing && (
       <div className="h-[70vh] overflow-hidden rounded-lg border border-border bg-muted">
         {outputUrl ? (
           <PdfPreview url={outputUrl} page={page} onPageChange={onPageChange} />
@@ -1000,6 +1042,7 @@ function RunDetail({
           </div>
         )}
       </div>
+      )}
     </div>
   )
 }
@@ -1010,5 +1053,36 @@ function Stat({ label, value }: { label: string; value: string }) {
       <p className="text-xs text-muted-foreground">{label}</p>
       <p className="font-medium text-foreground">{value}</p>
     </div>
+  )
+}
+
+/**
+ * Consumo de filme da folha (DTF): metros e m² pelo comprimento real montado e, se o
+ * perfil DTF tem custos salvos (DTF × DTG), o valor do filme e do pó. Sem custo: só o consumo.
+ */
+function FilmUse({ run }: { run: NestingRun }) {
+  const id = run.params.dtfProfileId
+  if (!id) return null
+  const profile = profileService.getProfilesSync().find((p) => p.id === id)
+  const width = run.result?.widthMm ?? run.params.material.widthMm
+  const length = run.result?.totalLengthMm
+  if (!length) return null
+  const meters = length / 1000
+  const area = (width / 1000) * meters
+  const costs = ((profile?.textile as Record<string, unknown> | undefined)?.costs ?? {}) as {
+    filmCostPerM?: number
+    powderCostPerM2?: number
+  }
+  const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+  const parts = [
+    `${meters.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} m de filme (${area.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} m²)`,
+    ...(costs.filmCostPerM !== undefined ? [`filme ${brl(meters * costs.filmCostPerM)}`] : []),
+    ...(costs.powderCostPerM2 !== undefined ? [`pó ${brl(area * costs.powderCostPerM2)}`] : []),
+  ]
+  return (
+    <p className="text-xs text-muted-foreground">
+      DTF{profile ? ` · ${profile.name}` : ''}: {parts.join(' · ')}
+      {costs.filmCostPerM === undefined && ' · cadastre o custo do filme em DTF × DTG para ver o valor'}
+    </p>
   )
 }
