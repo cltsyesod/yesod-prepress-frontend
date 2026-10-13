@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Download, LayoutGrid, Loader2, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -136,7 +137,23 @@ export default function NestingPage() {
   // Com preenchimento: quais trabalhos podem receber cópias além do mínimo (padrão: todos).
   const [fillFlags, setFillFlags] = useState<Record<string, boolean>>({})
   const chosen = useMemo(() => jobs.filter((job) => job.id in selected), [jobs, selected])
+  // Folha de DTF: só trabalhos com perfil DTF; cada um precisa da base branca antes de montar
+  // (quando o perfil diz que é o sistema que gera o branco).
+  const [whiteDone, setWhiteDone] = useState<Set<string>>(new Set())
+  const profileOf = (job: Job) => profiles.find((p) => p.id === job.profileId)
+  const listed = dtfId ? jobs.filter((job) => profileOf(job)?.technology === 'dtf') : jobs
+  const needsWhite = (job: Job) => profileOf(job)?.textile?.whiteMode === 'generate' && !whiteDone.has(job.id)
+  const dtfJobIds = dtfId ? listed.map((job) => job.id).join(',') : ''
+  useEffect(() => {
+    if (!dtfJobIds) return
+    jobsService
+      .withWhiteBase(dtfJobIds.split(','))
+      .then(setWhiteDone)
+      .catch(() => setWhiteDone(new Set()))
+  }, [dtfJobIds])
+  const lacking = dtfId ? chosen.filter(needsWhite) : []
   const problem =
+    (lacking.length ? `Gere a base branca antes de montar: ${lacking.map((j) => j.name).join(', ')}.` : '') ||
     materialProblem(params, isSheet) ||
     (fillOn && !isSheet && !(params.fill?.rollLengthMm && params.fill.rollLengthMm > 0)
       ? 'Informe quanto do rolo usar (mm) para o sistema preencher.'
@@ -304,10 +321,12 @@ export default function NestingPage() {
               </p>
             )}
             <div className="max-h-64 space-y-1 overflow-auto rounded-md border border-border p-1">
-              {jobs.length === 0 && (
-                <p className="p-3 text-sm text-muted-foreground">Nenhum trabalho na fila.</p>
+              {listed.length === 0 && (
+                <p className="p-3 text-sm text-muted-foreground">
+                  {dtfId ? 'Nenhum trabalho com perfil DTF na fila.' : 'Nenhum trabalho na fila.'}
+                </p>
               )}
-              {jobs.map((job) => {
+              {listed.map((job) => {
                 const included = job.id in selected
                 const quantity = selected[job.id] ?? 0
                 return (
@@ -327,6 +346,14 @@ export default function NestingPage() {
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm text-foreground">{job.name}</p>
                       {job.clientName && <p className="truncate text-xs text-muted-foreground">{job.clientName}</p>}
+                      {dtfId && needsWhite(job) && (
+                        <Link
+                          to={`/trabalhos/${job.id}`}
+                          className="text-[11px] text-amber-600 underline dark:text-amber-400"
+                        >
+                          sem base branca: gerar no trabalho
+                        </Link>
+                      )}
                     </div>
                     {included && fillOn && (
                       <label
@@ -398,6 +425,15 @@ export default function NestingPage() {
                     }
                     const t = profile.textile ?? {}
                     setIsSheet(false)
+                    // Na folha de DTF só entram trabalhos DTF: desmarca os outros.
+                    setSelected((s) =>
+                      Object.fromEntries(
+                        Object.entries(s).filter(([id]) => {
+                          const job = jobs.find((j) => j.id === id)
+                          return job && profileOf(job)?.technology === 'dtf'
+                        }),
+                      ),
+                    )
                     // Filme em rolo: largura, margem e espaçamento do perfil (o que estiver
                     // cadastrado); peças pelo contorno da arte, sem desenhar faca; o branco da
                     // arte é estampa (não é fundo); espelho só se o fluxo do perfil pedir.

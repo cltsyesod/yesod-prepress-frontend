@@ -243,6 +243,25 @@ export const jobsService = {
     return project.id
   },
 
+  /** Trabalhos cujo arquivo principal já recebeu a base branca gerada pelo sistema. */
+  async withWhiteBase(projectIds: string[]): Promise<Set<string>> {
+    if (!projectIds.length) return new Set()
+    const { data, error } = await supabase
+      .from('project_files')
+      .select('project, applied_fixes')
+      .in('project', projectIds)
+      .eq('is_primary', true)
+      .neq('status', 'removed')
+    if (error) throw error
+    return new Set(
+      (data ?? [])
+        .filter((row) =>
+          ((row.applied_fixes as { id?: string }[] | null) ?? []).some((fix) => fix?.id === 'add_white_underbase'),
+        )
+        .map((row) => String(row.project)),
+    )
+  },
+
   async updateTicket(id: string, ticket: JobTicket, profileId: string): Promise<void> {
     const { error } = await supabase
       .from('projects')
