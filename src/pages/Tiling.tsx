@@ -88,6 +88,9 @@ import { toast } from '@/hooks/use-toast'
 import { getErrorMessage } from '@/lib/supabase/errors'
 import { cn } from '@/lib/utils'
 import { jobsService, type Job } from '@/services/jobsService'
+import { analysisJobsService } from '@/services/analysisJobsService'
+import { artResolution, resolutionIssues, type ArtImage } from '@/domain/tiling/resolution'
+import type { FileProfile } from '@/lib/xray'
 import { profileService } from '@/services/profileService'
 import { isImageFile, projectFilesService } from '@/services/projectFilesService'
 import {
@@ -225,6 +228,8 @@ export default function TilingPage() {
 
   const [name, setName] = useState('')
   const [scale, setScale] = useState(1)
+  // Imagens da arte medidas pela análise do trabalho (raio-x), para a resolução final.
+  const [artImages, setArtImages] = useState<ArtImage[] | null>(null)
   const [unit, setUnit] = useState<Unit>('mm')
   const [project, setProject] = useState<TilingProjectModel | null>(null)
   const [projectSource, setProjectSource] = useState('')
@@ -348,6 +353,11 @@ export default function TilingPage() {
       }
       setFileId(keep?.fileId || primary.id)
       setPdfUrl(await projectFilesService.getDownloadUrl(primary.storage_path))
+      setArtImages(null)
+      analysisJobsService
+        .getLatestProfile(keep?.fileId || primary.id)
+        .then((profile) => setArtImages(((profile as FileProfile | null)?.images?.items ?? []) as ArtImage[]))
+        .catch(() => setArtImages(null))
       const profile = profiles.find((p) => p.id === chosen?.profileId)
       setScale(keep?.scale ?? parseScale(chosen?.ticket.fileScale || profile?.scale || 1))
       setProjectSource('')
@@ -447,9 +457,24 @@ export default function TilingPage() {
     [active, prefs.marks.labelTop, prefs.marks.labelBottom, projectName, job, revision, numbers], // eslint-disable-line react-hooks/exhaustive-deps
   )
   // Problemas do motor + avisos de acabamento (marcas sem espaço, etiqueta encurtada).
+  // Resolução das imagens no tamanho final (arte × escala do projeto) e o mínimo do trabalho.
+  const posterScale = project?.poster.scale ?? scale
+  const resolution = useMemo(
+    () => (artImages ? artResolution(artImages, pageNumber, posterScale) : null),
+    [artImages, pageNumber, posterScale],
+  )
+  const minimumPpi = useMemo(() => {
+    const chosen = jobs.find((j) => j.id === jobId)
+    const profile = profiles.find((p) => p.id === chosen?.profileId)
+    return chosen?.ticket.minResolution ?? profile?.minResolution ?? null
+  }, [jobs, jobId, profiles])
   const issues = useMemo(
-    () => [...(geometry?.issues ?? []), ...finishingIssues(active, prefs.marks, labels)],
-    [geometry, active, prefs.marks, labels],
+    () => [
+      ...(geometry?.issues ?? []),
+      ...finishingIssues(active, prefs.marks, labels),
+      ...(resolution ? resolutionIssues(resolution, minimumPpi) : []),
+    ],
+    [geometry, active, prefs.marks, labels, resolution, minimumPpi],
   )
   const errors = useMemo(() => issues.filter((i) => i.severity === 'error'), [issues])
   const warnings = issues.filter((i) => i.severity === 'warning')
@@ -968,6 +993,17 @@ export default function TilingPage() {
                         value={(['top', 'right', 'bottom', 'left'] as const).map((e) => fmt(project.poster.availableBleed[e], 0)).join(' / ') + ' mm'}
                       />
                       {art.pageCount > 1 && <Readout label="Páginas" value={art.pageCount} />}
+                      <Readout
+                        label="Resolução no tamanho final"
+                        hint="A menor imagem da página, já ampliada pela escala. Vem da análise do trabalho."
+                        value={
+                          artImages === null
+                            ? 'analise o trabalho para medir'
+                            : resolution?.minPpi == null
+                              ? 'sem imagens (vetorial)'
+                              : `${fmt(resolution.minPpi, 0)} ppi${minimumPpi ? ` · pede ${minimumPpi}` : ''}`
+                        }
+                      />
                     </Section>
                     <Section title="Imagem de referência">
                       <p className="text-[11px] text-muted-foreground">Foto ou gabarito do local de instalação (fachada, parede, vitrine, veículo…). Só na tela e no guia, nunca nos painéis.</p>

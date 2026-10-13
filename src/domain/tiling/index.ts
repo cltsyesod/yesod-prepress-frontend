@@ -16,3 +16,4 @@ export {
   type LabelContext,
 } from './labels'
 export { defaultMedia, layoutMedia, onMedia, orientationOf, printableWidthOf, rotationOf } from './media'
+export { artResolution, resolutionIssues, type ArtImage, type ArtResolution } from './resolution'
