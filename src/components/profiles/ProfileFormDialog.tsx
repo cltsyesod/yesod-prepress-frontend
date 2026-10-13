@@ -34,6 +34,8 @@ type FormData = Omit<ProductionProfile, 'id' | 'createdAt' | 'updatedAt'>
 const FORMATS = ['PDF', 'AI', 'PSD', 'INDD', 'EPS']
 const CATEGORIES = [
   'Offset',
+  'DTF',
+  'DTG',
   'Digital',
   'Comunicação Visual',
   'Adesivo',

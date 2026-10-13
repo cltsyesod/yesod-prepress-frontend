@@ -122,6 +122,16 @@ function createSeedProfiles(): ProductionProfile[] {
         inkCoverageLimit: 280,
       }),
     ),
+    make('wp-dtf', 'DTF (filme)', 'Transfer em filme: preencha equipamento, filme, branco e saída', 'DTF', {
+      technology: 'dtf',
+      allowedFormats: ['PDF', 'PNG', 'TIFF'],
+      textile: {},
+    }),
+    make('wp-dtg', 'DTG (direto na peça)', 'Impressão na peça: preencha área imprimível, tinta e branco', 'DTG', {
+      technology: 'dtg',
+      allowedFormats: ['PDF', 'PNG', 'TIFF'],
+      textile: {},
+    }),
     make(
       'wp-custom',
       'Perfil personalizado',

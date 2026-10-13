@@ -34,6 +34,8 @@ export function JobTicketFields({
 }: JobTicketFieldsProps) {
   const profile = profiles.find((p) => p.id === profileId)
   const set = (patch: Partial<JobTicket>) => onChange({ ...ticket, ...patch })
+  // DTF/DTG: sem sangria nem faca; a estampa é conferida pelo perfil têxtil.
+  const textile = profile?.technology === 'dtf' || profile?.technology === 'dtg'
 
   return (
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -47,6 +49,9 @@ export function JobTicketFields({
             {profiles.map((p) => (
               <SelectItem key={p.id} value={p.id}>
                 {p.name}
+                {p.technology && p.technology !== 'grafica' && (
+                  <span className="ml-2 text-xs text-muted-foreground">{p.technology.toUpperCase()}</span>
+                )}
               </SelectItem>
             ))}
           </SelectContent>
@@ -91,6 +96,8 @@ export function JobTicketFields({
         />
       </div>
 
+      {!textile && (
+        <>
       <div className="space-y-1.5">
         <Label>Sangria mínima (mm)</Label>
         <Input
@@ -113,6 +120,8 @@ export function JobTicketFields({
           </span>
         </div>
       </div>
+        </>
+      )}
 
       <div className="space-y-1.5 sm:col-span-2 lg:col-span-4">
         <div className="flex items-center gap-2">
