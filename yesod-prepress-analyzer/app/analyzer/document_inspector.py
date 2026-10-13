@@ -17,6 +17,7 @@ from app.analyzer.page_inspector import inspect_pages
 from app.contracts.production_profile import ProductionProfile
 from app.core.config import Settings
 from app.core.exceptions import InvalidPdfError
+from app.fixes.white import without_cut_lines
 
 
 def _sha256(path: Path) -> str:
@@ -115,10 +116,17 @@ def inspect_document(path: Path, profile: ProductionProfile, settings: Settings)
         context.facts["spot_names"] = sorted(context.colors.spot_names)
         if profile.is_textile:
             # Medição do alfa para DTF/DTG; falha vira aviso, nunca derruba a análise.
+            # A faca que vem na arte não é impressa: mede a estampa numa cópia sem ela.
+            measured = path.with_name(f"{path.stem}_semfaca.pdf")
             try:
-                context.facts["textile_pages"] = inspect_alpha(path, profile)
+                removed = without_cut_lines(path, measured, profile.cut_layer_names)
+                source = measured if removed else path
+                context.facts["textile_pages"] = inspect_alpha(source, profile)
+                context.facts["textile_cut_strokes"] = removed
             except Exception as exc:  # noqa: BLE001
                 context.facts["textile_error"] = str(exc)
+            finally:
+                measured.unlink(missing_ok=True)
         return context
     finally:
         pdf.close()

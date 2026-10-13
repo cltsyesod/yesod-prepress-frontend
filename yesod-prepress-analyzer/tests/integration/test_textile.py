@@ -148,3 +148,30 @@ def test_print_rules_are_off_for_textile_and_textile_rules_off_for_print(tmp_pat
     assert not any(
         i.rule_code.startswith("TEXTILE") for i in run_rules(printing, DEFAULT_RULES)
     )
+
+
+def test_die_line_in_the_art_is_not_measured_as_print(tmp_path):
+    import app.analyzer.document_inspector as di
+    from app.core.config import Settings
+
+    doc = pikepdf.Pdf.new()
+    doc.add_blank_page(page_size=(100 * MM, 100 * MM))
+    page = doc.pages[0]
+    tint = pikepdf.Dictionary(FunctionType=2, Domain=[0, 1], C0=[0, 0, 0, 0], C1=[0, 1, 0, 0], N=1)
+    space = [pikepdf.Name.Separation, pikepdf.Name("/CutContour"), pikepdf.Name.DeviceCMYK, tint]
+    page.obj.Resources = pikepdf.Dictionary(ColorSpace=pikepdf.Dictionary(C=pikepdf.Array(space)))
+    die = f"q /C CS 1 SCN 0.5 w {5 * MM} {5 * MM} {90 * MM} {90 * MM} re S Q\n"
+    page.contents_add((rect(30, 30, 40, 20) + die).encode())
+    path = tmp_path / "faca.pdf"
+    doc.save(path)
+    original = di._run_qpdf
+    di._run_qpdf = lambda p, t: (True, "")
+    try:
+        ctx = di.inspect_document(path, profile(minLineMm=0.5), Settings())
+    finally:
+        di._run_qpdf = original
+    measured = ctx.facts["textile_pages"][0]
+    w, h = measured.art_size_mm
+    assert abs(w - 40) < 0.5 and abs(h - 20) < 0.5, (w, h)  # a faca de 90 mm não conta
+    assert (measured.thin_mm2 or 0) < 1
+    assert ctx.facts["textile_cut_strokes"] == 1
