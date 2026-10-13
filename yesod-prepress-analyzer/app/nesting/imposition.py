@@ -53,6 +53,8 @@ class CutLines:
     """Also cut unprinted areas enclosed by the artwork (and nest small pieces in them)."""
     white_is_background: bool = True
     """Paper-white background (white box behind the art) is not part of the piece."""
+    draw: bool = True
+    """False: the traced outline only shapes the piece (DTF); no die line is drawn."""
 
 
 def _num(value: float) -> str:
@@ -154,6 +156,7 @@ def build_layout(
     sources: dict[str, SourcePiece],
     cut_lines: CutLines,
     marks: Marks | None = None,
+    mirror: bool = False,
 ) -> pikepdf.Pdf:
     """`material.margin` already includes the band kept free for registration marks."""
 
@@ -232,7 +235,7 @@ def build_layout(
             trim = placed(source.shape.cut, source, placement)
             if not source.shape.from_die_line and _is_rectangle(trim):
                 rectangles.append((trim, area))
-            if cut_lines.add and not source.shape.from_die_line:
+            if cut_lines.add and cut_lines.draw and not source.shape.from_die_line:
                 cut = trim
                 if material.gap <= _COMMON_LINE_GAP and _is_rectangle(cut):
                     straight.append(cut)
@@ -268,6 +271,9 @@ def build_layout(
                     str(page.add_resource(font, pikepdf.Name.Font, prefix="Slug")),
                 )
             )
+        if mirror:
+            # Espelho da folha inteira (peças, marcas e texto), em torno do centro.
+            content = [f"q -1 0 0 1 {_num(material.width)} 0 cm", *content, "Q"]
         # Slug text is WinAnsi; everything else is ASCII.
         page.contents_add("\n".join(c for c in content if c).encode("cp1252", "replace"))
     return out

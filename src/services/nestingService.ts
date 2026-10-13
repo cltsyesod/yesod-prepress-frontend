@@ -22,8 +22,12 @@ export interface NestingParams {
     cutHoles?: boolean
     /** "keep": o fundo branco faz parte da peça; padrão: é ignorado. */
     whiteBackground?: 'ignore' | 'keep'
+    /** false: o contorno só dá a forma da peça (DTF), sem desenhar a faca. */
+    draw?: boolean
   }
   marks?: NestingMarks
+  /** Espelha a folha inteira (DTF no verso do filme), só quando o fluxo pede. */
+  mirror?: boolean
   /** Retalho do estoque usado como material (baixado quando a montagem é criada). */
   offcutId?: string
   /**

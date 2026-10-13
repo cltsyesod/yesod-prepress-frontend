@@ -73,6 +73,8 @@ const numberOr = (value: string, fallback: number) => {
 
 export default function NestingPage() {
   const profiles = profileService.getProfilesSync()
+  const dtfProfiles = profiles.filter((p) => p.technology === 'dtf')
+  const [dtfId, setDtfId] = useState<string>()
   const [jobs, setJobs] = useState<Job[]>([])
   const [selected, setSelected] = useState<Record<string, number>>({})
   const [params, setParams] = useState<NestingParams>(loadParams)
@@ -365,6 +367,68 @@ export default function NestingPage() {
                 ))}
               </div>
             </div>
+            {dtfProfiles.length > 0 && (
+              <div className="col-span-2 space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Folha de DTF (filme)</Label>
+                <Select
+                  value={dtfId ?? 'none'}
+                  onValueChange={(value) => {
+                    const profile = dtfProfiles.find((p) => p.id === value)
+                    setDtfId(profile?.id)
+                    if (!profile) {
+                      setParams((p) => ({ ...p, mirror: false, cutLines: { ...p.cutLines, draw: true } }))
+                      return
+                    }
+                    const t = profile.textile ?? {}
+                    setIsSheet(false)
+                    // Filme em rolo: largura, margem e espaçamento do perfil (o que estiver
+                    // cadastrado); peças pelo contorno da arte, sem desenhar faca; o branco da
+                    // arte é estampa (não é fundo); espelho só se o fluxo do perfil pedir.
+                    setParams((p) => ({
+                      ...p,
+                      mirror: !!t.mirror,
+                      material: {
+                        ...p.material,
+                        lengthMm: undefined,
+                        ...(t.printWidthMm ? { widthMm: t.printWidthMm } : {}),
+                        ...(t.marginMm !== undefined ? { marginMm: t.marginMm } : {}),
+                        ...(t.gapMm !== undefined ? { gapMm: t.gapMm } : {}),
+                      },
+                      cutLines: { ...p.cutLines, add: true, draw: false, whiteBackground: 'keep', offsetMm: 0 },
+                    }))
+                  }}
+                >
+                  <SelectTrigger className="h-9">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Não é DTF</SelectItem>
+                    {dtfProfiles.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {dtfId && (
+                  <div className="space-y-1 text-xs text-muted-foreground">
+                    {!dtfProfiles.find((p) => p.id === dtfId)?.textile?.printWidthMm && (
+                      <p className="text-amber-600 dark:text-amber-400">
+                        O perfil não tem a largura útil do filme: informe abaixo ou cadastre no perfil.
+                      </p>
+                    )}
+                    <label className="flex items-center gap-2">
+                      <Switch
+                        checked={!!params.mirror}
+                        onCheckedChange={(mirror) => setParams((p) => ({ ...p, mirror }))}
+                      />
+                      Espelhar a folha (somente se o fluxo deste equipamento exigir)
+                    </label>
+                    <p>Peças pelo contorno da arte, sem faca; a base branca de cada arte vai junto.</p>
+                  </div>
+                )}
+              </div>
+            )}
             {offcuts.length > 0 && (
               <div className="col-span-2 space-y-1.5">
                 <Label className="text-xs text-muted-foreground">Usar retalho do estoque</Label>
@@ -512,11 +576,11 @@ export default function NestingPage() {
               </p>
             </div>
             <Switch
-              checked={params.cutLines.add}
-              onCheckedChange={(add) => setParams((p) => ({ ...p, cutLines: { ...p.cutLines, add } }))}
+              checked={params.cutLines.add && params.cutLines.draw !== false}
+              onCheckedChange={(add) => setParams((p) => ({ ...p, cutLines: { ...p.cutLines, add, draw: true } }))}
             />
           </div>
-          {params.cutLines.add && (
+          {params.cutLines.add && params.cutLines.draw !== false && (
             <div className="grid grid-cols-3 gap-3">
               <div className="space-y-1.5">
                 <Label className="text-xs text-muted-foreground">Afastamento da arte (mm)</Label>

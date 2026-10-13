@@ -102,7 +102,9 @@ class NestingService:
                         merge_mm=request.cut_lines.merge_mm,
                         cut_holes=request.cut_lines.cut_holes,
                         white_is_background=request.cut_lines.white_background != "keep",
+                        draw=request.cut_lines.draw,
                     ),
+                    mirror=request.mirror,
                     marks=Marks(
                         registration=request.marks.registration,
                         shape=request.marks.shape,

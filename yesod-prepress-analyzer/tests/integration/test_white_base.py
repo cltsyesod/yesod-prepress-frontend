@@ -106,3 +106,31 @@ def test_rule_offers_the_fix_only_when_it_can_run(tmp_path):
     from_file = TextileWhiteBaseRule().evaluate(context(path, profile(whiteMode="from_file")))
     assert from_file[0].severity == "critical"
     assert TextileWhiteBaseRule().evaluate(context(path, profile(whiteMode="rip"))) == []
+
+
+def test_art_stays_visible_and_inspection_carries_the_plate(tmp_path):
+    import io
+    import json
+
+    import pypdfium2 as pdfium
+    from PIL import Image
+
+    from app.analyzer.inspection import build_inspection
+
+    out, _ = run(tmp_path, profile(chokeMm=1))
+    # Multiplicar: num visualizador comum a arte continua aparecendo (não fica branca).
+    doc = pdfium.PdfDocument(str(out))
+    # Arte amarela: o canal azul cai onde há tinta.
+    gray = np.asarray(doc[0].render(scale=1).to_pil().convert("RGB"))[:, :, 2]
+    doc.close()
+    assert gray.min() < 100
+    insp = tmp_path / "insp.pdf"
+    build_inspection(out, insp, ["CutContour"])
+    with pikepdf.open(insp) as doc:
+        manifest = json.loads(doc.attachments["objects.json"].get_file().read_bytes())
+        entry = manifest["white"][0]
+        png = doc.attachments[entry["file"]].get_file().read_bytes()
+    alpha = np.asarray(Image.open(io.BytesIO(png)))[:, :, 3] > 0
+    cols = np.flatnonzero(alpha.any(axis=0))
+    scale = alpha.shape[1] / 100  # página de 100 mm
+    assert abs((cols[-1] - cols[0] + 1) / scale - 48) <= 1 / scale + 0.11

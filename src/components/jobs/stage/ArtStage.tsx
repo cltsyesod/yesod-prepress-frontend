@@ -101,8 +101,9 @@ export function ArtStage({
   const [fullscreen, setFullscreen] = useState(false)
   const [whiteView, setWhiteView] = useState<WhiteView>('garment')
   const [garment, setGarment] = useState('#1f2937')
-  // Camada da base branca gerada pelo sistema ("Branco (<cor>)").
-  const whiteLayer = layers.find((l) => l.name.startsWith('Branco ('))
+  // Placa da base branca gerada pelo sistema (vem no arquivo de inspeção).
+  const whitePlate = insp.inspection?.white?.find((w) => w.page === current)
+  const whiteLayer = insp.inspection?.white?.length ? true : false
 
   useEffect(() => setLayers(prod.pdf?.layers ?? []), [prod.pdf])
   // Modo que depende de algo que não existe (arquivo do cliente, inspeção): volta à produção.
@@ -165,15 +166,11 @@ export function ArtStage({
       const out: Record<string, HTMLCanvasElement | null> = {}
       const draw = (pdf: LoadedPdf, frame: Box, withLayers: boolean) =>
         renderInto(pdf, current, px, frame, withLayers ? layers : undefined)
-      if (mode === 'white' && whiteLayer) {
+      if (mode === 'white') {
         const frame = layout.frames[0].box
-        const set = (on: boolean) => layers.map((l) => (l.id === whiteLayer.id ? { ...l, visible: on } : l))
-        const [withWhite, color] = await Promise.all([
-          renderPage(prod.pdf!, current, px, set(true), frame, true),
-          renderPage(prod.pdf!, current, px, set(false), frame, true),
-        ])
-        out.prod = composeWhite(withWhite, color, whiteView, garment)
-      } else       if (mode === 'curtain' || mode === 'diff') {
+        const color = await renderPage(prod.pdf!, current, px, layers, frame, true)
+        out.prod = composeWhite(color, whitePlate, frame, px, whiteView, garment)
+      } else if (mode === 'curtain' || mode === 'diff') {
         const frame = layout.frames[0].box
         const [a, b] = await Promise.all([draw(prod.pdf!, frame, true), draw(orig.pdf!, frame, false)])
         if (mode === 'curtain') {
@@ -197,7 +194,7 @@ export function ArtStage({
     return () => {
       cancelled = true
     }
-  }, [layout, prod.pdf, orig.pdf, current, layers, mode, whiteLayer, whiteView, garment])
+  }, [layout, prod.pdf, orig.pdf, current, layers, mode, whitePlate, whiteView, garment])
 
   // Arrastar para mover a arte ampliada; Ctrl + roda do mouse para o zoom.
   const drag = useRef<{ x: number; y: number; left: number; top: number } | null>(null)
@@ -661,38 +658,36 @@ function minBleedMm(trim: Box, bleed: Box) {
 }
 
 /**
- * Prévia da base branca (DTF/DTG). `withWhite` tem a camada do branco por cima (o pdf.js
- * não simula sobreimpressão: onde há branco, a tela fica branca); `color` é só a arte.
- * Cor: a arte sobre a peça. Branco: só a placa, em branco sobre cinza escuro. Na peça: a
- * placa sob a arte, sobre a cor da peça (o choke aparece como borda sem branco).
- * É uma prévia de tela: o que vale é o arquivo, medido no analisador.
+ * Prévia da base branca (DTF/DTG), só de tela. `color` é a arte com fundo transparente (o
+ * branco do arquivo usa Multiplicar e não aparece); a placa vem do arquivo de inspeção,
+ * tirada do próprio PDF. Cor: a arte sobre a peça. Branco: só a placa sobre cinza escuro.
+ * Na peça: a placa sobre a cor da peça e a arte multiplicada por cima, então a tinta
+ * sem branco embaixo (o choke) escurece como no tecido.
  */
 function composeWhite(
-  withWhite: HTMLCanvasElement,
   color: HTMLCanvasElement,
+  plate: { box: Box; image: HTMLImageElement } | undefined,
+  frame: Box,
+  px: number,
   view: WhiteView,
   garment: string,
 ): HTMLCanvasElement {
-  const { width, height } = withWhite
+  const { width, height } = color
   const out = document.createElement('canvas')
   out.width = width
   out.height = height
   const ctx = out.getContext('2d')!
   ctx.fillStyle = view === 'white' ? '#3f3f46' : garment
   ctx.fillRect(0, 0, width, height)
-  if (view !== 'color') {
-    const plate = withWhite.getContext('2d')!.getImageData(0, 0, width, height)
-    const d = plate.data
-    for (let i = 0; i < d.length; i += 4) {
-      const isWhite = d[i + 3] > 0 && d[i] > 250 && d[i + 1] > 250 && d[i + 2] > 250
-      if (!isWhite) d[i + 3] = 0
-    }
-    const layer = document.createElement('canvas')
-    layer.width = width
-    layer.height = height
-    layer.getContext('2d')!.putImageData(plate, 0, 0)
-    ctx.drawImage(layer, 0, 0)
+  if (view !== 'color' && plate) {
+    const [x0, y0, x1, y1] = plate.box
+    ctx.imageSmoothingEnabled = false
+    ctx.drawImage(plate.image, (x0 - frame[0]) * px, (frame[3] - y1) * px, (x1 - x0) * px, (y1 - y0) * px)
   }
-  if (view !== 'white') ctx.drawImage(color, 0, 0)
+  if (view !== 'white') {
+    ctx.globalCompositeOperation = view === 'garment' ? 'multiply' : 'source-over'
+    ctx.drawImage(color, 0, 0)
+    ctx.globalCompositeOperation = 'source-over'
+  }
   return out
 }

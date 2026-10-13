@@ -106,6 +106,7 @@ Deno.serve(async (req: Request) => {
       rotation: params.rotation ?? {},
       cutLines: params.cutLines ?? {},
       marks: params.marks ?? {},
+      mirror: params.mirror === true,
       items,
       ...(autoFill
         ? {

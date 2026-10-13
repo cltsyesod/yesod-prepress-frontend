@@ -89,6 +89,8 @@ class NestingCutLines(BaseModel):
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
     add: bool = False
+    draw: bool = True
+    """False: só usa o contorno da arte como forma da peça (DTF), sem desenhar a faca."""
     name: str = "CutContour"
     offset_mm: float = Field(
         default=0.0, ge=-50, le=500, validation_alias=AliasChoices("offsetMm", "offset_mm")
@@ -154,6 +156,8 @@ class NestingRequest(BaseModel):
     marks: NestingMarks = Field(default_factory=NestingMarks)
     items: list[NestingSource] = Field(min_length=1, max_length=200)
     fill: NestingFill | None = None
+    mirror: bool = False
+    """Espelha a folha inteira (DTF impresso no verso do filme), só quando o fluxo pede."""
 
     @model_validator(mode="after")
     def check_fill_target(self) -> NestingRequest:

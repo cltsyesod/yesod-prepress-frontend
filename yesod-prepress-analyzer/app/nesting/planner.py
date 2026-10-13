@@ -58,6 +58,7 @@ class PlanOptions:
     rotation_step: float = 90.0
     cut_lines: CutLines = field(default_factory=CutLines)
     marks: Marks = field(default_factory=Marks)
+    mirror: bool = False
     max_roll_length_mm: float = 5000.0
 
 
@@ -171,7 +172,9 @@ def plan(
             result = filled.result
         else:
             result = nest([n for n in nest_items if n.quantity > 0], material)
-        layout = build_layout(result, material, sources, options.cut_lines, options.marks)
+        layout = build_layout(
+            result, material, sources, options.cut_lines, options.marks, options.mirror
+        )
         layout.save(output)
         summary = summarize(result, material, sources)
         summary["fill"] = spare_room(result, material, nest_items, items)

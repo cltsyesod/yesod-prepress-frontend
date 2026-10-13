@@ -10,6 +10,7 @@ Nenhum valor é suposto: nome, limite, densidade e choke vêm do perfil ou da fi
 
 from __future__ import annotations
 
+import io
 import zlib
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,6 +18,7 @@ from pathlib import Path
 import numpy as np
 import pikepdf
 import pypdfium2 as pdfium
+from PIL import Image
 
 from app.contracts.production_profile import ProductionProfile
 
@@ -153,7 +155,11 @@ def draw_white(
              pikepdf.Name.DeviceCMYK, tint]
         )
     )
-    state = pikepdf.Dictionary(Type=pikepdf.Name.ExtGState, OP=True, op=True, OPM=1)
+    # Sobreimpressão + Multiplicar: o RIP recebe o canal do branco sem apagar a arte, e
+    # visualizadores sem simulação de sobreimpressão continuam mostrando a arte.
+    state = pikepdf.Dictionary(
+        Type=pikepdf.Name.ExtGState, OP=True, op=True, OPM=1, BM=pikepdf.Name.Multiply
+    )
     if "/Resources" not in page.obj:
         page.obj.Resources = pikepdf.Dictionary()
     resources = page.obj.Resources
@@ -176,3 +182,31 @@ def draw_white(
         ).encode()
     )
     return int(mask.sum())
+
+
+PREVIEW_MAX_PX = 2400
+
+
+def white_plate_png(page: pikepdf.Page) -> tuple[bytes, list[float]] | None:
+    """A placa do branco gerada pelo sistema, em PNG reduzido (só para a tela), e a caixa
+    do PDF que ela cobre. None se a página não tem branco gerado."""
+
+    xobjects = page.obj.get("/Resources", {}).get("/XObject", {})
+    image = xobjects.get("/YesodWhiteIm") if xobjects else None
+    if image is None:
+        return None
+    w, h = int(image.Width), int(image.Height)
+    rows = np.frombuffer(image.read_bytes(), np.uint8).reshape(h, -1)
+    mask = np.unpackbits(rows, axis=1)[:, :w].astype(bool)
+    step = max(1, int(np.ceil(max(w, h) / PREVIEW_MAX_PX)))
+    if step > 1:
+        # Máximo em cada bloco: um detalhe fino do branco não some da prévia.
+        hh, ww = (h // step) * step, (w // step) * step
+        mask = mask[:hh, :ww].reshape(hh // step, step, ww // step, step).any(axis=(1, 3))
+    alpha = Image.fromarray((mask * 255).astype(np.uint8), "L")
+    rgba = Image.new("RGBA", alpha.size, (255, 255, 255, 0))
+    rgba.putalpha(alpha)
+    buffer = io.BytesIO()
+    rgba.save(buffer, "PNG", optimize=True)
+    box = page.obj.get("/CropBox") or page.obj.get("/MediaBox")
+    return buffer.getvalue(), [float(v) for v in box]

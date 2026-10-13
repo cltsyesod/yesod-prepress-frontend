@@ -172,6 +172,8 @@ export interface Inspection {
   /** Ordem das placas de cada página no arquivo de inspeção. */
   plates: Plate[]
   pages: InspectedPage[]
+  /** Base branca gerada pelo sistema: a placa de cada página (PNG) e a caixa do PDF. */
+  white: { page: number; box: Box; image: HTMLImageElement }[]
 }
 
 export type Plate = 'images' | 'text' | 'vectors' | 'cut'
@@ -190,7 +192,22 @@ export function useInspection(url: string | null) {
         const item = attachments?.['objects.json']
         if (!item || cancelled) return
         const data = JSON.parse(new TextDecoder().decode(item.content))
-        setInspection({ pdf, plates: data.plates, pages: data.pages })
+        const entries: { page: number; file: string; box: Box }[] = data.white ?? []
+        return Promise.all(
+          entries
+            .filter((e) => attachments?.[e.file])
+            .map(
+              (e) =>
+                new Promise<Inspection['white'][number]>((resolve, reject) => {
+                  const image = new Image()
+                  image.onload = () => resolve({ page: e.page, box: e.box, image })
+                  image.onerror = reject
+                  image.src = URL.createObjectURL(new Blob([new Uint8Array(attachments![e.file].content)], { type: 'image/png' }))
+                }),
+            ),
+        ).then((white) => {
+          if (!cancelled) setInspection({ pdf, plates: data.plates, pages: data.pages, white })
+        })
       })
       .catch(() => null)
     return () => {

@@ -25,6 +25,8 @@ import pypdfium2 as pdfium
 import pypdfium2.raw as raw
 from PIL import Image
 
+from app.fixes.white import white_plate_png
+
 logger = logging.getLogger(__name__)
 
 PLATES = ("images", "text", "vectors", "cut")
@@ -403,7 +405,17 @@ def build_inspection(source: Path, destination: Path, cut_names: list[str]) -> d
                 out.pages.append(pikepdf.Page(out.make_indirect(target)))
         _shrink_images(out)
         pages = object_map(source, cut_names, bled)
-        manifest = {"version": 1, "plates": list(PLATES), "pages": pages}
+        manifest = {"version": 1, "plates": list(PLATES), "pages": pages, "white": []}
+        # Base branca gerada pelo sistema: a placa vai como imagem, para a tela mostrar
+        # o branco separado (no arquivo ele é invisível fora do RIP: Multiplicar).
+        for number, page in enumerate(original.pages, start=1):
+            plate = white_plate_png(page)
+            if plate:
+                name = f"white-{number}.png"
+                out.attachments[name] = pikepdf.AttachedFileSpec(
+                    out, plate[0], mime_type="image/png"
+                )
+                manifest["white"].append({"page": number, "file": name, "box": plate[1]})
         out.attachments["objects.json"] = pikepdf.AttachedFileSpec(
             out, json.dumps(manifest, ensure_ascii=False).encode(), mime_type="application/json"
         )
