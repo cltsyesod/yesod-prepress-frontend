@@ -20,6 +20,23 @@ export interface JobTicket {
   notes?: string
 }
 
+export type Priority = 'baixa' | 'normal' | 'alta' | 'urgente'
+
+/**
+ * Etapa do trabalho na pré-impressão, calculada no banco (job_overview) a partir da
+ * última análise do arquivo principal e das decisões: não depende de a tela estar aberta.
+ */
+export type JobStage =
+  | 'waiting'
+  | 'analyzing'
+  | 'failed'
+  | 'blocked'
+  | 'decision'
+  | 'returned'
+  | 'ready'
+  | 'sent'
+  | 'archived'
+
 /** Um trabalho = um projeto com seu arquivo e a última análise. */
 export interface Job {
   id: string
@@ -30,14 +47,40 @@ export interface Job {
   issueCount: number
   severity: string
   updatedAt: string
+  createdAt: string
+  dueDate: string | null
+  priority: Priority
+  assigneeId: string | null
+  sentToRipAt: string | null
+  sentToRipBy: string | null
+  /** Só na lista (job_overview). */
+  stage?: JobStage
+  lastActivity?: string
+  pendingCritical?: number
+  pendingWarning?: number
+  returned?: number
   latestAnalysis: Pick<AnalysisJob, 'id' | 'status' | 'progress' | 'current_step' | 'error_message'> | null
 }
 
-export type JobState = 'analyzing' | 'blocked' | 'review' | 'ready' | 'failed' | 'waiting'
+export type JobState = 'analyzing' | 'blocked' | 'review' | 'returned' | 'ready' | 'sent' | 'failed' | 'waiting'
+
+const STAGE_STATE: Record<JobStage, JobState> = {
+  waiting: 'waiting',
+  analyzing: 'analyzing',
+  failed: 'failed',
+  blocked: 'blocked',
+  decision: 'review',
+  returned: 'returned',
+  ready: 'ready',
+  sent: 'sent',
+  archived: 'ready',
+}
 
 const ACTIVE = ['queued', 'preparing', 'downloading', 'validating', 'extracting', 'analyzing', 'generating_preview']
 
 export function jobState(job: Job): JobState {
+  if (job.sentToRipAt) return 'sent'
+  if (job.stage) return STAGE_STATE[job.stage]
   const status = job.latestAnalysis?.status
   if (!status) return 'waiting'
   if (ACTIVE.includes(status)) return 'analyzing'
@@ -57,12 +100,29 @@ function toJob(row: Record<string, any>, latest: Job['latestAnalysis']): Job {
     issueCount: Number(row.issue_count ?? 0),
     severity: row.severity || 'none',
     updatedAt: row.updated_at || row.created_at || '',
+    createdAt: row.created_at || '',
+    dueDate: row.due_date || null,
+    priority: (row.priority as Priority) || 'normal',
+    assigneeId: row.assignee_id || null,
+    sentToRipAt: row.sent_to_rip_at || null,
+    sentToRipBy: row.sent_to_rip_by || null,
+    stage: row.stage as JobStage | undefined,
+    lastActivity: row.last_activity || undefined,
+    pendingCritical: row.pending_critical ?? undefined,
+    pendingWarning: row.pending_warning ?? undefined,
+    returned: row.returned ?? undefined,
     latestAnalysis: latest,
   }
 }
 
 const PROJECT_COLUMNS =
-  'id, name, client_name, profile_id, job_ticket, issue_count, severity, updated_at, created_at'
+  'id, name, client_name, profile_id, job_ticket, issue_count, severity, updated_at, created_at, ' +
+  'due_date, priority, assignee_id, sent_to_rip_at, sent_to_rip_by'
+
+// A lista lê a etapa já calculada no banco, com os campos da ficha que ela usa.
+const OVERVIEW_COLUMNS =
+  'id, name, client_name, status, created_at, updated_at, due_date, priority, assignee_id, sent_to_rip_at, ' +
+  'sent_to_rip_by, stage, last_activity, pending_critical, pending_warning, returned'
 
 async function latestAnalyses(projectIds: string[]) {
   const latest = new Map<string, Job['latestAnalysis']>()
@@ -82,15 +142,42 @@ async function latestAnalyses(projectIds: string[]) {
 export const jobsService = {
   async listJobs(): Promise<Job[]> {
     const { data, error } = await supabase
-      .from('projects')
-      .select(PROJECT_COLUMNS)
+      .from('job_overview')
+      .select(OVERVIEW_COLUMNS)
       .neq('status', 'archived')
-      .order('updated_at', { ascending: false })
-      .limit(200)
+      .order('last_activity', { ascending: false })
+      .limit(300)
     if (error) throw error
-    const rows = data ?? []
+    const rows = (data ?? []) as Record<string, any>[]
     const latest = await latestAnalyses(rows.map((row) => row.id))
     return rows.map((row) => toJob(row, latest.get(row.id) ?? null))
+  },
+
+  /** Prazo, prioridade e responsável (gestão; não mexem na análise). */
+  async updateMeta(
+    id: string,
+    meta: Partial<{ dueDate: string | null; priority: Priority; assigneeId: string | null }>,
+  ): Promise<void> {
+    const row: Record<string, unknown> = {}
+    if ('dueDate' in meta) row.due_date = meta.dueDate || null
+    if ('priority' in meta) row.priority = meta.priority
+    if ('assigneeId' in meta) row.assignee_id = meta.assigneeId || null
+    const { error } = await supabase.from('projects').update(row).eq('id', id)
+    if (error) throw error
+  },
+
+  /** Marca (ou desfaz) o envio ao RIP: fim da pré-impressão. */
+  async setSentToRip(id: string, sent: boolean): Promise<void> {
+    const { data: auth } = await supabase.auth.getUser()
+    const { error } = await supabase
+      .from('projects')
+      .update(
+        sent
+          ? { sent_to_rip_at: new Date().toISOString(), sent_to_rip_by: auth.user?.id ?? null }
+          : { sent_to_rip_at: null, sent_to_rip_by: null },
+      )
+      .eq('id', id)
+    if (error) throw error
   },
 
   async getJob(id: string): Promise<Job | null> {
@@ -112,7 +199,15 @@ export const jobsService = {
    */
   async createFromFile(
     file: File,
-    params: { clientName: string; profileId: string; profileName: string; ticket: JobTicket },
+    params: {
+      clientName: string
+      profileId: string
+      profileName: string
+      ticket: JobTicket
+      dueDate?: string | null
+      priority?: Priority
+      assigneeId?: string | null
+    },
   ): Promise<string> {
     const { data: auth } = await supabase.auth.getUser()
     if (!auth.user) throw new Error('Faça login novamente para enviar arquivos.')
@@ -126,6 +221,9 @@ export const jobsService = {
         profile_id: params.profileId,
         production_profile: params.profileName,
         job_ticket: params.ticket,
+        due_date: params.dueDate || null,
+        priority: params.priority || 'normal',
+        assignee_id: params.assigneeId === undefined ? auth.user.id : params.assigneeId || null,
         filename: file.name,
         file_type: artworkType(file.name)?.extension ?? 'PDF',
         file_size: file.size,

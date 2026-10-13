@@ -8,6 +8,8 @@ const STYLES: Record<JobState, { label: string; className: string }> = {
   ready: { label: 'Pronto', className: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400' },
   failed: { label: 'Falhou', className: 'bg-red-500/15 text-red-600 dark:text-red-400' },
   waiting: { label: 'Sem análise', className: 'bg-muted text-muted-foreground' },
+  returned: { label: 'Devolvido', className: 'bg-orange-500/15 text-orange-700 dark:text-orange-400' },
+  sent: { label: 'No RIP', className: 'bg-violet-500/15 text-violet-700 dark:text-violet-400' },
 }
 
 export function JobStateBadge({ job }: { job: Job }) {
@@ -23,7 +25,9 @@ export function JobStateBadge({ job }: { job: Job }) {
     >
       {style.label}
       {state === 'analyzing' && progress > 0 && <span>{progress}%</span>}
-      {(state === 'blocked' || state === 'review') && <span>· {job.issueCount}</span>}
+      {(state === 'blocked' || state === 'review') && (
+        <span>· {(job.pendingCritical ?? 0) + (job.pendingWarning ?? 0) || job.issueCount}</span>
+      )}
     </span>
   )
 }

@@ -24,6 +24,8 @@ import {
 import { Progress } from '@/components/ui/progress'
 import { JobStateBadge } from '@/components/jobs/JobStateBadge'
 import { JobTicketFields } from '@/components/jobs/JobTicketFields'
+import { JobMetaFields, type JobMeta } from '@/components/jobs/JobMetaFields'
+import { useTeam } from '@/hooks/use-team'
 import { BleedDialog, type BleedOptions } from '@/components/jobs/BleedDialog'
 import { ContourCutDialog, type ContourCutOptions } from '@/components/jobs/ContourCutDialog'
 import { CropMarksDialog } from '@/components/jobs/CropMarksDialog'
@@ -65,6 +67,7 @@ export default function JobWorkspacePage() {
   const { id = '' } = useParams()
   const navigate = useNavigate()
   const profiles = profileService.getProfilesSync()
+  const { nameOf } = useTeam()
 
   const [job, setJob] = useState<Job | null>(null)
   const [file, setFile] = useState<ProjectFile | null>(null)
@@ -309,6 +312,30 @@ export default function JobWorkspacePage() {
     [analysis],
   )
 
+  // Gestão do trabalho: salva na hora, sem reanalisar (não muda o arquivo nem a ficha técnica).
+  const saveMeta = async (change: Partial<JobMeta>) => {
+    if (!job) return
+    const previous = job
+    setJob({ ...job, ...change })
+    try {
+      await jobsService.updateMeta(job.id, change)
+    } catch (err) {
+      setJob(previous)
+      toast({ title: 'Não foi possível salvar', description: getErrorMessage(err), variant: 'destructive' })
+    }
+  }
+
+  const sendToRip = async (sent: boolean) => {
+    if (!job) return
+    try {
+      await jobsService.setSentToRip(job.id, sent)
+      await loadJob()
+      toast({ title: sent ? 'Enviado ao RIP' : 'Envio ao RIP desfeito' })
+    } catch (err) {
+      toast({ title: 'Não foi possível atualizar', description: getErrorMessage(err), variant: 'destructive' })
+    }
+  }
+
   const reanalyze = async () => {
     if (!job) return
     try {
@@ -396,6 +423,13 @@ export default function JobWorkspacePage() {
             ))}
             {!done && <JobStateBadge job={liveJob} />}
           </p>
+          <div className="mt-2">
+            <JobMetaFields
+              compact
+              value={{ assigneeId: job.assigneeId, dueDate: job.dueDate, priority: job.priority }}
+              onChange={saveMeta}
+            />
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" onClick={() => setEditingTicket((v) => !v)}>
@@ -600,6 +634,8 @@ export default function JobWorkspacePage() {
                 setView('pending')
                 document.getElementById('issues')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
               }}
+              sentToRip={job.sentToRipAt ? { at: job.sentToRipAt, by: nameOf(job.sentToRipBy) } : null}
+              onSendToRip={sendToRip}
             />
           )}
 

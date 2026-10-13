@@ -9,6 +9,7 @@ import Layout from '@/components/Layout'
 
 import LoginPage from '@/pages/Login'
 import QueuePage from '@/pages/Queue'
+import DashboardPage from '@/pages/Dashboard'
 import JobWorkspacePage from '@/pages/JobWorkspace'
 import NestingPage from '@/pages/Nesting'
 import TilingPage from '@/pages/Tiling'
@@ -34,7 +35,7 @@ const App = () => (
 
             <Route element={<ProtectedRoute />}>
               <Route element={<Layout />}>
-                <Route path="/" element={<Navigate to="/trabalhos" replace />} />
+                <Route path="/" element={<DashboardPage />} />
                 <Route path="/trabalhos" element={<QueuePage />} />
                 <Route path="/trabalhos/:id" element={<JobWorkspacePage />} />
                 <Route path="/montagem" element={<NestingPage />} />
@@ -42,7 +43,7 @@ const App = () => (
                 <Route path="/perfis" element={<ProductionProfilesPage />} />
                 <Route path="/configuracoes" element={<SettingsPage />} />
 
-                <Route path="/dashboard" element={<Navigate to="/trabalhos" replace />} />
+                <Route path="/dashboard" element={<Navigate to="/" replace />} />
                 <Route path="/projects" element={<Navigate to="/trabalhos" replace />} />
                 <Route path="/projects/new" element={<Navigate to="/trabalhos" replace />} />
                 <Route path="/projects/:id/*" element={<LegacyProjectRedirect />} />

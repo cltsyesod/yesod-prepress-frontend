@@ -9,12 +9,19 @@ import { JobStateBadge } from '@/components/jobs/JobStateBadge'
 import { useRealtime } from '@/hooks/use-realtime'
 import { getErrorMessage } from '@/lib/supabase/errors'
 import { cn } from '@/lib/utils'
+import { useAuth } from '@/hooks/use-auth'
+import { useTeam } from '@/hooks/use-team'
+import { DUE_TONE, dueLabel, priorityOf } from '@/lib/job-meta'
 import { jobState, jobsService, type Job, type JobState } from '@/services/jobsService'
 
-const FILTERS: { key: 'all' | 'action' | 'ready'; label: string; states: JobState[] }[] = [
+type FilterKey = 'all' | 'action' | 'client' | 'ready' | 'sent'
+
+const FILTERS: { key: FilterKey; label: string; states: JobState[] }[] = [
   { key: 'action', label: 'Precisam de ação', states: ['blocked', 'review', 'failed'] },
-  { key: 'all', label: 'Todos', states: [] },
+  { key: 'client', label: 'Com o cliente', states: ['returned'] },
   { key: 'ready', label: 'Prontos', states: ['ready'] },
+  { key: 'sent', label: 'No RIP', states: ['sent'] },
+  { key: 'all', label: 'Todos', states: [] },
 ]
 
 export default function QueuePage() {
@@ -22,7 +29,10 @@ export default function QueuePage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [query, setQuery] = useState('')
-  const [filter, setFilter] = useState<(typeof FILTERS)[number]['key']>('all')
+  const [filter, setFilter] = useState<FilterKey>('all')
+  const [mine, setMine] = useState(false)
+  const { user } = useAuth()
+  const { nameOf } = useTeam()
 
   const load = useCallback(async () => {
     try {
@@ -48,9 +58,12 @@ export default function QueuePage() {
     return jobs.filter(
       (job) =>
         (!states.length || states.includes(jobState(job))) &&
-        (!q || `${job.name} ${job.clientName}`.toLowerCase().includes(q)),
+        (!mine || job.assigneeId === user?.id) &&
+        (!q || `${job.name} ${job.clientName} ${nameOf(job.assigneeId)}`.toLowerCase().includes(q)),
     )
-  }, [jobs, filter, query])
+    // nameOf muda quando a equipe carrega
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobs, filter, query, mine, user?.id])
 
   return (
     <div className="space-y-6">
@@ -81,11 +94,15 @@ export default function QueuePage() {
               </button>
             ))}
           </div>
+          <label className="flex items-center gap-2 text-sm text-muted-foreground">
+            <input type="checkbox" checked={mine} onChange={(e) => setMine(e.target.checked)} />
+            Só os meus
+          </label>
           <div className="relative sm:w-64">
             <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               className="pl-8"
-              placeholder="Buscar trabalho ou cliente"
+              placeholder="Buscar trabalho, cliente ou responsável"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
@@ -121,7 +138,8 @@ export default function QueuePage() {
                         'Sem análise'}
                     </p>
                   </div>
-                  <div className="flex items-center gap-3 sm:justify-end">
+                  <div className="flex flex-wrap items-center gap-3 sm:justify-end">
+                    <JobMetaLine job={job} assignee={nameOf(job.assigneeId)} />
                     <JobStateBadge job={job} />
                     <span className="w-28 text-right text-xs text-muted-foreground">
                       {job.updatedAt &&
@@ -135,5 +153,20 @@ export default function QueuePage() {
         )}
       </section>
     </div>
+  )
+}
+
+/** Prazo, prioridade e responsável na linha da fila. */
+function JobMetaLine({ job, assignee }: { job: Job; assignee: string }) {
+  const due = job.sentToRipAt ? null : dueLabel(job.dueDate)
+  const priority = priorityOf(job.priority)
+  return (
+    <span className="flex items-center gap-2 text-xs">
+      {job.priority !== 'normal' && (
+        <span className={cn('rounded px-1.5 py-0.5 font-medium', priority.className)}>{priority.label}</span>
+      )}
+      {due && <span className={DUE_TONE[due.tone]}>{due.text}</span>}
+      {assignee && <span className="max-w-[9rem] truncate text-muted-foreground">{assignee}</span>}
+    </span>
   )
 }

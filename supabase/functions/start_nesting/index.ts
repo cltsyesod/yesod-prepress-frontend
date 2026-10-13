@@ -1,6 +1,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2'
 import { corsHeaders } from '../_shared/cors.ts'
 import { signRequest } from '../_shared/analyzer.ts'
+import { orgOf } from '../_shared/team.ts'
 
 // Dispara uma montagem (nesting): o frontend cria a linha em nesting_runs com os
 // parâmetros do operador; aqui os PDFs ganham URLs assinadas e o job vai ao analisador.
@@ -38,7 +39,8 @@ Deno.serve(async (req: Request) => {
 
     const db = createClient(supabaseUrl, serviceRoleKey)
     const { data: run } = await db.from('nesting_runs').select('*').eq('id', nestingId).maybeSingle()
-    if (!run || run.user_id !== user.id) return json(404, { error: 'Montagem não encontrada' })
+    const org = await orgOf(db, user.id)
+    if (!run || !org || run.org_id !== org) return json(404, { error: 'Montagem não encontrada' })
 
     const fail = async (message: string) => {
       await db
@@ -54,10 +56,10 @@ Deno.serve(async (req: Request) => {
     for (const item of Array.isArray(run.items) ? run.items : []) {
       const { data: file } = await db
         .from('project_files')
-        .select('id, user_id, storage_path, sha256, size_bytes')
+        .select('id, org_id, storage_path, sha256, size_bytes')
         .eq('id', item.fileId)
         .maybeSingle()
-      if (!file || file.user_id !== user.id) return fail(`Arquivo de "${item.label}" não encontrado`)
+      if (!file || file.org_id !== org) return fail(`Arquivo de "${item.label}" não encontrado`)
       let url = ''
       for (const bucket of ['pdfs', 'project-files']) {
         const { data } = await db.storage.from(bucket).createSignedUrl(file.storage_path, 3600)
@@ -86,7 +88,8 @@ Deno.serve(async (req: Request) => {
     }
     if (!items.length) return fail('Nenhum trabalho selecionado')
 
-    const outputPath = `${user.id}/montagens/${nestingId}.pdf`
+    // Na pasta de quem criou a montagem: refazer substitui o arquivo, não duplica.
+    const outputPath = `${run.user_id}/montagens/${nestingId}.pdf`
     const { data: upload } = await db.storage.from('pdfs').createSignedUploadUrl(outputPath, { upsert: true })
     if (!upload?.signedUrl) return fail('Falha ao preparar o envio do PDF montado')
 

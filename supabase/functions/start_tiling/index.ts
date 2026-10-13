@@ -1,6 +1,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2'
 import { corsHeaders } from '../_shared/cors.ts'
 import { signRequest } from '../_shared/analyzer.ts'
+import { orgOf } from '../_shared/team.ts'
 
 // Exporta um painelamento: o frontend salva os painéis em tiling_projects; aqui a arte e a
 // imagem de referência ganham URLs assinadas, as saídas ganham URLs de envio e o job vai
@@ -39,7 +40,8 @@ Deno.serve(async (req: Request) => {
 
     const db = createClient(supabaseUrl, serviceRoleKey)
     const { data: tiling } = await db.from('tiling_projects').select('*').eq('id', tilingId).maybeSingle()
-    if (!tiling || tiling.user_id !== user.id) return json(404, { error: 'Painelamento não encontrado' })
+    const org = await orgOf(db, user.id)
+    if (!tiling || !org || tiling.org_id !== org) return json(404, { error: 'Painelamento não encontrado' })
 
     const fail = async (message: string) => {
       await db
@@ -53,10 +55,10 @@ Deno.serve(async (req: Request) => {
 
     const { data: file } = await db
       .from('project_files')
-      .select('id, user_id, storage_path, sha256, size_bytes, mime_type')
+      .select('id, org_id, storage_path, sha256, size_bytes, mime_type')
       .eq('id', tiling.file_id)
       .maybeSingle()
-    if (!file || file.user_id !== user.id) return fail('Arquivo da arte não encontrado')
+    if (!file || file.org_id !== org) return fail('Arquivo da arte não encontrado')
     if (file.mime_type && file.mime_type !== 'application/pdf') {
       return fail('A arte ainda é a imagem original: aguarde a conversão em PDF no trabalho e abra de novo.')
     }
@@ -86,7 +88,8 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    const folder = `${user.id}/paineis/${tilingId}`
+    // Na pasta de quem criou o projeto de painéis: exportar de novo substitui os arquivos.
+    const folder = `${tiling.user_id}/paineis/${tilingId}`
     const paths = { pdf: `${folder}/paineis.pdf`, zip: `${folder}/paineis.zip`, guide: `${folder}/guia.pdf` }
     const outputs: Record<string, unknown> = {}
     for (const [key, path] of Object.entries(paths)) {

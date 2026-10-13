@@ -1,6 +1,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2'
 import { corsHeaders } from '../_shared/cors.ts'
 import { signRequest, toAnalyzerProfile } from '../_shared/analyzer.ts'
+import { orgOf, ownerFolder } from '../_shared/team.ts'
 
 // Correções que alteram o PDF (as da ficha, como a escala, são tratadas no frontend).
 const FIX_IDS = [
@@ -86,8 +87,9 @@ Deno.serve(async (req: Request) => {
       return json(404, { error: 'Arquivo não encontrado' })
     }
 
-    // 3. Verificar permissão do usuário
-    if (requested.user_id !== user.id) {
+    // 3. Verificar permissão: o arquivo tem de ser da empresa de quem pede.
+    const org = await orgOf(adminDb, user.id)
+    if (!org || requested.org_id !== org) {
       return json(403, { error: 'Sem permissão para acessar este arquivo' })
     }
 
@@ -116,6 +118,7 @@ Deno.serve(async (req: Request) => {
           mime_type: 'application/pdf',
           size_bytes: source.size_bytes,
           user_id: user.id,
+          org_id: requested.org_id,
           storage_path: `${user.id}/${source.project}/${Date.now()}_${safeName}`,
           status: 'pending',
           is_primary: false,
@@ -138,6 +141,7 @@ Deno.serve(async (req: Request) => {
           version: copy.version || '',
           production_profile: profileId || 'default',
           user_id: user.id,
+          org_id: requested.org_id,
           status: 'queued',
           current_step: 'Preparando correções',
         })
@@ -178,7 +182,9 @@ Deno.serve(async (req: Request) => {
     if (analyzerUrl) {
       const { data: inspection } = await adminDb.storage
         .from('pdfs')
-        .createSignedUploadUrl(`${user.id}/inspection/${file.id}.pdf`, { upsert: true })
+        .createSignedUploadUrl(`${ownerFolder(file.storage_path, user.id)}/inspection/${file.id}.pdf`, {
+          upsert: true,
+        })
       inspectionUploadUrl = inspection?.signedUrl ?? ''
     }
 

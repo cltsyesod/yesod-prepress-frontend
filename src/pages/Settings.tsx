@@ -1,6 +1,6 @@
 import { PageHeader } from '@/components/PageHeader'
-import { EmptyState } from '@/components/EmptyState'
-import { Cog, Sun, Moon, Monitor, Check } from 'lucide-react'
+import { TeamSettings } from '@/components/settings/TeamSettings'
+import { Sun, Moon, Monitor, Check } from 'lucide-react'
 import { useTheme } from '@/hooks/use-theme'
 import { cn } from '@/lib/utils'
 
@@ -86,19 +86,7 @@ export default function SettingsPage() {
           </div>
         </section>
 
-        <section>
-          <div className="mb-4">
-            <h2 className="text-lg font-semibold text-foreground">Geral</h2>
-            <p className="text-sm text-muted-foreground">
-              Configurações gerais da conta e da gráfica.
-            </p>
-          </div>
-          <EmptyState
-            icon={Cog}
-            title="Configurações em desenvolvimento"
-            description="Opções gerais da conta, preferências da gráfica e integrações aparecerão em breve."
-          />
-        </section>
+        <TeamSettings />
       </div>
     </div>
   )

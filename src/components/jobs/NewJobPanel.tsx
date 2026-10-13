@@ -8,6 +8,8 @@ import { toast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
 import { getErrorMessage } from '@/lib/supabase/errors'
 import { JobTicketFields } from '@/components/jobs/JobTicketFields'
+import { JobMetaFields, type JobMeta } from '@/components/jobs/JobMetaFields'
+import { useAuth } from '@/hooks/use-auth'
 import { jobsService, type JobTicket } from '@/services/jobsService'
 import { profileService } from '@/services/profileService'
 import { ARTWORK_ACCEPT, MAX_UPLOAD_BYTES, artworkType } from '@/services/projectFilesService'
@@ -26,6 +28,9 @@ export function NewJobPanel() {
   )
   const [ticket, setTicket] = useState<JobTicket>({})
   const [sending, setSending] = useState(false)
+  // Quem envia já fica como responsável; prazo e prioridade são da gestão do trabalho.
+  const { user } = useAuth()
+  const [meta, setMeta] = useState<JobMeta>({ assigneeId: user?.id ?? null, dueDate: null, priority: 'normal' })
 
   const pick = (candidate: File | undefined) => {
     if (!candidate) return
@@ -54,6 +59,9 @@ export function NewJobPanel() {
         profileId,
         profileName: profile?.name ?? '',
         ticket,
+        dueDate: meta.dueDate,
+        priority: meta.priority,
+        assigneeId: meta.assigneeId,
       })
       navigate(`/trabalhos/${id}`)
     } catch (err) {
@@ -144,6 +152,8 @@ export function NewJobPanel() {
           {sending ? 'Enviando...' : 'Analisar'}
         </Button>
       </div>
+
+      <JobMetaFields value={meta} onChange={(change) => setMeta((prev) => ({ ...prev, ...change }))} />
 
       {showTicket && (
         <div className="border-t border-border pt-4">

@@ -1,5 +1,6 @@
 import { NavLink } from 'react-router-dom'
 import {
+  Gauge,
   Grid2x2,
   Inbox,
   LayoutGrid,
@@ -20,6 +21,7 @@ interface AppSidebarProps {
 }
 
 const NAV_ITEMS = [
+  { label: 'Painel', icon: Gauge, to: '/', end: true },
   { label: 'Fila de trabalho', icon: Inbox, to: '/trabalhos' },
   { label: 'Montagem', icon: LayoutGrid, to: '/montagem' },
   { label: 'Painéis', icon: Grid2x2, to: '/paineis' },
@@ -72,6 +74,7 @@ export function AppSidebar({ collapsed, onToggleCollapse, onNavigateMobile }: Ap
               <NavLink
                 key={item.to}
                 to={item.to}
+                end={'end' in item ? item.end : undefined}
                 onClick={onNavigateMobile}
                 className={({ isActive }) =>
                   cn(
@@ -103,10 +106,10 @@ export function AppSidebar({ collapsed, onToggleCollapse, onNavigateMobile }: Ap
                 {user?.name || 'Usuário'}
               </p>
               <p className="text-xs text-slate-300 truncate">
-                {user?.company || 'Gráfica Exemplo'}
+                {user?.company || 'Sem empresa'}
               </p>
               <p className="text-xs text-blue-400 font-medium truncate mt-0.5">
-                {user?.plan || 'Plano Profissional'}
+                {user?.role}
               </p>
             </div>
           )}

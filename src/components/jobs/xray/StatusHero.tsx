@@ -1,4 +1,4 @@
-import { ArrowRight, CheckCircle2, CircleAlert, Download, Loader2, MessageSquareText, OctagonX, Wand2 } from 'lucide-react'
+import { ArrowRight, CheckCircle2, CircleAlert, Download, Loader2, MessageSquareText, OctagonX, Send, Undo2, Wand2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { TONE_CLASS, toneOf } from '@/lib/xray'
@@ -12,6 +12,7 @@ const HEADLINE = {
   blocked: { icon: OctagonX, title: 'Não pode ir para produção', text: 'Há pontos que impedem a impressão deste arquivo.' },
   decision: { icon: CircleAlert, title: 'Aguarda a sua decisão', text: 'O arquivo pode seguir assim que você decidir os pontos em aberto.' },
   ready: { icon: CheckCircle2, title: 'Pronto para produção', text: 'Tudo conferido ou decidido.' },
+  sent: { icon: Send, title: 'Enviado ao RIP', text: 'A pré-impressão deste trabalho terminou.' },
 }
 
 /**
@@ -30,6 +31,8 @@ export function StatusHero({
   onFixAll,
   onMessage,
   onShowPending,
+  sentToRip,
+  onSendToRip,
 }: {
   issues: AnalysisIssue[]
   autoFixes: number
@@ -42,10 +45,13 @@ export function StatusHero({
   onFixAll: () => void
   onMessage: () => void
   onShowPending: () => void
+  /** Quando e por quem foi enviado ao RIP (fim da pré-impressão). */
+  sentToRip: { at: string; by: string } | null
+  onSendToRip: (sent: boolean) => void
 }) {
   const state = toneOf(issues)
-  const key = state === 'blocked' ? 'blocked' : state === 'decision' ? 'decision' : 'ready'
-  const style = TONE_CLASS[key === 'ready' ? 'ok' : state]
+  const key = sentToRip ? 'sent' : state === 'blocked' ? 'blocked' : state === 'decision' ? 'decision' : 'ready'
+  const style = TONE_CLASS[key === 'ready' || key === 'sent' ? 'ok' : state]
   const head = HEADLINE[key]
   const Icon = head.icon
 
@@ -70,7 +76,11 @@ export function StatusHero({
           <div className="min-w-0 flex-1 space-y-2.5">
             <div>
               <h2 className="text-lg font-semibold tracking-tight text-foreground">{head.title}</h2>
-              <p className="text-sm text-muted-foreground">{head.text}</p>
+              <p className="text-sm text-muted-foreground">
+                {sentToRip
+                  ? `Em ${new Date(sentToRip.at).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}${sentToRip.by ? ` por ${sentToRip.by}` : ''}.`
+                  : head.text}
+              </p>
             </div>
             {actionable.length > 0 && (
               <div className="space-y-1.5">
@@ -115,8 +125,20 @@ export function StatusHero({
               Mensagem ao cliente
             </Button>
           )}
-          {key === 'ready' && downloadUrl && (
-            <Button asChild>
+          {key === 'ready' && (
+            <Button onClick={() => onSendToRip(true)} className="justify-start">
+              <Send className="h-4 w-4" />
+              Enviar ao RIP
+            </Button>
+          )}
+          {key === 'sent' && (
+            <Button variant="ghost" onClick={() => onSendToRip(false)} className="justify-start">
+              <Undo2 className="h-4 w-4" />
+              Desfazer envio ao RIP
+            </Button>
+          )}
+          {(key === 'ready' || key === 'sent') && downloadUrl && (
+            <Button asChild variant="outline">
               <a href={downloadUrl} target="_blank" rel="noreferrer">
                 <Download className="h-4 w-4" />
                 Baixar arquivo final
