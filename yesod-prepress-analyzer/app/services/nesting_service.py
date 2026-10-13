@@ -9,7 +9,7 @@ from app.core.config import Settings
 from app.core.exceptions import AnalyzerError
 from app.nesting.imposition import CutLines
 from app.nesting.marks import Marks
-from app.nesting.planner import PlanItem, PlanOptions, plan
+from app.nesting.planner import PlanFill, PlanItem, PlanOptions, plan
 from app.services.callback_client import CallbackClient
 from app.services.file_downloader import FileDownloader
 from app.services.file_uploader import FileUploader
@@ -69,10 +69,24 @@ class NestingService:
                             bleed_mm=source.bleed_mm,
                             cut_names=source.cut_names,
                             use_die_line=source.use_die_line,
+                            fill=source.fill,
                         )
                     )
 
-                await notify("progress", "running", 50, "Encaixando as peças")
+                auto_fill = None
+                if request.fill is not None:
+                    auto_fill = PlanFill(
+                        roll_length_mm=(
+                            request.fill.roll_length_mm if request.fill.target == "roll" else None
+                        ),
+                        auto_rotation=request.fill.auto_rotation,
+                    )
+                await notify(
+                    "progress",
+                    "running",
+                    50,
+                    "Calculando quantas peças cabem" if auto_fill else "Encaixando as peças",
+                )
                 material = request.material
                 options = PlanOptions(
                     width_mm=material.width_mm,
@@ -102,7 +116,7 @@ class NestingService:
                 )
                 output = workspace / "montagem.pdf"
                 # CPU-bound: keep the event loop free for nothing else, but off the main thread.
-                summary = await asyncio.to_thread(plan, items, options, output)
+                summary = await asyncio.to_thread(plan, items, options, output, auto_fill)
 
                 await notify("progress", "running", 90, "Salvando o PDF montado")
                 size, sha256 = await self.uploader.upload(str(request.output_upload_url), output)

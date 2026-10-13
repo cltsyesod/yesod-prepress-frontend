@@ -128,8 +128,19 @@ export default function NestingPage() {
       offcutId: 'widthMm' in patch || 'lengthMm' in patch ? undefined : p.offcutId,
     }))
 
-  const chosen = useMemo(() => jobs.filter((job) => selected[job.id]), [jobs, selected])
-  const problem = materialProblem(params, isSheet)
+  const fillOn = params.fill?.enabled === true
+  // Com preenchimento: quais trabalhos podem receber cópias além do mínimo (padrão: todos).
+  const [fillFlags, setFillFlags] = useState<Record<string, boolean>>({})
+  const chosen = useMemo(() => jobs.filter((job) => job.id in selected), [jobs, selected])
+  const problem =
+    materialProblem(params, isSheet) ||
+    (fillOn && !isSheet && !(params.fill?.rollLengthMm && params.fill.rollLengthMm > 0)
+      ? 'Informe quanto do rolo usar (mm) para o sistema preencher.'
+      : '') ||
+    (fillOn && chosen.length > 0 && !chosen.some((job) => fillFlags[job.id] !== false || (selected[job.id] ?? 0) > 0)
+      ? 'Marque "preencher" em ao menos um trabalho, ou dê um mínimo.'
+      : '') ||
+    (!fillOn && chosen.some((job) => !(selected[job.id] > 0)) ? 'Informe a quantidade de cada trabalho.' : '')
   const canSubmit = chosen.length > 0 && !problem
 
   const submit = async () => {
@@ -139,6 +150,7 @@ export default function NestingPage() {
         ...params,
         material: { ...params.material, lengthMm: isSheet ? params.material.lengthMm : undefined },
         offcutId: isSheet ? params.offcutId : undefined,
+        fill: fillOn ? params.fill : undefined,
       }
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(finalParams))
@@ -156,7 +168,8 @@ export default function NestingPage() {
           projectId: job.id,
           fileId: primary.id,
           label: job.name,
-          quantity: selected[job.id],
+          quantity: selected[job.id] ?? 0,
+          fill: fillOn ? fillFlags[job.id] !== false : undefined,
           fileScale: job.ticket.fileScale || profile?.scale || 1,
           bleedMm: job.ticket.minBleed ?? profile?.minBleed ?? 0,
           cutNames: cutName ? [cutName, 'CutContour', 'Corte', 'Cut'] : undefined,
@@ -205,6 +218,19 @@ export default function NestingPage() {
     setSubmitting(false)
   }
 
+  // As quantidades que o preenchimento calculou viram as da lista, para ajustar à mão.
+  const useQuantities = (run: NestingRun) => {
+    const computed = new Map((run.result?.autoFill?.quantities ?? []).map((q) => [q.key, q.quantity]))
+    const next: Record<string, number> = {}
+    for (const item of run.items) {
+      const quantity = computed.get(item.fileId) ?? 0
+      if (quantity > 0) next[item.projectId] = quantity
+    }
+    setSelected(next)
+    setParams((p) => ({ ...p, fill: { enabled: false, rollLengthMm: p.fill?.rollLengthMm, autoRotation: p.fill?.autoRotation ?? false } }))
+    toast({ title: 'Quantidades na lista', description: 'Ajuste o que quiser e monte de novo.' })
+  }
+
   const remove = async (run: NestingRun) => {
     await nestingService.remove(run.id).catch(() => null)
     if (currentId === run.id) setCurrentId(null)
@@ -223,21 +249,56 @@ export default function NestingPage() {
       <div className="grid gap-4 lg:grid-cols-[minmax(0,380px)_minmax(0,1fr)]">
         <section className="space-y-5 rounded-lg border border-border bg-card p-4">
           <div className="space-y-2">
-            <Label>Trabalhos e quantidades</Label>
+            <div className="flex items-center justify-between gap-2">
+              <Label>Trabalhos e quantidades</Label>
+              <div className="flex rounded-md border border-border p-0.5 text-xs" role="tablist" aria-label="Quantidades">
+                {[
+                  { on: false, label: 'Eu defino' },
+                  { on: true, label: 'Preencher o material' },
+                ].map((option) => (
+                  <button
+                    key={option.label}
+                    type="button"
+                    role="tab"
+                    aria-selected={fillOn === option.on}
+                    className={cn(
+                      'rounded px-2 py-1',
+                      fillOn === option.on ? 'bg-primary text-primary-foreground' : 'text-muted-foreground',
+                    )}
+                    onClick={() =>
+                      setParams((p) => ({
+                        ...p,
+                        fill: { enabled: option.on, rollLengthMm: p.fill?.rollLengthMm, autoRotation: p.fill?.autoRotation ?? false },
+                      }))
+                    }
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {fillOn && (
+              <p className="rounded-md bg-primary/5 px-2.5 py-2 text-xs text-muted-foreground">
+                O sistema calcula quantas cópias de cada trabalho marcado cabem{' '}
+                {isSheet ? 'na chapa' : 'no comprimento de rolo informado abaixo'}, com o espaço e os giros escolhidos. O
+                número ao lado é o mínimo (vazio = nenhum); desmarque "preencher" para o trabalho ficar só no mínimo.
+              </p>
+            )}
             <div className="max-h-64 space-y-1 overflow-auto rounded-md border border-border p-1">
               {jobs.length === 0 && (
                 <p className="p-3 text-sm text-muted-foreground">Nenhum trabalho na fila.</p>
               )}
               {jobs.map((job) => {
-                const quantity = selected[job.id]
+                const included = job.id in selected
+                const quantity = selected[job.id] ?? 0
                 return (
                   <div key={job.id} className="flex items-center gap-2 rounded px-2 py-1.5 hover:bg-muted">
                     <Checkbox
-                      checked={!!quantity}
+                      checked={included}
                       onCheckedChange={(checked) =>
                         setSelected((s) => {
                           const next = { ...s }
-                          if (checked) next[job.id] = s[job.id] || 1
+                          if (checked) next[job.id] = s[job.id] ?? (fillOn ? 0 : 1)
                           else delete next[job.id]
                           return next
                         })
@@ -248,14 +309,32 @@ export default function NestingPage() {
                       <p className="truncate text-sm text-foreground">{job.name}</p>
                       {job.clientName && <p className="truncate text-xs text-muted-foreground">{job.clientName}</p>}
                     </div>
-                    {!!quantity && (
+                    {included && fillOn && (
+                      <label
+                        className="flex items-center gap-1 text-[11px] text-muted-foreground"
+                        title="Pode receber cópias além do mínimo"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={fillFlags[job.id] !== false}
+                          onChange={(e) => setFillFlags((f) => ({ ...f, [job.id]: e.target.checked }))}
+                        />
+                        preencher
+                      </label>
+                    )}
+                    {included && (
                       <Input
                         className="h-8 w-20"
                         inputMode="numeric"
-                        aria-label="Quantidade"
-                        value={quantity}
+                        aria-label={fillOn ? 'Mínimo' : 'Quantidade'}
+                        title={fillOn ? 'Mínimo de cópias deste trabalho' : 'Quantidade'}
+                        placeholder={fillOn ? 'mín.' : undefined}
+                        value={fillOn && !quantity ? '' : quantity}
                         onChange={(e) =>
-                          setSelected((s) => ({ ...s, [job.id]: Math.max(1, Math.round(numberOr(e.target.value, 1))) }))
+                          setSelected((s) => ({
+                            ...s,
+                            [job.id]: Math.max(fillOn ? 0 : 1, Math.round(numberOr(e.target.value, fillOn ? 0 : 1))),
+                          }))
                         }
                       />
                     )}
@@ -338,6 +417,26 @@ export default function NestingPage() {
                 />
               </div>
             )}
+            {!isSheet && fillOn && (
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Usar do rolo (mm)</Label>
+                <Input
+                  inputMode="decimal"
+                  placeholder="ex.: 2000"
+                  value={params.fill?.rollLengthMm || ''}
+                  onChange={(e) =>
+                    setParams((p) => ({
+                      ...p,
+                      fill: {
+                        enabled: true,
+                        autoRotation: p.fill?.autoRotation ?? false,
+                        rollLengthMm: numberOr(e.target.value, 0) || undefined,
+                      },
+                    }))
+                  }
+                />
+              </div>
+            )}
             <div className="space-y-1.5">
               <Label className="text-xs text-muted-foreground">Margem da borda (mm)</Label>
               <Input
@@ -381,6 +480,27 @@ export default function NestingPage() {
             <p className="text-xs text-muted-foreground">
               Peças retangulares só usam 0° e 90°; peças com faca usam todos os ângulos escolhidos.
             </p>
+            {fillOn && params.rotation.allow && (
+              <label className="flex items-start gap-2 pt-1 text-sm">
+                <Checkbox
+                  className="mt-0.5"
+                  checked={params.fill?.autoRotation === true}
+                  onCheckedChange={(v) =>
+                    setParams((p) => ({
+                      ...p,
+                      fill: { enabled: true, rollLengthMm: p.fill?.rollLengthMm, autoRotation: v === true },
+                    }))
+                  }
+                />
+                <span>
+                  Testar os giros e ficar com o que cabe mais
+                  <span className="block text-xs text-muted-foreground">
+                    Compara só combinações dos ângulos acima (todos, quartos de volta, meia volta, sem giro). Leva um
+                    pouco mais.
+                  </span>
+                </span>
+              </label>
+            )}
           </div>
 
           <div className="flex items-start justify-between gap-3">
@@ -568,6 +688,7 @@ export default function NestingPage() {
               onComplete={complete}
               onOffcutSaved={loadOffcuts}
               busy={submitting}
+              onUseQuantities={useQuantities}
             />
           )}
 
@@ -645,6 +766,7 @@ function RunDetail({
   onComplete,
   onOffcutSaved,
   busy,
+  onUseQuantities,
 }: {
   run: NestingRun
   outputUrl: string
@@ -653,13 +775,16 @@ function RunDetail({
   onComplete: (run: NestingRun, fileId: string, extra: number) => void
   onOffcutSaved: () => void
   busy: boolean
+  /** Leva as quantidades calculadas para a lista (modo "eu defino"). */
+  onUseQuantities?: (run: NestingRun) => void
 }) {
   const result = run.result ?? {}
   const sheets = result.sheets ?? []
   const width = run.params?.material?.widthMm
   const last = sheets[sheets.length - 1]
   const offcut = last?.offcutMm
-  const fill = (result.fill ?? []).filter((f) => f.extra > 0)
+  // Preenchida automaticamente, a chapa já está cheia: sem sugestão de completar.
+  const fill = result.autoFill ? [] : (result.fill ?? []).filter((f) => f.extra > 0)
   const mm = (value: number) => Math.round(value).toLocaleString('pt-BR')
   const [savedOffcut, setSavedOffcut] = useState('')
   const saveOffcut = async (source: NestingRun, size: [number, number]) => {
@@ -735,6 +860,33 @@ function RunDetail({
         <p className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm text-amber-700 dark:text-amber-400">
           Não couberam: {result.unplaced.map((u) => `${u.label} (${u.reason})`).join('; ')}
         </p>
+      )}
+      {result.autoFill && (
+        <div className="space-y-2 rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm">
+          <p className="font-medium text-foreground">
+            Preenchimento automático{' '}
+            {result.autoFill.rollLengthMm ? `de ${mm(result.autoFill.rollLengthMm)} mm do rolo` : 'da chapa'}
+          </p>
+          <ul className="flex flex-wrap gap-x-5 gap-y-1">
+            {result.autoFill.quantities
+              .filter((q) => q.quantity > 0)
+              .map((q) => (
+                <li key={q.key} className="text-foreground">
+                  <span className="font-semibold tabular-nums">{q.quantity}</span> × {q.label}
+                  {q.minimum > 0 && <span className="text-muted-foreground"> (mínimo {q.minimum})</span>}
+                </li>
+              ))}
+          </ul>
+          <p className="text-xs text-muted-foreground">
+            Giros usados: {result.autoFill.rotations} · {result.autoFill.tested} encaixes testados · nenhuma cópia a mais
+            cabe com este espaço entre peças.
+          </p>
+          {onUseQuantities && (
+            <Button size="sm" variant="outline" onClick={() => onUseQuantities(run)}>
+              Usar estas quantidades
+            </Button>
+          )}
+        </div>
       )}
       {last && offcut && offcut[1] > 0 && (
         <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-card p-3 text-sm text-foreground">

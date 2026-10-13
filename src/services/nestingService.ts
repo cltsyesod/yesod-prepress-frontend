@@ -26,6 +26,11 @@ export interface NestingParams {
   marks?: NestingMarks
   /** Retalho do estoque usado como material (baixado quando a montagem é criada). */
   offcutId?: string
+  /**
+   * Preenchimento automático: o sistema calcula quantas cópias de cada trabalho cabem
+   * na chapa (ou em `rollLengthMm` do rolo), com o espaço e os giros escolhidos.
+   */
+  fill?: { enabled: boolean; rollLengthMm?: number; autoRotation: boolean }
 }
 
 /** Marcas fora das peças; formato e medidas seguem o plotter do operador. */
@@ -52,7 +57,10 @@ export interface NestingItem {
   projectId: string
   fileId: string
   label: string
+  /** Quantidade; com preenchimento automático, o mínimo do trabalho (pode ser 0). */
   quantity: number
+  /** Com preenchimento automático: o trabalho pode receber cópias além do mínimo. */
+  fill?: boolean
   fileScale?: string | number
   bleedMm?: number
   cutNames?: string[]
@@ -80,6 +88,13 @@ export interface NestingResult {
   dieLines?: string[]
   /** Cópias a mais de cada trabalho (sozinho) que ainda cabem na última folha. key = fileId. */
   fill?: { key: string; label: string; extra: number }[]
+  /** Quantidades calculadas pelo preenchimento automático. key = fileId. */
+  autoFill?: {
+    quantities: { key: string; label: string; minimum: number; quantity: number }[]
+    rotations: string
+    tested: number
+    rollLengthMm: number | null
+  }
 }
 
 export interface NestingRun {

@@ -3,7 +3,15 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from pydantic import AliasChoices, AnyHttpUrl, BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    AliasChoices,
+    AnyHttpUrl,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 from app.contracts.job_request import DownloadSource
 
@@ -16,7 +24,10 @@ class NestingSource(BaseModel):
     key: str = Field(min_length=1)
     label: str = ""
     file: DownloadSource
-    quantity: int = Field(default=1, ge=1, le=10_000)
+    # Com preenchimento automático é o mínimo do trabalho (pode ser 0).
+    quantity: int = Field(default=1, ge=0, le=10_000)
+    fill: bool = True
+    """Com preenchimento automático: o trabalho pode receber cópias além do mínimo."""
     pages: list[int] = Field(default_factory=list)  # vazio = todas as páginas
     file_scale: float = Field(
         default=1.0, gt=0, le=1000, validation_alias=AliasChoices("fileScale", "file_scale")
@@ -113,6 +124,20 @@ class NestingMarks(BaseModel):
     slug: str = Field(default="", max_length=200)
 
 
+class NestingFill(BaseModel):
+    """Preenchimento automático: o sistema calcula as quantidades que cabem."""
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    target: Literal["sheet", "roll"] = "sheet"
+    roll_length_mm: float | None = Field(
+        default=None, gt=0, le=5080, validation_alias=AliasChoices("rollLengthMm", "roll_length_mm")
+    )
+    auto_rotation: bool = Field(
+        default=False, validation_alias=AliasChoices("autoRotation", "auto_rotation")
+    )
+
+
 class NestingRequest(BaseModel):
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
@@ -128,6 +153,19 @@ class NestingRequest(BaseModel):
     )
     marks: NestingMarks = Field(default_factory=NestingMarks)
     items: list[NestingSource] = Field(min_length=1, max_length=200)
+    fill: NestingFill | None = None
+
+    @model_validator(mode="after")
+    def check_fill_target(self) -> NestingRequest:
+        if self.fill is None:
+            if not any(item.quantity > 0 for item in self.items):
+                raise ValueError("informe a quantidade de ao menos um trabalho")
+            return self
+        if self.fill.target == "roll" and not self.fill.roll_length_mm:
+            raise ValueError("preencher o rolo exige o comprimento a usar (rollLengthMm)")
+        if self.fill.target == "sheet" and not self.material.length_mm:
+            raise ValueError("preencher a chapa exige o comprimento da chapa")
+        return self
 
 
 class NestingCallback(BaseModel):

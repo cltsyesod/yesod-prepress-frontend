@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import pikepdf
@@ -15,6 +15,7 @@ from app.nesting.engine import (
     spare_sets,
     used_efficiency,
 )
+from app.nesting.fill import FillGroup, fill
 from app.nesting.imposition import CutLines, SourcePiece, build_layout
 from app.nesting.marks import Marks
 from app.nesting.shapes import contour_pieces, page_pieces, scaled
@@ -35,6 +36,16 @@ class PlanItem:
     """Bleed at final size, used only when the piece has a die line or no BleedBox."""
     cut_names: list[str] = field(default_factory=lambda: ["CutContour", "Corte", "Cut"])
     use_die_line: bool = True
+    fill: bool = True
+    """With automatic filling: whether this job may receive copies beyond its quantity."""
+
+
+@dataclass(slots=True)
+class PlanFill:
+    """Automatic quantities: fill one sheet, or `roll_length_mm` of the roll."""
+
+    roll_length_mm: float | None = None
+    auto_rotation: bool = False
 
 
 @dataclass(slots=True)
@@ -73,7 +84,9 @@ def _has_bleed_around_trim(page: pikepdf.Page) -> bool:
     return min(t[0] - b[0], t[1] - b[1], b[2] - t[2], b[3] - t[3]) > 0.5
 
 
-def plan(items: list[PlanItem], options: PlanOptions, output: Path) -> dict:
+def plan(
+    items: list[PlanItem], options: PlanOptions, output: Path, auto_fill: PlanFill | None = None
+) -> dict:
     material = Material(
         width=options.width_mm * MM,
         length=options.length_mm * MM if options.length_mm else None,
@@ -137,11 +150,46 @@ def plan(items: list[PlanItem], options: PlanOptions, output: Path) -> dict:
                         )
                     )
 
-        result = nest(nest_items, material)
+        filled = None
+        if auto_fill is not None:
+            if auto_fill.roll_length_mm:
+                # The chosen length of the roll is treated as one sheet of that length.
+                material = replace(material, length=auto_fill.roll_length_mm * MM)
+            groups = [
+                FillGroup(
+                    key=item.key,
+                    label=item.label,
+                    pieces=[n for n in nest_items if n.key.split("#")[0] == item.key],
+                    minimum=item.quantity,
+                    fillable=item.fill,
+                )
+                for item in items
+            ]
+            filled = fill([g for g in groups if g.pieces], material, auto_fill.auto_rotation)
+            for piece in nest_items:
+                piece.quantity = filled.quantities.get(piece.key.split("#")[0], 0)
+            result = filled.result
+        else:
+            result = nest([n for n in nest_items if n.quantity > 0], material)
         layout = build_layout(result, material, sources, options.cut_lines, options.marks)
         layout.save(output)
         summary = summarize(result, material, sources)
         summary["fill"] = spare_room(result, material, nest_items, items)
+        if filled is not None:
+            summary["autoFill"] = {
+                "quantities": [
+                    {
+                        "key": item.key,
+                        "label": item.label,
+                        "minimum": item.quantity,
+                        "quantity": filled.quantities.get(item.key, 0),
+                    }
+                    for item in items
+                ],
+                "rotations": filled.rotations,
+                "tested": filled.tested,
+                "rollLengthMm": auto_fill.roll_length_mm,
+            }
         return summary
     finally:
         for pdf in opened:

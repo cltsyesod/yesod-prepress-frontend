@@ -51,6 +51,8 @@ Deno.serve(async (req: Request) => {
     }
     if (!analyzerUrl || !inboundSecret) return fail('Analisador não configurado')
 
+    // Preenchimento automático: o analisador calcula as quantidades que cabem.
+    const autoFill = run.params?.fill?.enabled === true
     // Cada trabalho: URL assinada do arquivo principal + parâmetros vindos da ficha.
     const items = []
     for (const item of Array.isArray(run.items) ? run.items : []) {
@@ -77,7 +79,9 @@ Deno.serve(async (req: Request) => {
           sha256: /^[0-9a-f]{64}$/i.test(file.sha256 || '') ? file.sha256 : undefined,
           sizeBytes: file.size_bytes || undefined,
         },
-        quantity: Math.max(1, Number(item.quantity) || 1),
+        // Preenchendo o material, a quantidade é o mínimo do trabalho (pode ser 0).
+        quantity: autoFill ? Math.max(0, Math.round(Number(item.quantity) || 0)) : Math.max(1, Number(item.quantity) || 1),
+        fill: item.fill !== false,
         // Sem lista de páginas, o analisador usa todas as páginas do arquivo.
         pages: Array.isArray(item.pages) ? item.pages : [],
         fileScale: item.fileScale || 1,
@@ -103,6 +107,15 @@ Deno.serve(async (req: Request) => {
       cutLines: params.cutLines ?? {},
       marks: params.marks ?? {},
       items,
+      ...(autoFill
+        ? {
+            fill: {
+              target: params.material?.lengthMm ? 'sheet' : 'roll',
+              rollLengthMm: params.material?.lengthMm ? undefined : Number(params.fill.rollLengthMm) || undefined,
+              autoRotation: params.fill.autoRotation === true,
+            },
+          }
+        : {}),
     })
     const timestamp = String(Math.floor(Date.now() / 1000))
     const requestId = crypto.randomUUID()
