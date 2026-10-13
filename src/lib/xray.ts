@@ -26,7 +26,7 @@ export const sectionApplies = (id: SectionId, p: FileProfile | null): boolean =>
 
 export interface FileProfile {
   technology?: 'grafica' | 'dtf' | 'dtg'
-  textile?: { pages: TextilePage[]; error: string } | null
+  textile?: { pages: TextilePage[]; error: string; settings?: Record<string, string | number | boolean | null> } | null
   document?: {
     pdfVersion?: string
     pdfx?: string

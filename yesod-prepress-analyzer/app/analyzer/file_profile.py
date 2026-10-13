@@ -159,6 +159,20 @@ def file_profile(context: DocumentContext) -> dict:
         "textile": {
             "pages": [page.to_dict() for page in context.facts.get("textile_pages", [])],
             "error": context.facts.get("textile_error", ""),
+            # Configurações usadas (perfil + ficha); vazio = a confirmar pelo operador.
+            "settings": profile.textile.model_dump(
+                include={
+                    "print_width_mm", "print_height_mm", "min_line_mm", "alpha_threshold_percent",
+                    "choke_mm", "spread_mm", "white_mode", "white_spot_name",
+                    "white_density_percent",
+                }
+            )
+            | {
+                key: (profile.textile.model_extra or {}).get(key)
+                for key in (
+                    "equipment", "rip", "media", "ink", "outputFormat", "mirror", "pretreatment"
+                )
+            },
         }
         if profile.is_textile
         else None,

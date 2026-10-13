@@ -243,6 +243,43 @@ export function factsOf(id: SectionId, p: FileProfile, bad: Tone): Fact[] {
       const all = p.textile?.pages ?? []
       if (!all.length) return [{ label: 'Medição', value: p.textile?.error || 'não disponível', tone: bad }]
       const pct = (v: number) => `${(v * 100).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`
+      // Configurações usadas na análise (perfil + ficha); vazio = a confirmar pelo operador.
+      const s = p.textile?.settings ?? {}
+      const SETTINGS: [string, string, string?][] = [
+        ['equipment', 'Equipamento'],
+        ['rip', 'RIP'],
+        ['media', p.technology === 'dtf' ? 'Filme' : 'Substrato'],
+        ['ink', 'Tinta'],
+        ['outputFormat', 'Formato de saída'],
+        ['print_width_mm', p.technology === 'dtf' ? 'Largura útil do filme' : 'Largura da área', 'mm'],
+        ...(p.technology === 'dtg' ? [['print_height_mm', 'Altura da área', 'mm'] as [string, string, string]] : []),
+        ['white_mode', 'Base branca'],
+        ['white_spot_name', 'Cor do branco'],
+        ['alpha_threshold_percent', 'Opacidade mínima do branco', '%'],
+        ['white_density_percent', 'Densidade do branco', '%'],
+        ['choke_mm', 'Choke', 'mm'],
+        ['spread_mm', 'Spread', 'mm'],
+        ['min_line_mm', 'Traço mínimo', 'mm'],
+        ...(p.technology === 'dtg' ? [['pretreatment', 'Pré-tratamento'] as [string, string]] : []),
+      ]
+      const WHITE: Record<string, string> = { generate: 'gerada pelo sistema', from_file: 'vem na arte', rip: 'gerada pelo RIP' }
+      const used: Fact[] = SETTINGS.map(([key, label, unit]) => {
+        const v = s[key]
+        const empty = v === null || v === undefined || v === ''
+        return {
+          label,
+          value: empty ? 'a confirmar' : key === 'white_mode' ? WHITE[String(v)] ?? String(v) : `${typeof v === 'number' ? num(v) : v}${unit ? ` ${unit}` : ''}`,
+          tone: empty ? ('info' as Tone) : undefined,
+        }
+      })
+      if (s.mirror !== undefined && s.mirror !== null) used.push({ label: 'Espelhar na saída', value: s.mirror ? 'sim' : 'não' })
+      const toConfirm = used.filter((f) => f.value === 'a confirmar').length
+      return [
+        { label: 'Configurações usadas', value: toConfirm ? `${toConfirm} a confirmar` : 'completas', tone: toConfirm ? ('info' as Tone) : 'ok' },
+        ...used,
+        ...measuredFacts(),
+      ]
+      function measuredFacts(): Fact[] {
       return all.flatMap((tp) => [
         ...(all.length > 1 ? [{ label: `Página ${tp.page}`, value: '' }] : []),
         { label: 'Tamanho da estampa', value: tp.artSizeMm ? `${size(tp.artSizeMm)} (±${num(1 / tp.px_per_mm)} mm)` : 'sem tinta' },
@@ -258,6 +295,7 @@ export function factsOf(id: SectionId, p: FileProfile, bad: Tone): Fact[] {
           tone: tp.thin_measured ? (tp.thin_mm2 ? bad : 'ok') : ('info' as Tone),
         },
       ])
+      }
     }
     case 'structure': {
       const d = p.document ?? {}
