@@ -29,6 +29,7 @@ import {
 import { createDefaultRules, createTextileRules } from '@/services/profileService'
 import type { ProductionProfile, ProfileTechnology, TechnicalRule, Severity } from '@/types'
 import { TextileProfileFields } from '@/components/profiles/TextileProfileFields'
+import { ColorProfileFields } from '@/components/profiles/ColorProfileFields'
 
 type FormData = Omit<ProductionProfile, 'id' | 'createdAt' | 'updatedAt'>
 
@@ -245,6 +246,12 @@ export function ProfileFormDialog({ open, onOpenChange, initialData, onSave, sco
               </AccordionContent>
             </AccordionItem>
           )}
+          <AccordionItem value="color-management">
+            <AccordionTrigger className="text-sm font-semibold">Gestão de cor (perfis ICC)</AccordionTrigger>
+            <AccordionContent className="pt-1">
+              <ColorProfileFields value={form.color ?? {}} onChange={(v) => update('color', v)} />
+            </AccordionContent>
+          </AccordionItem>
           <AccordionItem value="color">
             <AccordionTrigger className="text-sm font-semibold">Cor e Imagem</AccordionTrigger>
             <AccordionContent className="space-y-3 pt-1">

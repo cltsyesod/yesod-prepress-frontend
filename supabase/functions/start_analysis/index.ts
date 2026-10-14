@@ -235,12 +235,17 @@ Deno.serve(async (req: Request) => {
         if (stored) profileSettings = { ...(stored.settings ?? {}), name: stored.name }
       }
 
+      // Gestão de cor: perfis ICC da biblioteca da empresa, com link temporário assinado.
+      const analyzerProfile = toAnalyzerProfile(profileId, profileSettings, project?.job_ticket ?? {})
+      const color = await colorSettings(adminDb, org, profileSettings.color)
+      if (color) analyzerProfile.color = color
+
       const payload = JSON.stringify({
         analysisId: jobId,
         projectId: projectId || 'sem-projeto',
         fileId: file.id,
         versionId: String(job?.version || file.version || ''),
-        productionProfile: toAnalyzerProfile(profileId, profileSettings, project?.job_ticket ?? {}),
+        productionProfile: analyzerProfile,
         // O analisador confere se o conteúdo é mesmo deste tipo (PDF, TIFF, JPEG ou PNG).
         file: {
           url: signedUrl,
@@ -313,3 +318,31 @@ Deno.serve(async (req: Request) => {
     return json(500, { error: err?.message || 'Internal server error' })
   }
 })
+
+/** Perfis ICC escolhidos no perfil de produção, da empresa, com link de 10 min para o analisador. */
+async function colorSettings(adminDb: any, org: string, color: any) {
+  if (!color || typeof color !== 'object') return undefined
+  const ids = [color.outputIccId, color.rgbSourceIccId].filter((v) => typeof v === 'string' && v)
+  const rows: Record<string, any> = {}
+  if (ids.length) {
+    const { data } = await adminDb
+      .from('icc_profiles')
+      .select('id, name, storage_path, color_space')
+      .in('id', ids)
+      .eq('org_id', org)
+    for (const row of data ?? []) rows[row.id] = row
+  }
+  const sign = async (id: string | undefined) => {
+    const row = id ? rows[id] : undefined
+    if (!row) return undefined
+    const { data } = await adminDb.storage.from('pdfs').createSignedUrl(row.storage_path, 600)
+    return data?.signedUrl ? { url: data.signedUrl, name: row.name, colorSpace: row.color_space } : undefined
+  }
+  return {
+    workflow: color.workflow ?? 'analyze',
+    intent: color.intent ?? 'relative',
+    blackPointCompensation: color.blackPointCompensation !== false,
+    output: await sign(color.outputIccId),
+    rgbSource: await sign(color.rgbSourceIccId),
+  }
+}

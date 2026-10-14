@@ -9,6 +9,8 @@ from app.rules.color_rules import (
     RgbContentRule,
     SpotDuplicateRule,
     SpotInventoryRule,
+    GamutRule,
+    OutputConditionRule,
 )
 from app.rules.file_rules import PdfSyntaxRule, PdfVersionRule, PdfXRule, PdfiumRenderRule
 from app.rules.finishing_rules import CutLayerRule, MagentaDieLineRule
@@ -50,6 +52,8 @@ DEFAULT_RULES: tuple[Rule, ...] = (
     InkCoverageRule(),
     SpotDuplicateRule(),
     SpotInventoryRule(),
+    GamutRule(),
+    OutputConditionRule(),
     CutLayerRule(),
     MagentaDieLineRule(),
     TextileMeasureRule(),

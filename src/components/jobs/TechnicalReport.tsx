@@ -1,3 +1,4 @@
+import { GamutPanel } from '@/components/jobs/xray/GamutPanel'
 import { PdfxPreflight } from '@/components/jobs/xray/PdfxPreflight'
 import { InkProportions } from '@/components/jobs/xray/InkProportions'
 import { useEffect, useState } from 'react'
@@ -109,6 +110,12 @@ export function TechnicalReport({
           {fileProfile?.pdfx4?.checks?.length ? (
             <section className="report-section">
               <PdfxPreflight profile={fileProfile} />
+            </section>
+          ) : null}
+
+          {fileProfile?.gamut && !fileProfile.gamut.error ? (
+            <section className="report-section">
+              <GamutPanel profile={fileProfile} />
             </section>
           ) : null}
 

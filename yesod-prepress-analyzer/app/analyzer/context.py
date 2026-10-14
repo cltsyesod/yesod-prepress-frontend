@@ -56,6 +56,10 @@ class ColorInfo:
     maximum_declared_ink_coverage: float = 0.0
     output_intent_identifier: str = ""
     output_intent_valid: bool | None = None
+    rgb_colors: set[tuple[float, float, float]] = field(default_factory=set)
+    """Cores RGB de dispositivo usadas em vetores e textos (até 2000, para o gamut)."""
+    output_intent_profile: bytes = b""
+    """Perfil ICC incorporado no Output Intent (para comparar com o destino)."""
 
 
 @dataclass(slots=True)

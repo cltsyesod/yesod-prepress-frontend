@@ -43,6 +43,11 @@ def inspect_colors(pdf: pikepdf.Pdf) -> ColorInfo:
             op = str(operator)
             if op in {"rg", "RG"}:
                 info.rgb_operators += 1
+                if len(info.rgb_colors) < 2000:
+                    try:
+                        info.rgb_colors.add(tuple(round(float(v), 4) for v in operands[:3]))
+                    except (TypeError, ValueError):
+                        pass
             elif op in {"k", "K"}:
                 info.cmyk_operators += 1
                 try:
@@ -64,8 +69,10 @@ def inspect_colors(pdf: pikepdf.Pdf) -> ColorInfo:
         profile = intent.get("/DestOutputProfile")
         if profile is not None:
             try:
-                ImageCms.getOpenProfile(BytesIO(profile.read_bytes()))
+                data = profile.read_bytes()
+                ImageCms.getOpenProfile(BytesIO(data))
                 info.output_intent_valid = True
+                info.output_intent_profile = data
             except Exception:
                 info.output_intent_valid = False
     return info

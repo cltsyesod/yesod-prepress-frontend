@@ -161,6 +161,8 @@ export interface ProductionProfile {
   /** Tecnologia de produção: define quais verificações valem. Vazio = gráfica. */
   technology?: ProfileTechnology
   textile?: TextileSettings
+  /** Gestão de cor: perfis ICC da biblioteca da empresa e como analisar/converter. */
+  color?: ColorSettings
   createdAt: string
   updatedAt: string
 }
@@ -357,3 +359,20 @@ export interface AnalysisProblem {
 }
 
 export type SortOption = 'recent' | 'oldest' | 'deadline' | 'name' | 'severity'
+
+/**
+ * Gestão de cor do perfil de produção. Os perfis ICC vêm da biblioteca da empresa
+ * (icc_profiles); nada é suposto: sem perfil de destino, a análise de gamut não roda.
+ */
+export interface ColorSettings {
+  /** Perfil de saída (destino) da condição de impressão. */
+  outputIccId?: string
+  /** Perfil para o RGB sem perfil (vazio = a análise usa sRGB e diz isso). */
+  rgbSourceIccId?: string
+  /** Intenção de renderização usada na análise e, depois, na conversão. */
+  intent?: 'perceptual' | 'relative' | 'saturation' | 'absolute'
+  /** Compensação do ponto preto. */
+  blackPointCompensation?: boolean
+  /** Fluxo de cor: só analisar, preservar a origem (o RIP converte) ou preparar para o destino. */
+  workflow?: 'analyze' | 'preserve' | 'convert'
+}

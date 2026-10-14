@@ -19,6 +19,7 @@ from app.fixes.engine import apply_fixes
 from app.services.callback_client import CallbackClient
 from app.services.file_downloader import FileDownloader
 from app.services.file_uploader import FileUploader
+from app.services.icc_fetch import fetch_color_profiles
 from app.services.temp_files import job_workspace
 
 logger = logging.getLogger(__name__)
@@ -159,7 +160,11 @@ class JobService:
                     pdf_path = fixed_path
                 await notify("progress", "validating", 20, "Validando estrutura PDF")
                 await notify("progress", "extracting", 35, "Inspecionando objetos técnicos")
-                result = self.engine.analyze(pdf_path, request.production_profile)
+                # Perfis ICC do perfil de produção (gestão de cor), baixados para a análise.
+                color_files = await fetch_color_profiles(
+                    request.production_profile, pdf_path.parent, self.settings
+                )
+                result = self.engine.analyze(pdf_path, request.production_profile, color_files)
                 clock.lap("analysis")
                 if self._cancelled(request.analysis_id):
                     raise JobCancelled("job cancelled during analysis")

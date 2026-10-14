@@ -33,6 +33,18 @@ export interface InkPage {
 export interface FileProfile {
   /** Proporção de tintas pela separação do arquivo (todas as tecnologias). */
   inks?: { pages: InkPage[]; error: string; dpi?: number }
+  /** Gestão de cor: gamut no perfil de destino (Little CMS). */
+  gamut?: {
+    error?: string
+    output?: string
+    outputSpace?: string
+    rgbSource?: string
+    intent: string
+    check?: string
+    images?: { page: number; name: string; share: number; maxDe: number; p95De: number; embeddedProfile: boolean }[]
+    vectors?: { colors: number; outOfGamut: number; worst: { rgb: number[]; de: number }[] }
+    outputIntent?: { name: string; matchesDestination: boolean | null }
+  } | null
   /** Preflight PDF/X-4 (ISO 15930-7). */
   pdfx4?: {
     standard?: string
@@ -167,7 +179,7 @@ export const SECTIONS: { id: SectionId; title: string; codes: string[] }[] = [
   {
     id: 'colors',
     title: 'Cores',
-    codes: ['COLOR_RGB_CONTENT', 'COLOR_SPOT_DUPLICATE', 'COLOR_SPOT_INVENTORY', 'COLOR_OUTPUT_INTENT', 'COLOR_INK_COVERAGE'],
+    codes: ['COLOR_RGB_CONTENT', 'COLOR_SPOT_DUPLICATE', 'COLOR_SPOT_INVENTORY', 'COLOR_OUTPUT_INTENT', 'COLOR_INK_COVERAGE', 'COLOR_OUT_OF_GAMUT', 'COLOR_OUTPUT_CONDITION_MISMATCH'],
   },
   { id: 'fonts', title: 'Fontes e textos', codes: ['FONT_NOT_EMBEDDED', 'FONT_PROGRAM_INVALID'] },
   { id: 'finishing', title: 'Faca e acabamento', codes: ['FINISHING_CUT_LAYER', 'FINISHING_MAGENTA_DIE_LINE'] },

@@ -170,3 +170,78 @@ class InkCoverageRule(Rule):
                 recommendation="Ajuste a separação de cores/geração de preto para o substrato.",
             )
         ]
+
+
+def _pct(value: float) -> str:
+    return f"{value * 100:.1f}".replace(".", ",") + "%"
+
+
+class GamutRule(Rule):
+    """Cores que mudam além da tolerância ao ir para o perfil de destino (gestão de cor)."""
+
+    code = "COLOR_OUT_OF_GAMUT"
+    default_severity = "informational"
+
+    def evaluate(self, context: DocumentContext) -> list[AnalysisIssue]:
+        gamut = context.facts.get("gamut") or {}
+        if not gamut.get("output"):
+            return []
+        images = [i for i in gamut.get("images", []) if i["share"] > 0]
+        vectors = gamut.get("vectors", {})
+        if not images and not vectors.get("outOfGamut"):
+            return []
+        parts = []
+        if vectors.get("outOfGamut"):
+            parts.append(f"{vectors['outOfGamut']} de {vectors['colors']} cores de vetor/texto")
+        for image in images[:5]:
+            parts.append(f"imagem {image['name']} (pág. {image['page']}): {_pct(image['share'])}")
+        return [
+            self.issue(
+                context,
+                title="Cores que mudam ao ir para o perfil de destino",
+                category="Cor",
+                found_value="; ".join(parts),
+                expected_value=f"Cores alcançáveis em {gamut['output']}",
+                description=(
+                    "Pela verificação de gamut (Little CMS, colorimétrica relativa) com "
+                    f"{gamut['output']}, "
+                    "estas cores não são alcançadas pela condição de impressão. "
+                    f"RGB sem perfil foi tratado como {gamut['rgbSource']}."
+                ),
+                recommendation=(
+                    "Confira na prova; se a cor for crítica (marca, Pantone), combine com o "
+                    "cliente uma alternativa alcançável ou aceite a diferença."
+                ),
+            )
+        ]
+
+
+class OutputConditionRule(Rule):
+    """CMYK preparado para outra condição: o RIP pode converter de novo (conversão dupla)."""
+
+    code = "COLOR_OUTPUT_CONDITION_MISMATCH"
+    default_severity = "warning"
+
+    def evaluate(self, context: DocumentContext) -> list[AnalysisIssue]:
+        gamut = context.facts.get("gamut") or {}
+        intent = gamut.get("outputIntent") or {}
+        if intent.get("matchesDestination") is not False or not context.colors.cmyk_operators:
+            return []
+        return [
+            self.issue(
+                context,
+                title="Arte preparada para outra condição de impressão",
+                category="Cor",
+                found_value=f"Perfil de saída da arte: {intent.get('name') or 'outro perfil'}",
+                expected_value=f"Destino: {gamut.get('output')}",
+                description=(
+                    "O CMYK da arte foi feito para outra condição. Se o RIP converter esse CMYK "
+                    "para o destino, as cores mudam (conversão dupla); se não converter, a "
+                    "impressão usa números feitos para outra máquina."
+                ),
+                recommendation=(
+                    "Confirme com o cliente a condição correta ou configure o RIP para tratar o "
+                    "CMYK de origem com o perfil da arte."
+                ),
+            )
+        ]

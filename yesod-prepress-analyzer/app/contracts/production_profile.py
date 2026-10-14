@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
+from pydantic import AliasChoices, AnyHttpUrl, BaseModel, ConfigDict, Field, field_validator
 
 
 class RuleOverride(BaseModel):
@@ -108,6 +108,33 @@ class TextileSettings(BaseModel):
         return value.strip() or None if isinstance(value, str) else value
 
 
+class IccReference(BaseModel):
+    """Perfil ICC da biblioteca da empresa, com link temporário assinado."""
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    url: AnyHttpUrl
+    name: str = ""
+    color_space: str = Field(default="", validation_alias=AliasChoices("colorSpace", "color_space"))
+
+
+class ColorSettings(BaseModel):
+    """Gestão de cor do perfil: destino, origem do RGB sem perfil, intenção e tolerância."""
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    workflow: Literal["analyze", "preserve", "convert"] = "analyze"
+    intent: Literal["perceptual", "relative", "saturation", "absolute"] = "relative"
+    black_point_compensation: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("blackPointCompensation", "black_point_compensation"),
+    )
+    output: IccReference | None = None
+    rgb_source: IccReference | None = Field(
+        default=None, validation_alias=AliasChoices("rgbSource", "rgb_source")
+    )
+
+
 class ProductionProfile(BaseModel):
     """Production tolerances sent by Skip.
 
@@ -202,6 +229,7 @@ class ProductionProfile(BaseModel):
         description="grafica: impressão gráfica; dtf: filme; dtg: direto na peça.",
     )
     textile: TextileSettings = Field(default_factory=lambda: TextileSettings())
+    color: ColorSettings = Field(default_factory=lambda: ColorSettings())
 
     @field_validator("technology", mode="before")
     @classmethod

@@ -248,6 +248,38 @@ function catalogue(issue: AnalysisIssue): Solution[] {
         },
       ]
 
+    case 'COLOR_OUT_OF_GAMUT':
+      return [
+        {
+          kind: 'client',
+          title: 'Avisar o cliente e combinar a cor',
+          text: 'A impressão não alcança essas cores; vale combinar antes de imprimir.',
+          request:
+            'Algumas cores da arte (tons muito vivos de RGB) não são alcançadas pela impressão e vão sair mais fechadas. Se alguma for cor de marca, podemos usar uma referência alcançável (ou Pantone, se o equipamento tiver). Podemos seguir assim?',
+        },
+        {
+          kind: 'accept',
+          title: 'Seguir com a cor mais próxima',
+          text: 'O cliente aceita a diferença prevista pela verificação de gamut.',
+          reason: 'Cores fora do gamut aceitas pelo cliente',
+        },
+      ]
+    case 'COLOR_OUTPUT_CONDITION_MISMATCH':
+      return [
+        {
+          kind: 'client',
+          title: 'Confirmar a condição de impressão',
+          text: 'O CMYK da arte foi feito para outra máquina/papel.',
+          request:
+            'O arquivo foi preparado para outra condição de impressão (perfil de saída diferente do nosso). Pode enviar a versão para a nossa condição, ou o arquivo em RGB/com perfil para fazermos a preparação?',
+        },
+        {
+          kind: 'accept',
+          title: 'Imprimir tratando o CMYK pelo perfil da arte',
+          text: 'Configure o RIP para usar o perfil de origem do arquivo, evitando conversão dupla.',
+          reason: 'CMYK de outra condição; RIP configurado com o perfil da arte',
+        },
+      ]
     case 'TEXTILE_SEMI_TRANSPARENT':
       return [
         {
