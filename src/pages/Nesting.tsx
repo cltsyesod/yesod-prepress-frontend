@@ -1,5 +1,5 @@
 import { isTextile, type Scope } from '@/lib/scope'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Download, LayoutGrid, Loader2, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -81,6 +81,9 @@ export default function NestingPage({ scope = 'print' }: { scope?: Scope }) {
   const [dtfId, setDtfId] = useState<string>()
   const [jobs, setJobs] = useState<Job[]>([])
   const [selected, setSelected] = useState<Record<string, number>>({})
+  // Vindo do trabalho ("Montar"): ele já entra marcado, com as cópias da ficha.
+  const [search, setSearch] = useSearchParams()
+  const incoming = search.get('job')
   const [params, setParams] = useState<NestingParams>(loadParams)
   const [isSheet, setIsSheet] = useState(!!loadParams().material.lengthMm)
   const [submitting, setSubmitting] = useState(false)
@@ -140,6 +143,15 @@ export default function NestingPage({ scope = 'print' }: { scope?: Scope }) {
   // Com preenchimento: quais trabalhos podem receber cópias além do mínimo (padrão: todos).
   const [fillFlags, setFillFlags] = useState<Record<string, boolean>>({})
   const chosen = useMemo(() => jobs.filter((job) => job.id in selected), [jobs, selected])
+  useEffect(() => {
+    if (!incoming) return
+    const job = jobs.find((j) => j.id === incoming)
+    if (!job) return
+    setSelected((s) => ({ ...s, [job.id]: s[job.id] ?? job.ticket.dtf?.copies ?? 1 }))
+    toast({ title: `${job.name} incluído na folha`, description: 'Confira a quantidade e monte.' })
+    setSearch({}, { replace: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [incoming, jobs])
   // Folha de DTF: só trabalhos com perfil DTF; cada um precisa da base branca antes de montar
   // (quando o perfil diz que é o sistema que gera o branco).
   const [whiteDone, setWhiteDone] = useState<Set<string>>(new Set())

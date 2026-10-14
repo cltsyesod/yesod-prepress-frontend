@@ -131,7 +131,7 @@ export function TextileSteps({
           state: sheets === null ? 'waiting' : 'todo',
           text: `${ticket.dtf?.copies ?? 1} cópia(s) a montar`,
           action: (
-            <Link to="/textil/folha" className="text-xs font-medium text-primary hover:underline">
+            <Link to={`/textil/folha?job=${jobId}`} className="text-xs font-medium text-primary hover:underline">
               Montar
             </Link>
           ),
