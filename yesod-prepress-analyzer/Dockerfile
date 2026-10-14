@@ -18,7 +18,7 @@ ENV PATH="/opt/venv/bin:$PATH" \
     ENVIRONMENT=production
 
 RUN apt-get update \
-    && apt-get install --no-install-recommends -y qpdf liblcms2-2 \
+    && apt-get install --no-install-recommends -y qpdf liblcms2-2 ghostscript \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --uid 10001 --shell /usr/sbin/nologin analyzer
 

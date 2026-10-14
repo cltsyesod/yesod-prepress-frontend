@@ -4,6 +4,7 @@ from pathlib import Path
 
 from app.analyzer.document_inspector import inspect_document
 from app.analyzer.file_profile import file_profile
+from app.analyzer.ink_coverage import measure_inks
 from app.analyzer.result import AnalysisResult
 from app.contracts.production_profile import ProductionProfile
 from app.core.config import Settings
@@ -21,4 +22,9 @@ class AnalyzerEngine:
         )
         # Raio-X do arquivo, mostrado na tela do trabalho ao lado das ocorrências.
         result.summary["fileProfile"] = file_profile(context)
+        # Proporção de tintas (separação como num RIP), em todos os módulos.
+        try:
+            result.summary["fileProfile"]["inks"] = measure_inks(path)
+        except Exception as exc:  # noqa: BLE001 - nunca derruba a análise
+            result.summary["fileProfile"]["inks"] = {"pages": [], "error": str(exc)}
         return result
