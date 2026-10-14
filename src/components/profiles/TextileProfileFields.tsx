@@ -109,11 +109,71 @@ export function TextileProfileFields({
         {num('chokeMm', 'Choke do branco (mm)', 'recuo do branco sob a cor')}
         {num('spreadMm', 'Spread (mm)')}
       </div>
+      {!dtf && (
+        <div className="space-y-2 rounded-md border border-border p-3">
+          <Label className="text-xs font-medium text-foreground">Branco conforme a cor da peça</Label>
+          <p className="text-[11px] text-muted-foreground">
+            A cor da peça vem da ficha do trabalho. Sem estratégia definida, o sistema não gera o branco.
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label className={lbl}>Peça escura</Label>
+              <Select value={value.whiteDark ?? ''} onValueChange={(v) => set({ whiteDark: v as TextileSettings['whiteDark'] })}>
+                <SelectTrigger className={field}>
+                  <SelectValue placeholder="definir" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="full" className="text-xs">Branco sob toda a estampa</SelectItem>
+                  <SelectItem value="no_black" className="text-xs">Branco, menos no preto (o tecido faz o preto)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {value.whiteDark === 'no_black'
+              ? num('blackThreshold', 'Limite do preto (luminosidade %)', 'cores até aqui ficam sem branco')
+              : <div />}
+            <div>
+              <Label className={lbl}>Peça clara</Label>
+              <Select value={value.whiteLight ?? ''} onValueChange={(v) => set({ whiteLight: v as TextileSettings['whiteLight'] })}>
+                <SelectTrigger className={field}>
+                  <SelectValue placeholder="definir" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none" className="text-xs">Sem branco</SelectItem>
+                  <SelectItem value="light_colors" className="text-xs">Branco só sob as cores claras</SelectItem>
+                  <SelectItem value="full" className="text-xs">Branco sob toda a estampa</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {value.whiteLight === 'light_colors'
+              ? num('lightThreshold', 'Limite de cor clara (luminosidade %)', 'cores a partir daqui recebem branco')
+              : <div />}
+          </div>
+        </div>
+      )}
+      {dtf && (
+        <div className="grid grid-cols-2 gap-3">
+          {num('sheetLengthMm', 'Comprimento da folha (mm)', 'vazio = filme contínuo (rolo)')}
+          <label className="flex items-center gap-2 pt-5 text-xs">
+            <Switch checked={!!value.sheetLabel} onCheckedChange={(v) => set({ sheetLabel: v })} />
+            Identificação na folha (trabalhos e data)
+          </label>
+        </div>
+      )}
       {!dtf && <TemplatesEditor value={value.templates ?? []} onChange={(templates) => set({ templates })} />}
       <label className="flex items-center gap-2 text-xs">
         <Switch checked={!!value.mirror} onCheckedChange={(v) => set({ mirror: v })} />
-        Espelhar na saída (somente se o fluxo deste equipamento exigir)
+        Espelhar no arquivo (deixe desligado quando o RIP espelha)
       </label>
+      <details className="rounded-md border border-dashed border-border p-3 text-[11px] text-muted-foreground">
+        <summary className="cursor-pointer font-medium text-foreground">Onde encontrar cada valor</summary>
+        <ul className="mt-2 list-disc space-y-1 pl-4">
+          <li>Largura útil do filme / área imprimível e gabaritos: manual da impressora ou software dela (tamanho do berço/platen).</li>
+          <li>Nome da cor do branco: configuração de branco do RIP (o nome da cor especial que ele lê).</li>
+          <li>Opacidade mínima, densidade, choke e spread: ajustes de branco do RIP ou do perfil de tinta do fabricante; confirme com um teste impresso.</li>
+          <li>Traço mínimo: ficha do filme/tinta ou teste de lavagem; pergunte ao fornecedor.</li>
+          <li>Pré-tratamento e limites de preto/cor clara (DTG): recomendação do fabricante da tinta e testes na peça.</li>
+        </ul>
+      </details>
     </div>
   )
 }

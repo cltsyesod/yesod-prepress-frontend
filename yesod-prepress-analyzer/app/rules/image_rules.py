@@ -67,7 +67,8 @@ class ImageResolutionRule(Rule):
                         "preview": (
                             f"Imagens abaixo de {minimum} ppi ampliadas com Lanczos até {minimum} "
                             "ppi no tamanho final (no máximo 4×), em uma cópia; cores e "
-                            "transparência preservadas"
+                            "transparência preservadas. Atenção: cumpre o ppi, mas não recupera "
+                            "detalhe; a nitidez continua a do original"
                         ),
                         "params": {"targetPpi": minimum},
                     },
@@ -148,4 +149,31 @@ class ImageTransparencyRule(Rule):
             )
             for image in context.images
             if image.has_transparency
+        ]
+
+
+class UpscaledImagesRule(Rule):
+    """Depois da ampliação a regra de ppi fica quieta; isto lembra que o detalhe é o original."""
+
+    code = "IMAGE_UPSCALED"
+    default_severity = "informational"
+
+    def evaluate(self, context: DocumentContext) -> list[AnalysisIssue]:
+        if "upscale_images" not in context.facts.get("applied_fixes", []):
+            return []
+        return [
+            self.issue(
+                context,
+                title="Imagens ampliadas pelo sistema",
+                category="Imagem",
+                found_value="Ampliação aplicada (Lanczos)",
+                expected_value="Imagem original na resolução pedida",
+                description=(
+                    "O arquivo atinge o ppi pedido porque as imagens foram ampliadas; a ampliação "
+                    "não recupera detalhe e a nitidez continua a da imagem original."
+                ),
+                recommendation=(
+                    "Para peças vistas de perto, peça ao cliente a imagem em maior resolução."
+                ),
+            )
         ]

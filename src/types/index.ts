@@ -198,6 +198,18 @@ export interface TextileSettings {
   pretreatment?: string
   /** DTG: gabaritos de peça (área imprimível por peça e tamanho). */
   templates?: DtgTemplate[]
+  /** DTG, peça escura: branco sob toda a estampa ou menos no preto (o tecido faz o preto). */
+  whiteDark?: 'full' | 'no_black'
+  /** DTG, peça clara: sem branco, só sob as cores claras ou sob toda a estampa. */
+  whiteLight?: 'none' | 'light_colors' | 'full'
+  /** Luminosidade (%) até a qual a cor conta como preto. */
+  blackThreshold?: number
+  /** Luminosidade (%) a partir da qual a cor é clara. */
+  lightThreshold?: number
+  /** DTF: comprimento da folha (mm); vazio = filme contínuo. */
+  sheetLengthMm?: number
+  /** DTF: faixa de identificação na folha (trabalhos e data). */
+  sheetLabel?: boolean
   notes?: string
 }
 

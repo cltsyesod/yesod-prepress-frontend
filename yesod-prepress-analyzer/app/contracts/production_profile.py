@@ -64,7 +64,45 @@ class TextileSettings(BaseModel):
         validation_alias=AliasChoices("whiteDensity", "white_density_percent"),
     )
 
-    @field_validator("white_mode", "white_spot_name", mode="before")
+    # DTG: estratégia do branco conforme a cor da peça (cor vem da ficha do trabalho).
+    garment_color: str | None = Field(
+        default=None, validation_alias=AliasChoices("garmentColor", "garment_color")
+    )
+    white_dark: Literal["full", "no_black"] | None = Field(
+        default=None, validation_alias=AliasChoices("whiteDark", "white_dark")
+    )
+    white_light: Literal["none", "light_colors", "full"] | None = Field(
+        default=None, validation_alias=AliasChoices("whiteLight", "white_light")
+    )
+    black_threshold_percent: float | None = Field(
+        default=None,
+        ge=0,
+        le=100,
+        validation_alias=AliasChoices("blackThreshold", "black_threshold_percent"),
+    )
+    """Luminosidade até a qual a cor conta como preto (sem branco embaixo em peça escura)."""
+    light_threshold_percent: float | None = Field(
+        default=None,
+        ge=0,
+        le=100,
+        validation_alias=AliasChoices("lightThreshold", "light_threshold_percent"),
+    )
+    """Luminosidade a partir da qual a cor é clara (recebe branco em peça clara)."""
+
+    @property
+    def garment_is_dark(self) -> bool | None:
+        """Pela luminância da cor da peça; None sem cor informada."""
+
+        value = (self.garment_color or "").lstrip("#")
+        if len(value) != 6:
+            return None
+        try:
+            r, g, b = (int(value[i : i + 2], 16) for i in (0, 2, 4))
+        except ValueError:
+            return None
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b < 128
+
+    @field_validator("white_mode", "white_spot_name", "white_dark", "white_light", mode="before")
     @classmethod
     def blank_is_none(cls, value: object) -> object:
         return value.strip() or None if isinstance(value, str) else value

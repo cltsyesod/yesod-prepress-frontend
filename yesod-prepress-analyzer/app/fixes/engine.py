@@ -36,7 +36,13 @@ from app.fixes.magenta import convert_magenta_strokes
 from app.fixes.paths import circle, pdf_path
 from app.fixes.rgb_profile import assign_srgb
 from app.fixes.upscale import upscale_images
-from app.fixes.white import WhiteSettingsMissing, draw_white, white_mask, without_cut_lines
+from app.fixes.white import (
+    STRATEGY_TEXT,
+    WhiteSettingsMissing,
+    draw_white,
+    white_mask,
+    without_cut_lines,
+)
 from app.fixes.white import settings_for as white_settings
 
 # Order matters: boxes first, because the die line and the marks use the TrimBox; a
@@ -384,6 +390,10 @@ def _upscale(pdf: pikepdf.Pdf, profile: ProductionProfile, params: dict) -> Appl
         for item in done
     ]
     details += [f"Não ampliada: {reason}" for reason in skipped]
+    for number in sorted({item.page for item in done}):
+        _record(pdf.pages[number - 1], "upscale_images")
+    if done:
+        details.append("Ampliação cumpre o ppi, mas não recupera detalhe (nitidez do original)")
     return AppliedFix(id="upscale_images", label="Imagens ampliadas (Lanczos)", details=details)
 
 
@@ -510,6 +520,8 @@ def _add_white(
         settings = white_settings(profile, params)
     except WhiteSettingsMissing as exc:
         raise FixError(str(exc)) from exc
+    if settings.strategy == "none":
+        raise FixError("Peça clara e o perfil diz sem branco: nada a gerar")
     layer = pdf.make_indirect(
         pikepdf.Dictionary(Type=pikepdf.Name.OCG, Name=f"Branco ({settings.spot_name})")
     )
@@ -528,7 +540,9 @@ def _add_white(
         label=(
             f"Base branca \"{settings.spot_name}\" gerada ({settings.density_percent:g}%, "
             f"{sign} {abs(settings.offset_mm):g} mm, a partir de {settings.threshold_percent:g}% "
-            "de opacidade)"
+            "de opacidade"
+            + (f"; {STRATEGY_TEXT[settings.strategy]}" if settings.strategy != "full" else "")
+            + ")"
         ),
         details=details,
     )

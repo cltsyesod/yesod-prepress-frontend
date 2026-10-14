@@ -26,7 +26,7 @@ import {
   AccordionTrigger,
   AccordionContent,
 } from '@/components/ui/accordion'
-import { createDefaultRules } from '@/services/profileService'
+import { createDefaultRules, createTextileRules } from '@/services/profileService'
 import type { ProductionProfile, ProfileTechnology, TechnicalRule, Severity } from '@/types'
 import { TextileProfileFields } from '@/components/profiles/TextileProfileFields'
 
@@ -97,7 +97,9 @@ export function ProfileFormDialog({ open, onOpenChange, initialData, onSave, sco
       setForm(
         initialData
           ? { ...initialData, rules: initialData.rules.map((r) => ({ ...r })) }
-          : { ...defaultForm(), technology: scope === 'textile' ? 'dtf' : 'grafica' },
+          : scope === 'textile'
+            ? { ...defaultForm(), technology: 'dtf', colorMode: 'RGB', category: 'DTF', rules: createTextileRules() }
+            : { ...defaultForm(), technology: 'grafica' },
       )
     }
   }, [open, initialData])

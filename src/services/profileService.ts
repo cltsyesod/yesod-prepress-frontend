@@ -37,6 +37,21 @@ export function createDefaultRules(): TechnicalRule[] {
   }))
 }
 
+/**
+ * Regras de estamparia (DTF/DTG): RGB é o fluxo normal (o RIP converte; aviso só informa),
+ * e sangria, faca, preto e sobreimpressão de gráfica não se aplicam.
+ */
+export function createTextileRules(): TechnicalRule[] {
+  const off = new Set(['bleed', 'margins', 'cut_layer', 'black', 'overprint'])
+  return createDefaultRules().map((r) =>
+    r.key === 'color_mode' || r.key === 'icc_profile'
+      ? { ...r, severity: 'info' as Severity }
+      : off.has(r.key)
+        ? { ...r, enabled: false }
+        : r,
+  )
+}
+
 const now = () => new Date().toISOString()
 
 function make(
@@ -126,11 +141,15 @@ function createSeedProfiles(): ProductionProfile[] {
       technology: 'dtf',
       allowedFormats: ['PDF', 'PNG', 'TIFF'],
       textile: {},
+      colorMode: 'RGB',
+      rules: createTextileRules(),
     }),
     make('wp-dtg', 'DTG (direto na peça)', 'Impressão na peça: preencha área imprimível, tinta e branco', 'DTG', {
       technology: 'dtg',
       allowedFormats: ['PDF', 'PNG', 'TIFF'],
       textile: {},
+      colorMode: 'RGB',
+      rules: createTextileRules(),
     }),
     make(
       'wp-custom',

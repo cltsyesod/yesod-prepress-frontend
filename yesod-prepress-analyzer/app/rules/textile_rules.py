@@ -10,6 +10,7 @@ from __future__ import annotations
 from app.analyzer.alpha_inspector import AlphaPage
 from app.analyzer.context import DocumentContext
 from app.contracts.issue import AnalysisIssue
+from app.fixes.white import STRATEGY_TEXT, WhiteSettingsMissing, dtg_strategy
 from app.rules.base import Rule
 
 TEXTILE = ("dtf", "dtg")
@@ -318,8 +319,39 @@ class TextileWhiteBaseRule(Rule):
                     **base,
                 )
             ]
+        # DTG: o que fazer depende da cor da peça e da estratégia do perfil.
+        try:
+            strategy, _, _ = dtg_strategy(context.profile)
+        except WhiteSettingsMissing as exc:
+            return [
+                self.issue(
+                    context,
+                    severity="informational",
+                    title="Base branca: estratégia da peça não definida",
+                    found_value=str(exc).replace("Cadastre no perfil: ", "Falta: "),
+                    description="Sem a estratégia para esta cor de peça o sistema não gera branco.",
+                    recommendation="Defina no perfil DTG o branco em peça clara e em peça escura.",
+                    **base,
+                )
+            ]
+        if strategy == "none":
+            return [
+                self.issue(
+                    context,
+                    severity="informational",
+                    title="Peça clara: sem base branca",
+                    found_value=f"Peça {t.garment_color}",
+                    description=(
+                        "O perfil diz que peça clara não leva branco: a cor vai direto no tecido."
+                    ),
+                    recommendation="Nada a fazer. Para outra peça, troque a cor na ficha.",
+                    **base,
+                )
+            ]
         offset = (t.spread_mm or 0) - (t.choke_mm or 0)
         how = f"{'spread' if offset > 0 else 'choke'} {abs(offset):g} mm"
+        if strategy != "full":
+            how += f", {STRATEGY_TEXT[strategy]}"
         return [
             self.issue(
                 context,

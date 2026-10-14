@@ -294,7 +294,9 @@ export default function NestingPage({ scope = 'print' }: { scope?: Scope }) {
                       return
                     }
                     const t = profile.textile ?? {}
-                    setIsSheet(false)
+                    // Folha de tamanho fixo ou filme contínuo, e identificação, conforme o perfil.
+                    setIsSheet(!!t.sheetLengthMm)
+                    setMarks({ slug: t.sheetLabel ? AUTO_SLUG : '' })
                     // Na folha de DTF só entram trabalhos DTF: desmarca os outros.
                     setSelected((s) =>
                       Object.fromEntries(
@@ -313,7 +315,7 @@ export default function NestingPage({ scope = 'print' }: { scope?: Scope }) {
                       dtfProfileId: profile.id,
                       material: {
                         ...p.material,
-                        lengthMm: undefined,
+                        lengthMm: t.sheetLengthMm || undefined,
                         ...(t.printWidthMm ? { widthMm: t.printWidthMm } : {}),
                         ...(t.marginMm !== undefined ? { marginMm: t.marginMm } : {}),
                         ...(t.gapMm !== undefined ? { gapMm: t.gapMm } : {}),

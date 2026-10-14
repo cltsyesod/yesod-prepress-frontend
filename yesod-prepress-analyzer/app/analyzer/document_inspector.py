@@ -114,6 +114,10 @@ def inspect_document(path: Path, profile: ProductionProfile, settings: Settings)
             layers=inspect_layers(pdf),
         )
         context.facts["spot_names"] = sorted(context.colors.spot_names)
+        # Correções que o próprio sistema já aplicou neste arquivo (marcador nas páginas).
+        context.facts["applied_fixes"] = sorted(
+            {str(item) for page in pdf.pages for item in page.obj.get("/YesodFixes", [])}
+        )
         if profile.is_textile:
             # Medição do alfa para DTF/DTG; falha vira aviso, nunca derruba a análise.
             # A faca que vem na arte não é impressa: mede a estampa numa cópia sem ela.

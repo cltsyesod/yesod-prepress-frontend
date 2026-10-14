@@ -38,6 +38,11 @@ class WhiteSettings:
     offset_mm: float
     """Spread menos choke: negativo recua o branco para dentro da cor."""
     px_per_mm: float
+    max_luma: float | None = None
+    """DTG peça escura, sem branco no preto: cores até esta luminosidade (0–1) ficam sem branco."""
+    min_luma: float | None = None
+    """DTG peça clara, branco só nas cores claras: a partir desta luminosidade (0–1)."""
+    strategy: str = "full"
 
 
 def settings_for(profile: ProductionProfile, params: dict) -> WhiteSettings:
@@ -61,6 +66,7 @@ def settings_for(profile: ProductionProfile, params: dict) -> WhiteSettings:
     ]
     if missing:
         raise WhiteSettingsMissing("Cadastre no perfil: " + ", ".join(missing))
+    strategy, max_luma, min_luma = dtg_strategy(profile)
     choke = float(merged.get("chokeMm") or 0)
     spread = float(merged.get("spreadMm") or 0)
     # Resolução do branco = a mínima pedida para o trabalho (nada fixo aqui).
@@ -70,7 +76,43 @@ def settings_for(profile: ProductionProfile, params: dict) -> WhiteSettings:
         density_percent=float(merged["whiteDensity"]),
         offset_mm=spread - choke,
         px_per_mm=profile.minimum_resolution_dpi / 25.4,
+        max_luma=max_luma,
+        min_luma=min_luma,
+        strategy=strategy,
     )
+
+
+STRATEGY_TEXT = {
+    "full": "sob toda a estampa",
+    "no_black": "menos no preto (o tecido faz o preto)",
+    "light_colors": "só sob as cores claras",
+    "none": "sem branco (peça clara)",
+}
+
+
+def dtg_strategy(profile: ProductionProfile) -> tuple[str, float | None, float | None]:
+    """Estratégia do branco no DTG pela cor da peça; DTF e peça sem cor: branco cheio."""
+
+    t = profile.textile
+    if profile.technology != "dtg" or t.garment_is_dark is None:
+        return "full", None, None
+    if t.garment_is_dark:
+        if t.white_dark is None:
+            raise WhiteSettingsMissing("Cadastre no perfil: branco em peça escura")
+        if t.white_dark == "no_black":
+            if t.black_threshold_percent is None:
+                raise WhiteSettingsMissing("Cadastre no perfil: limite do preto (peça escura)")
+            return "no_black", t.black_threshold_percent / 100, None
+        return "full", None, None
+    if t.white_light is None:
+        raise WhiteSettingsMissing("Cadastre no perfil: branco em peça clara")
+    if t.white_light == "light_colors":
+        if t.light_threshold_percent is None:
+            raise WhiteSettingsMissing("Cadastre no perfil: limite de cor clara (peça clara)")
+        return "light_colors", None, t.light_threshold_percent / 100
+    if t.white_light == "full":
+        return "full", None, None
+    return "none", None, None
 
 
 def _dilate_disk(mask: np.ndarray, radius: int) -> np.ndarray:
@@ -127,10 +169,18 @@ def white_mask(
         if w_pt * h_pt * px_per_pt**2 > MAX_PIXELS:
             px_per_pt = (MAX_PIXELS / (w_pt * h_pt)) ** 0.5
         bitmap = page.render(scale=px_per_pt, fill_color=(255, 255, 255, 0), draw_annots=False)
-        alpha = np.asarray(bitmap.to_pil().convert("RGBA"))[:, :, 3]
+        rgba = np.asarray(bitmap.to_pil().convert("RGBA")).astype(np.float32)
     finally:
         doc.close()
+    alpha = rgba[:, :, 3]
     mask = alpha >= settings.threshold_percent / 100 * 255
+    if settings.max_luma is not None or settings.min_luma is not None:
+        # Luminosidade da cor como sai na tela (0–1): preto ou claro conforme o perfil.
+        luma = (0.2126 * rgba[:, :, 0] + 0.7152 * rgba[:, :, 1] + 0.0722 * rgba[:, :, 2]) / 255
+        if settings.max_luma is not None:
+            mask &= luma > settings.max_luma
+        if settings.min_luma is not None:
+            mask &= luma >= settings.min_luma
     px_per_mm = px_per_pt / (MM_PER_PT * profile.file_scale)
     mask = offset_mask(mask, round(settings.offset_mm * px_per_mm))
     return mask, px_per_pt, box

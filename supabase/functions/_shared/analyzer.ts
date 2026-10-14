@@ -128,6 +128,10 @@ export function toAnalyzerProfile(id: string, profile: Json, ticket: Json): Json
     textile: {
       ...((profile.textile as Json) ?? {}),
       ...((ticket.textile as Json) ?? {}),
+      // DTG: a cor da peça (ficha) define a estratégia do branco.
+      ...(text((ticket.dtg as Json | undefined)?.garmentColor)
+        ? { garmentColor: text((ticket.dtg as Json).garmentColor) }
+        : {}),
     },
   }
 }

@@ -161,3 +161,59 @@ def test_die_line_in_the_art_gets_no_white(tmp_path):
     w, h = span_mm(white_of(out)[0])
     assert abs(w - 50) <= 1 / PX_PER_MM + 1e-6 and abs(h - 30) <= 1 / PX_PER_MM + 1e-6, (w, h)
     assert "faca" in applied[0].details[0]
+
+
+def dtg(**textile):
+    base = {
+        "whiteSpotName": "White",
+        "alphaThreshold": 50,
+        "whiteDensity": 80,
+        "whiteMode": "generate",
+    }
+    return ProductionProfile(
+        id="g", technology="dtg", minimumResolutionDpi=254, textile={**base, **textile}
+    )
+
+
+
+
+def two_squares(tmp_path):
+    # Quadrado preto (20 mm) à esquerda e amarelo (20 mm) à direita.
+    x, s = 10 * MM_PT, 20 * MM_PT
+    ops = f"0 0 0 1 k {x} {x} {s} {s} re f\n" + rect(50, 10, 20, 20)
+    return pdf(tmp_path / "q.pdf", ops)
+
+
+def white_cols(tmp_path, prof):
+    out = tmp_path / "o.pdf"
+    apply_fixes(two_squares(tmp_path), out, [FixRequest(id="add_white_underbase")], prof)
+    bits = white_of(out)[0]
+    return np.flatnonzero(bits.any(axis=0)) / PX_PER_MM
+
+
+def test_dark_garment_full_or_without_black(tmp_path):
+    full = white_cols(tmp_path, dtg(garmentColor="#111111", whiteDark="full"))
+    assert full.min() < 15 and full.max() > 65  # branco sob os dois quadrados
+    no_black = white_cols(
+        tmp_path, dtg(garmentColor="#111111", whiteDark="no_black", blackThreshold=20)
+    )
+    assert no_black.min() > 45  # o preto ficou sem branco: o tecido faz o preto
+
+
+def test_light_garment_only_light_colors_or_none(tmp_path):
+    light = white_cols(
+        tmp_path, dtg(garmentColor="#f5f5f5", whiteLight="light_colors", lightThreshold=70)
+    )
+    assert light.min() > 45  # só o amarelo (claro) recebe branco
+    prof = dtg(garmentColor="#f5f5f5", whiteLight="none")
+    with pytest.raises(FixError, match="sem branco"):
+        fix = [FixRequest(id="add_white_underbase")]
+        apply_fixes(two_squares(tmp_path), tmp_path / "x.pdf", fix, prof)
+    issue = TextileWhiteBaseRule().evaluate(context(two_squares(tmp_path), prof))[0]
+    assert issue.fix is None and "Peça clara" in issue.title
+
+
+def test_strategy_must_be_chosen_for_the_garment(tmp_path):
+    prof = dtg(garmentColor="#111111")
+    issue = TextileWhiteBaseRule().evaluate(context(two_squares(tmp_path), prof))[0]
+    assert issue.fix is None and "peça escura" in issue.found_value

@@ -13,7 +13,12 @@ from app.rules.color_rules import (
 from app.rules.file_rules import PdfSyntaxRule, PdfVersionRule, PdfXRule, PdfiumRenderRule
 from app.rules.finishing_rules import CutLayerRule, MagentaDieLineRule
 from app.rules.font_rules import EmbeddedFontsRule, FontProgramRule
-from app.rules.image_rules import ImageResolutionRule, ImageRgbRule, ImageTransparencyRule
+from app.rules.image_rules import (
+    ImageResolutionRule,
+    ImageRgbRule,
+    ImageTransparencyRule,
+    UpscaledImagesRule,
+)
 from app.rules.page_rules import BleedRule, DimensionRule, PageBoxRule, PageSizeConsistencyRule
 from app.rules.textile_rules import (
     TextileBackgroundRule,
@@ -37,6 +42,7 @@ DEFAULT_RULES: tuple[Rule, ...] = (
     ImageResolutionRule(),
     ImageRgbRule(),
     ImageTransparencyRule(),
+    UpscaledImagesRule(),
     EmbeddedFontsRule(),
     FontProgramRule(),
     RgbContentRule(),

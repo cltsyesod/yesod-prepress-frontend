@@ -153,7 +153,7 @@ export type SectionId =
 export const SECTIONS: { id: SectionId; title: string; codes: string[] }[] = [
   { id: 'format', title: 'Formato e tamanho', codes: ['PAGE_DIMENSION_MISMATCH', 'PAGE_SIZE_INCONSISTENT'] },
   { id: 'bleed', title: 'Sangria e caixas', codes: ['PAGE_BLEED_INSUFFICIENT', 'PAGE_TRIMBOX_MISSING'] },
-  { id: 'images', title: 'Imagens', codes: ['IMAGE_LOW_RESOLUTION', 'IMAGE_RGB', 'IMAGE_TRANSPARENCY'] },
+  { id: 'images', title: 'Imagens', codes: ['IMAGE_LOW_RESOLUTION', 'IMAGE_RGB', 'IMAGE_TRANSPARENCY', 'IMAGE_UPSCALED'] },
   {
     id: 'colors',
     title: 'Cores',
