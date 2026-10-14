@@ -1,5 +1,6 @@
 """Proporção de tintas: separação real (Ghostscript) em PDFs de cobertura conhecida."""
 
+import os
 import shutil
 
 import pikepdf
@@ -9,7 +10,10 @@ from app.analyzer import ink_coverage
 from app.analyzer.ink_coverage import measure_inks
 
 MM = 72 / 25.4
-needs_gs = pytest.mark.skipif(ink_coverage._gs() is None, reason="Ghostscript não instalado")
+# No CI (Linux, como o servidor) o Ghostscript é obrigatório: lá estes testes nunca pulam.
+needs_gs = pytest.mark.skipif(
+    ink_coverage._gs() is None and not os.environ.get("CI"), reason="Ghostscript não instalado"
+)
 
 
 def spot(name: str, cmyk: list[float]) -> pikepdf.Array:

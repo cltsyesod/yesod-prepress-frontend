@@ -1,3 +1,4 @@
+import { InkProportions } from '@/components/jobs/xray/InkProportions'
 import { useEffect, useState } from 'react'
 import { Printer } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -103,6 +104,12 @@ export function TechnicalReport({
               )}
             </section>
           )}
+
+          {fileProfile?.inks?.pages?.length ? (
+            <section className="report-section">
+              <InkProportions profile={fileProfile} compact />
+            </section>
+          ) : null}
 
           {sections.map((s) => {
             const facts = factsOf(s.id, fileProfile!, 'decision')

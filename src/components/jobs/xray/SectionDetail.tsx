@@ -1,3 +1,4 @@
+import { InkProportions } from '@/components/jobs/xray/InkProportions'
 import type { ReactNode } from 'react'
 import { Info, ListChecks, Package, X } from 'lucide-react'
 import { IssueChecklist } from '@/components/jobs/IssueChecklist'
@@ -125,6 +126,7 @@ export function SectionDetail({
           </dl>
         )}
 
+        {view === 'colors' && profile ? <InkProportions profile={profile} /> : null}
         {view === 'images' && profile?.images?.items.length ? <ImageTable profile={profile} tone={tone} /> : null}
 
         <div>

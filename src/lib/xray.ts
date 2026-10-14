@@ -24,7 +24,15 @@ export interface TextilePage {
 export const sectionApplies = (id: SectionId, p: FileProfile | null): boolean =>
   p?.textile ? id !== 'bleed' && id !== 'finishing' : id !== 'textile'
 
+export interface InkPage {
+  page: number
+  inks: { name: string; process: boolean; coverage: number; area: number; meanWhereUsed: number; share: number }[]
+  maxProcessTotal: number
+}
+
 export interface FileProfile {
+  /** Proporção de tintas pela separação do arquivo (todas as tecnologias). */
+  inks?: { pages: InkPage[]; error: string; dpi?: number }
   technology?: 'grafica' | 'dtf' | 'dtg'
   textile?: { pages: TextilePage[]; error: string; settings?: Record<string, string | number | boolean | null> } | null
   document?: {
