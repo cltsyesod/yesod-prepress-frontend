@@ -830,6 +830,7 @@ export default function NestingPage({ scope = 'print' }: { scope?: Scope }) {
               busy={submitting}
               onUseQuantities={useQuantities}
               onManual={manual}
+              onChanged={loadRuns}
             />
           )}
 
@@ -909,6 +910,7 @@ function RunDetail({
   busy,
   onUseQuantities,
   onManual,
+  onChanged,
 }: {
   run: NestingRun
   outputUrl: string
@@ -921,6 +923,8 @@ function RunDetail({
   onUseQuantities?: (run: NestingRun) => void
   /** Gera a folha nas posições editadas à mão. */
   onManual?: (run: NestingRun, placements: ManualPlacement[]) => void
+  /** Recarrega a lista (ex.: depois de marcar a folha como enviada ao RIP). */
+  onChanged?: () => void
 }) {
   const result = run.result ?? {}
   const sheets = result.sheets ?? []
@@ -1073,6 +1077,7 @@ function RunDetail({
       )}
 
       <FilmUse run={run} />
+      {run.status === 'completed' && <SentToRip run={run} onChanged={onChanged} />}
       {onManual && result.placements?.length && result.shapes ? (
         editing ? (
           <SheetEditor
@@ -1132,5 +1137,35 @@ function FilmUse({ run }: { run: NestingRun }) {
     <p className="text-xs text-muted-foreground">
       Filme: {fmt(meters)} m ({fmt(area)} m²) · peças {fmt(used)} m² · desperdício {Math.round((1 - used / area) * 100)}%
     </p>
+  )
+}
+
+/** Folha enviada ao RIP: marca a folha e cada trabalho dela (o fim da pré-impressão). */
+function SentToRip({ run, onChanged }: { run: NestingRun; onChanged?: () => void }) {
+  const [busy, setBusy] = useState(false)
+  const toggle = async (sent: boolean) => {
+    setBusy(true)
+    try {
+      await nestingService.setSentToRip(run, sent)
+      toast({ title: sent ? 'Folha marcada como enviada ao RIP' : 'Envio desfeito' })
+      onChanged?.()
+    } catch (err) {
+      toast({ title: 'Não foi possível marcar', description: getErrorMessage(err), variant: 'destructive' })
+    }
+    setBusy(false)
+  }
+  return run.sent_to_rip_at ? (
+    <div className="flex flex-wrap items-center gap-2 text-xs">
+      <span className="rounded bg-emerald-500/15 px-2 py-1 font-medium text-emerald-700 dark:text-emerald-400">
+        Enviada ao RIP em {new Date(run.sent_to_rip_at).toLocaleString('pt-BR')} · {run.items.length} trabalho(s)
+      </span>
+      <Button size="sm" variant="ghost" className="h-7" disabled={busy} onClick={() => toggle(false)}>
+        Desfazer
+      </Button>
+    </div>
+  ) : (
+    <Button size="sm" variant="outline" disabled={busy} onClick={() => toggle(true)}>
+      Marcar folha como enviada ao RIP ({run.items.length} trabalho(s))
+    </Button>
   )
 }

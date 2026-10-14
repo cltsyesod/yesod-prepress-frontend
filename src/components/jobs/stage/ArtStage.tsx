@@ -72,6 +72,7 @@ export function ArtStage({
   changes,
   correcting,
   inspectionUrl,
+  whiteRequest = 0,
 }: {
   production: StageFile | null
   /** Arquivo do cliente em PDF, quando difere do de produção. */
@@ -84,6 +85,8 @@ export function ArtStage({
   correcting: boolean
   /** Arquivo de inspeção (placas + mapa de objetos) do arquivo de produção, se houver. */
   inspectionUrl: string | null
+  /** Muda para a vista da base branca quando ela existe (cada novo número é um pedido). */
+  whiteRequest?: number
 }) {
   const stageRef = useRef<HTMLDivElement>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
@@ -104,6 +107,9 @@ export function ArtStage({
   // Placa da base branca gerada pelo sistema (vem no arquivo de inspeção).
   const whitePlate = insp.inspection?.white?.find((w) => w.page === current)
   const whiteLayer = insp.inspection?.white?.length ? true : false
+  useEffect(() => {
+    if (whiteRequest && whiteLayer) setMode('white')
+  }, [whiteRequest, whiteLayer])
 
   useEffect(() => setLayers(prod.pdf?.layers ?? []), [prod.pdf])
   // Modo que depende de algo que não existe (arquivo do cliente, inspeção): volta à produção.

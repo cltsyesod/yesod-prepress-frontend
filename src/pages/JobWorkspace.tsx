@@ -28,6 +28,7 @@ import { JobStateBadge } from '@/components/jobs/JobStateBadge'
 import { JobTicketFields } from '@/components/jobs/JobTicketFields'
 import { DtgPlacementPanel } from '@/components/jobs/DtgPlacementPanel'
 import { TechnicalReport } from '@/components/jobs/TechnicalReport'
+import { TextileSteps } from '@/components/jobs/TextileSteps'
 import { JobMetaFields, type JobMeta } from '@/components/jobs/JobMetaFields'
 import { useTeam } from '@/hooks/use-team'
 import { BleedDialog, type BleedOptions } from '@/components/jobs/BleedDialog'
@@ -83,6 +84,8 @@ export default function JobWorkspacePage() {
   const [loadError, setLoadError] = useState('')
   const [editingTicket, setEditingTicket] = useState(false)
   const [reportOpen, setReportOpen] = useState(false)
+  // Pede à mesa a vista da base branca (DTF/DTG abre nela quando o branco existe).
+  const [whiteRequest, setWhiteRequest] = useState(1)
   const [ticket, setTicket] = useState<JobTicket>({})
   const [profileId, setProfileId] = useState('')
   const [correction, setCorrection] = useState<ProjectFile | null>(null)
@@ -410,6 +413,7 @@ export default function JobWorkspacePage() {
   const done = !!analysis.job && !running && analysis.job.status !== 'failed' && analysis.job.status !== 'cancelled'
   const dtgProfile = profiles.find((p) => p.id === profileId && p.technology === 'dtg')
   const currentProfile = profiles.find((p) => p.id === profileId)
+  const textileProfile = isTextile(currentProfile?.technology) ? currentProfile : undefined
   const deliveredProfile = hasProfile(analysis.job?.file_profile) ? (analysis.job!.file_profile as FileProfile) : null
   const changes = canCompareCount(clientProfile, deliveredProfile)
   const profileName = profiles.find((p) => p.id === job.profileId)?.name
@@ -463,6 +467,16 @@ export default function JobWorkspacePage() {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-72">
               <DropdownMenuLabel className="text-xs text-muted-foreground">Inserir no arquivo</DropdownMenuLabel>
+              {textileProfile ? (
+                <DropdownMenuItem
+                  disabled={applied('add_white_underbase') || running || fixing}
+                  onSelect={() => applyFixes([{ id: 'add_white_underbase' }])}
+                >
+                  <Wand2 className="h-4 w-4" />
+                  Gerar base branca{applied('add_white_underbase') && ' (já gerada)'}
+                </DropdownMenuItem>
+              ) : (
+                <>
               <DropdownMenuItem
                 disabled={applied('add_bleed') || applied('add_crop_marks') || running || fixing}
                 onSelect={guardScale(() =>
@@ -495,6 +509,8 @@ export default function JobWorkspacePage() {
                 Faca retangular{cutLayerName ? ` (${cutLayerName})` : ''}
                 {applied('add_cut_contour') && ' (já inserida)'}
               </DropdownMenuItem>
+                </>
+              )}
               <DropdownMenuSeparator />
               {pdfUrl && (
                 <DropdownMenuItem asChild>
@@ -542,6 +558,23 @@ export default function JobWorkspacePage() {
         }}
       />
 
+      {textileProfile && (
+        <TextileSteps
+          jobId={job.id}
+          profile={textileProfile}
+          ticket={ticket}
+          analysed={done}
+          analysing={running}
+          issues={analysis.issues}
+          whiteApplied={applied('add_white_underbase')}
+          sentToRipAt={job.sentToRipAt}
+          busy={running || fixing}
+          onGenerateWhite={() => applyFixes([{ id: 'add_white_underbase' }])}
+          onShowWhite={() => setWhiteRequest((n) => n + 1)}
+          onSendToRip={sendToRip}
+        />
+      )}
+
       {/* ---- A mesa: a arte em destaque, e a coluna de análise e decisões ao lado ---- */}
       <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[minmax(0,1fr)_400px] 2xl:grid-cols-[minmax(0,1fr)_460px]">
         <div className="h-[70vh] min-h-0 lg:h-auto">
@@ -555,6 +588,7 @@ export default function JobWorkspacePage() {
               changes={appliedFixes}
               correcting={!!correction}
               inspectionUrl={inspectionUrl || null}
+              whiteRequest={whiteRequest}
             />
           ) : (
             <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-border text-sm text-muted-foreground">

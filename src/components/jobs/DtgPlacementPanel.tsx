@@ -61,7 +61,7 @@ export function DtgPlacementPanel({
   }
 
   return (
-    <section className="space-y-3 rounded-xl border border-border bg-card p-4">
+    <section id="dtg-placement" className="scroll-mt-2 space-y-3 rounded-xl border border-border bg-card p-4">
       <div>
         <h3 className="text-sm font-semibold">Posição na peça (DTG)</h3>
         <p className="text-xs text-muted-foreground">Medidas em mm no tamanho final, a partir do topo da área imprimível.</p>

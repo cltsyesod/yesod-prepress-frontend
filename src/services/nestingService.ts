@@ -1,3 +1,4 @@
+import { jobsService } from '@/services/jobsService'
 import supabase from '@/lib/supabase/client'
 import { getErrorMessage } from '@/lib/supabase/errors'
 import { projectFilesService } from '@/services/projectFilesService'
@@ -130,6 +131,8 @@ export interface NestingRun {
   output_path: string
   error_message: string
   created: string
+  /** Folha enviada ao RIP (migration 0015). */
+  sent_to_rip_at?: string | null
 }
 
 export const NESTING_ACTIVE = ['queued', 'running']
@@ -143,6 +146,31 @@ export const nestingService = {
       .limit(30)
     if (error) throw error
     return (data ?? []) as NestingRun[]
+  },
+
+  /** Folhas (montagens concluídas) em que um trabalho entrou, da mais nova à mais antiga. */
+  async runsForProject(projectId: string): Promise<NestingRun[]> {
+    const { data, error } = await supabase
+      .from('nesting_runs')
+      .select('*')
+      .contains('items', [{ projectId }])
+      .eq('status', 'completed')
+      .order('created', { ascending: false })
+    if (error) throw error
+    return (data ?? []) as NestingRun[]
+  },
+
+  /** Marca (ou desmarca) a folha como enviada ao RIP e, junto, cada trabalho dela. */
+  async setSentToRip(run: NestingRun, sent: boolean): Promise<void> {
+    const { data: auth } = await supabase.auth.getUser()
+    const { error } = await supabase
+      .from('nesting_runs')
+      .update({ sent_to_rip_at: sent ? new Date().toISOString() : null, sent_to_rip_by: sent ? auth.user?.id : null })
+      .eq('id', run.id)
+    if (error) throw error
+    for (const item of run.items) {
+      if (item.projectId) await jobsService.setSentToRip(item.projectId, sent)
+    }
   },
 
   /** Registra a montagem e a envia ao analisador. Retorna o id. */
