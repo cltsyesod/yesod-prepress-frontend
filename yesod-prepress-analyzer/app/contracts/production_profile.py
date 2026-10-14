@@ -148,7 +148,7 @@ class ProductionProfile(BaseModel):
     name: str | None = None
     rules: list[RuleOverride] = Field(default_factory=list)
     color_mode_expected: str = Field(
-        default="CMYK",
+        default="RGB",
         validation_alias=AliasChoices("colorModeExpected", "color_mode_expected", "colorMode"),
     )
     minimum_resolution_dpi: int = Field(

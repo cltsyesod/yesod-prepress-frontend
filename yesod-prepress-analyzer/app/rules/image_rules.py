@@ -81,6 +81,12 @@ class ImageRgbRule(Rule):
     code = "IMAGE_RGB"
     default_severity = "warning"
 
+    def severity(self, context: DocumentContext):
+        # Fluxo RGB (o RIP converte para CMYK): RGB é o normal, nunca é problema.
+        if context.profile.rgb_policy != "cmyk_only":
+            return "informational"
+        return super().severity(context)
+
     def evaluate(self, context: DocumentContext) -> list[AnalysisIssue]:
         if context.profile.rgb_policy == "cmyk_only":
             return [
@@ -109,7 +115,7 @@ class ImageRgbRule(Rule):
                 title="Imagem RGB sem perfil ICC",
                 category="Cor",
                 found_value=image.color_space,
-                expected_value="RGB com perfil ICC incorporado, ou CMYK",
+                expected_value="RGB com perfil ICC (o RIP converte para CMYK)",
                 description=(
                     "Sem perfil de origem, o RIP interpreta a imagem com o perfil RGB padrão "
                     "dele, e a cor pode mudar entre equipamentos."

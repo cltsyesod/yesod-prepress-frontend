@@ -70,3 +70,39 @@ def test_cut_layer_accepts_spot_color_name():
     colors = ColorInfo(spot_names={"CutContour"})
     context = make_context(colors=colors)
     assert CutLayerRule().evaluate(context) == []
+
+
+def test_rgb_is_never_a_problem_when_the_rip_converts():
+    from app.rules.color_rules import RgbContentRule
+    from app.rules.image_rules import ImageRgbRule
+
+    # Perfil antigo marcava "modo de cor" como impeditivo: no fluxo RGB isso não vale.
+    rules = [
+        {"code": "COLOR_RGB_CONTENT", "severity": "critical"},
+        {"code": "IMAGE_RGB", "severity": "critical"},
+    ]
+    image = ImageInfo(
+        page=1,
+        object_id="/Im1",
+        width_px=10,
+        height_px=10,
+        effective_dpi_x=300,
+        effective_dpi_y=300,
+        color_space="DeviceRGB",
+        bits_per_component=8,
+        has_transparency=False,
+    )
+    managed = make_context(
+        profile=ProductionProfile(id="p", rules=rules),
+        images=[image],
+        colors=ColorInfo(rgb_operators=3),
+    )
+    assert RgbContentRule().evaluate(managed)[0].severity == "informational"
+    assert ImageRgbRule().evaluate(managed)[0].severity == "informational"
+    # Só quando o trabalho exige CMYK o RGB volta a ser cobrado.
+    strict = make_context(
+        profile=ProductionProfile(id="p", rules=rules, rgbPolicy="cmyk_only"),
+        images=[image],
+        colors=ColorInfo(rgb_operators=3),
+    )
+    assert RgbContentRule().evaluate(strict)[0].severity == "critical"

@@ -9,7 +9,8 @@ const RULE_DEFINITIONS: {
   defaultSeverity: Severity
   defaultEnabled: boolean
 }[] = [
-  { key: 'color_mode', label: 'Modo de cor', defaultSeverity: 'critical', defaultEnabled: true },
+  // Fluxo RGB: o arquivo segue em RGB e o RIP converte para CMYK; RGB só informa.
+  { key: 'color_mode', label: 'Modo de cor', defaultSeverity: 'info', defaultEnabled: true },
   { key: 'resolution', label: 'Resolução', defaultSeverity: 'critical', defaultEnabled: true },
   { key: 'bleed', label: 'Sangria', defaultSeverity: 'warning', defaultEnabled: true },
   { key: 'margins', label: 'Margens', defaultSeverity: 'warning', defaultEnabled: true },
@@ -68,7 +69,7 @@ function make(
     status: 'active',
     category: cat,
     allowedFormats: ['PDF', 'AI', 'EPS'],
-    colorMode: 'CMYK',
+    colorMode: 'RGB',
     iccProfile: '',
     minResolution: 300,
     blackConfig: 'Standard',

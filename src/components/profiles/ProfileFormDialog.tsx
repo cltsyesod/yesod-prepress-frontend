@@ -61,7 +61,7 @@ function defaultForm(): FormData {
     status: 'active',
     category: '',
     allowedFormats: ['PDF', 'AI', 'EPS'],
-    colorMode: 'CMYK',
+    colorMode: 'RGB',
     iccProfile: '',
     minResolution: 300,
     blackConfig: 'Standard',

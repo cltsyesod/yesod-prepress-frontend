@@ -20,6 +20,12 @@ class RgbContentRule(Rule):
     code = "COLOR_RGB_CONTENT"
     default_severity = "warning"
 
+    def severity(self, context: DocumentContext):
+        # Fluxo RGB (o RIP converte para CMYK): RGB é o normal, nunca é problema.
+        if context.profile.rgb_policy != "cmyk_only":
+            return "informational"
+        return super().severity(context)
+
     def evaluate(self, context: DocumentContext) -> list[AnalysisIssue]:
         # rg/RG always paint in DeviceRGB, i.e. RGB without a source profile.
         if not context.colors.rgb_operators:
@@ -34,7 +40,7 @@ class RgbContentRule(Rule):
                 expected_value=(
                     "CMYK (exigido para este trabalho)"
                     if cmyk_only
-                    else "RGB com perfil ICC, ou CMYK"
+                    else "RGB (o RIP converte para CMYK)"
                 ),
                 description=(
                     "Vetores em DeviceRGB não carregam perfil de origem; o RIP aplicará o "
@@ -126,7 +132,7 @@ class SpotInventoryRule(Rule):
 
 class OutputIntentRule(Rule):
     code = "COLOR_OUTPUT_INTENT"
-    default_severity = "warning"
+    default_severity = "informational"
 
     def evaluate(self, context: DocumentContext) -> list[AnalysisIssue]:
         if (
@@ -142,8 +148,11 @@ class OutputIntentRule(Rule):
                 category="Cor",
                 found_value="ICC inválido" if invalid else "OutputIntent ausente",
                 expected_value="OutputIntent ICC válido",
-                description="O PDF não declara de forma confiável a condição de impressão.",
-                recommendation="Exporte usando o perfil ICC fornecido pela produção.",
+                description=(
+                    "O PDF não declara a condição de impressão. No fluxo RGB isso é normal: "
+                    "quem define a conversão para CMYK é o RIP."
+                ),
+                recommendation="Nada a fazer no fluxo RGB; só é exigido em entregas PDF/X.",
                 source="lcms",
             )
         ]
