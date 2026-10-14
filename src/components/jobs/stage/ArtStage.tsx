@@ -5,6 +5,7 @@ import {
   Columns2,
   Eye,
   Shirt,
+  Printer,
   FileInput,
   Layers,
   Layers3,
@@ -34,11 +35,12 @@ const GUIDES = {
   trim: { label: 'Formato final', color: '#22c55e' },
 } as const
 
-type Mode = 'production' | 'white' | 'client' | 'side' | 'curtain' | 'diff' | 'structure' | 'layers3d'
+type Mode = 'production' | 'proof' | 'white' | 'client' | 'side' | 'curtain' | 'diff' | 'structure' | 'layers3d'
 type WhiteView = 'color' | 'white' | 'garment'
 
-const MODES: { id: Mode; label: string; icon: typeof Eye; compare?: boolean; inspect?: boolean; white?: boolean; hint: string }[] = [
+const MODES: { id: Mode; label: string; icon: typeof Eye; compare?: boolean; inspect?: boolean; white?: boolean; proof?: boolean; hint: string }[] = [
   { id: 'production', label: 'Produção', icon: Eye, hint: 'O arquivo que vai para a produção' },
+  { id: 'proof', label: 'Prova (RIP)', icon: Printer, proof: true, hint: 'Como o RIP imprimiria: sobreimpressão simulada e cores especiais (Ghostscript)' },
   { id: 'white', label: 'Base branca', icon: Shirt, white: true, hint: 'DTF/DTG: a cor, só o branco e a estampa na peça' },
   { id: 'client', label: 'Cliente', icon: FileInput, compare: true, hint: 'O arquivo como o cliente enviou' },
   { id: 'side', label: 'Lado a lado', icon: Columns2, compare: true, hint: 'Cliente e produção na mesma escala' },
@@ -106,6 +108,7 @@ export function ArtStage({
   const [garment, setGarment] = useState('#1f2937')
   // Placa da base branca gerada pelo sistema (vem no arquivo de inspeção).
   const whiteLayer = insp.inspection?.white?.length ? true : false
+  const hasProof = !!insp.inspection?.proof?.length
   useEffect(() => {
     if (whiteRequest && whiteLayer) setMode('white')
   }, [whiteRequest, whiteLayer])
@@ -115,8 +118,8 @@ export function ArtStage({
   const inspecting = mode === 'structure' || mode === 'layers3d'
   useEffect(() => {
     const spec = MODES.find((m) => m.id === mode)
-    if ((spec?.compare && !comparable) || (spec?.inspect && !insp.inspection) || (spec?.white && !whiteLayer)) setMode('production')
-  }, [comparable, insp.inspection, mode, whiteLayer])
+    if ((spec?.compare && !comparable) || (spec?.inspect && !insp.inspection) || (spec?.white && !whiteLayer) || (spec?.proof && !hasProof)) setMode('production')
+  }, [comparable, insp.inspection, mode, whiteLayer, hasProof])
 
   // A área da arte é recriada ao sair das vistas de inspeção: observa de novo.
   useEffect(() => {
@@ -144,7 +147,7 @@ export function ArtStage({
   const layout = useMemo(() => {
     if (!prodPage || !area.width || mode === 'structure' || mode === 'layers3d') return null
     const frames: { key: 'prod' | 'orig'; box: Box }[] = []
-    if (mode === 'production' || mode === 'white' || !origPage) frames.push({ key: 'prod', box: prodPage.view })
+    if (mode === 'production' || mode === 'white' || mode === 'proof' || !origPage) frames.push({ key: 'prod', box: prodPage.view })
     else if (mode === 'client') frames.push({ key: 'orig', box: origPage.view })
     else if (mode === 'side') frames.push({ key: 'orig', box: origPage.view }, { key: 'prod', box: prodPage.view })
     else frames.push({ key: 'prod', box: union(prodPage.view, origPage.view) })
@@ -173,7 +176,16 @@ export function ArtStage({
       const out: Record<string, HTMLCanvasElement | null> = {}
       const draw = (pdf: LoadedPdf, frame: Box, withLayers: boolean) =>
         renderInto(pdf, current, px, frame, withLayers ? layers : undefined)
-      if (mode === 'white') {
+      if (mode === 'proof') {
+        // Prova de saída: a imagem do Ghostscript (página inteira) no quadro da página.
+        const proof = insp.inspection?.proof?.find((p) => p.page === current)
+        const frame = layout.frames[0].box
+        const canvas = document.createElement('canvas')
+        canvas.width = Math.max(1, Math.round((frame[2] - frame[0]) * px))
+        canvas.height = Math.max(1, Math.round((frame[3] - frame[1]) * px))
+        if (proof) canvas.getContext('2d')!.drawImage(proof.image, 0, 0, canvas.width, canvas.height)
+        out.prod = canvas
+      } else if (mode === 'white') {
         const frame = layout.frames[0].box
         const color = await renderPage(prod.pdf!, current, px, layers, frame, true)
         out.prod = composeWhite(color, whitePlate, frame, px, whiteView, garment)
@@ -201,7 +213,7 @@ export function ArtStage({
     return () => {
       cancelled = true
     }
-  }, [layout, prod.pdf, orig.pdf, current, layers, mode, whitePlate, whiteView, garment])
+  }, [layout, prod.pdf, orig.pdf, current, layers, mode, whitePlate, whiteView, garment, insp.inspection])
 
   // Arrastar para mover a arte ampliada; Ctrl + roda do mouse para o zoom.
   const drag = useRef<{ x: number; y: number; left: number; top: number } | null>(null)
@@ -249,7 +261,7 @@ export function ArtStage({
       {/* Barra da mesa: modo de ver, página, zoom, guias, camadas. */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border px-3 py-2 text-sm">
         <div className="flex items-center rounded-lg bg-muted p-0.5" role="tablist" aria-label="Como ver o arquivo">
-          {MODES.filter((m) => (!m.white || !!whiteLayer) && (!m.compare || comparable) && (!m.inspect || (production && !production.image))).map((m) => {
+          {MODES.filter((m) => (!m.proof || hasProof) && (!m.white || !!whiteLayer) && (!m.compare || comparable) && (!m.inspect || (production && !production.image))).map((m) => {
             const Icon = m.icon
             // Inspeção ainda não gerada (análise anterior a ela): o botão explica.
             const unavailable = m.inspect && !insp.inspection

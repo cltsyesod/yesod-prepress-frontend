@@ -174,6 +174,8 @@ export interface Inspection {
   pages: InspectedPage[]
   /** Base branca gerada pelo sistema: a placa de cada página (PNG) e a caixa do PDF. */
   white: { page: number; box: Box; image: HTMLImageElement }[]
+  /** Prova de saída (Ghostscript, sobreimpressão simulada), uma imagem por página. */
+  proof: { page: number; image: HTMLImageElement }[]
 }
 
 export type Plate = 'images' | 'text' | 'vectors' | 'cut'
@@ -192,21 +194,25 @@ export function useInspection(url: string | null) {
         const item = attachments?.['objects.json']
         if (!item || cancelled) return
         const data = JSON.parse(new TextDecoder().decode(item.content))
-        const entries: { page: number; file: string; box: Box }[] = data.white ?? []
-        return Promise.all(
-          entries
-            .filter((e) => attachments?.[e.file])
-            .map(
-              (e) =>
-                new Promise<Inspection['white'][number]>((resolve, reject) => {
-                  const image = new Image()
-                  image.onload = () => resolve({ page: e.page, box: e.box, image })
-                  image.onerror = reject
-                  image.src = URL.createObjectURL(new Blob([new Uint8Array(attachments![e.file].content)], { type: 'image/png' }))
-                }),
-            ),
-        ).then((white) => {
-          if (!cancelled) setInspection({ pdf, plates: data.plates, pages: data.pages, white })
+        // Imagens anexadas (placa do branco, prova de saída), carregadas para a tela.
+        const load = (entries: { page: number; file: string; box?: Box }[] = []) =>
+          Promise.all(
+            entries
+              .filter((e) => attachments?.[e.file])
+              .map(
+                (e) =>
+                  new Promise<{ page: number; box: Box; image: HTMLImageElement }>((resolve, reject) => {
+                    const image = new Image()
+                    image.onload = () => resolve({ page: e.page, box: e.box ?? [0, 0, 0, 0], image })
+                    image.onerror = reject
+                    image.src = URL.createObjectURL(
+                      new Blob([new Uint8Array(attachments![e.file].content)], { type: 'image/png' }),
+                    )
+                  }),
+              ),
+          )
+        return Promise.all([load(data.white), load(data.proof)]).then(([white, proof]) => {
+          if (!cancelled) setInspection({ pdf, plates: data.plates, pages: data.pages, white, proof })
         })
       })
       .catch(() => null)

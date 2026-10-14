@@ -33,6 +33,16 @@ export interface InkPage {
 export interface FileProfile {
   /** Proporção de tintas pela separação do arquivo (todas as tecnologias). */
   inks?: { pages: InkPage[]; error: string; dpi?: number }
+  /** Preflight PDF/X-4 (ISO 15930-7). */
+  pdfx4?: {
+    standard?: string
+    declared?: string
+    conforms?: boolean
+    errors?: number
+    warnings?: number
+    error?: string
+    checks: { id: string; label: string; ok: boolean | null; detail: string; severity: 'error' | 'warning' }[]
+  } | null
   technology?: 'grafica' | 'dtf' | 'dtg'
   textile?: { pages: TextilePage[]; error: string; settings?: Record<string, string | number | boolean | null> } | null
   document?: {

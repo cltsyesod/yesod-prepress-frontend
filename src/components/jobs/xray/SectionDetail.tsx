@@ -1,3 +1,4 @@
+import { PdfxPreflight } from '@/components/jobs/xray/PdfxPreflight'
 import { InkProportions } from '@/components/jobs/xray/InkProportions'
 import type { ReactNode } from 'react'
 import { Info, ListChecks, Package, X } from 'lucide-react'
@@ -127,6 +128,7 @@ export function SectionDetail({
         )}
 
         {view === 'colors' && profile ? <InkProportions profile={profile} /> : null}
+        {view === 'structure' && profile ? <PdfxPreflight profile={profile} /> : null}
         {view === 'images' && profile?.images?.items.length ? <ImageTable profile={profile} tone={tone} /> : null}
 
         <div>

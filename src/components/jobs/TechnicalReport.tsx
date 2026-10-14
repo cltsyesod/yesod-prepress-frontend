@@ -1,3 +1,4 @@
+import { PdfxPreflight } from '@/components/jobs/xray/PdfxPreflight'
 import { InkProportions } from '@/components/jobs/xray/InkProportions'
 import { useEffect, useState } from 'react'
 import { Printer } from 'lucide-react'
@@ -104,6 +105,12 @@ export function TechnicalReport({
               )}
             </section>
           )}
+
+          {fileProfile?.pdfx4?.checks?.length ? (
+            <section className="report-section">
+              <PdfxPreflight profile={fileProfile} />
+            </section>
+          ) : null}
 
           {fileProfile?.inks?.pages?.length ? (
             <section className="report-section">
