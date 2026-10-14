@@ -155,6 +155,7 @@ def file_profile(context: DocumentContext) -> dict:
         "fonts": _fonts(context),
         "colors": _colors(context),
         "layers": sorted(context.layers),
+        "pdfx4": context.facts.get("pdfx4"),
         "technology": profile.technology,
         "textile": {
             "pages": [page.to_dict() for page in context.facts.get("textile_pages", [])],

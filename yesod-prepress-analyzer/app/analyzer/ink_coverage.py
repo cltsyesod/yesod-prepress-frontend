@@ -121,3 +121,41 @@ def measure_inks(path: Path, timeout: int = 120) -> dict:
                 }
             )
     return {"pages": result, "error": "", "dpi": round(dpi, 1)}
+
+
+PROOF_MAX_SIDE_PX = 2400
+
+
+def output_proof(path: Path, timeout: int = 120) -> list[tuple[int, bytes]]:
+    """Prova de saída: a página como o RIP imprimiria (sobreimpressão simulada, cores
+    especiais pelas suas alternativas), em PNG para a tela. Lista vazia sem Ghostscript."""
+
+    gs = _gs()
+    if not gs:
+        return []
+    with pikepdf.open(path) as pdf:
+        sides = []
+        for page in list(pdf.pages)[:MAX_PAGES]:
+            box = page.obj.get("/CropBox") or page.obj.get("/MediaBox")
+            sides.append(max(float(box[2]) - float(box[0]), float(box[3]) - float(box[1])) / 72)
+    dpi = max(MIN_DPI, min(150, PROOF_MAX_SIDE_PX / max(max(sides), 1e-6)))
+    with tempfile.TemporaryDirectory(prefix="proof_") as tmp:
+        cmd = [
+            gs,
+            "-q",
+            "-dSAFER",
+            "-dBATCH",
+            "-dNOPAUSE",
+            "-sDEVICE=png16m",
+            "-dOverprint=/simulate",
+            "-dUseCropBox",
+            "-dTextAlphaBits=4",
+            "-dGraphicsAlphaBits=4",
+            f"-dLastPage={MAX_PAGES}",
+            f"-r{dpi:.2f}",
+            f"-sOutputFile={Path(tmp) / 'p%d.png'}",
+            str(path),
+        ]
+        subprocess.run(cmd, check=True, capture_output=True, timeout=timeout)  # noqa: S603
+        files = sorted(Path(tmp).glob("p*.png"), key=lambda f: int(f.stem[1:]))
+        return [(int(f.stem[1:]), f.read_bytes()) for f in files]

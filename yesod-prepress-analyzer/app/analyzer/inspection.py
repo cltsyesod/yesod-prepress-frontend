@@ -25,6 +25,7 @@ import pypdfium2 as pdfium
 import pypdfium2.raw as raw
 from PIL import Image
 
+from app.analyzer.ink_coverage import output_proof
 from app.fixes.white import white_plate_png
 
 logger = logging.getLogger(__name__)
@@ -416,6 +417,15 @@ def build_inspection(source: Path, destination: Path, cut_names: list[str]) -> d
                     out, plate[0], mime_type="image/png"
                 )
                 manifest["white"].append({"page": number, "file": name, "box": plate[1]})
+        # Prova de saída (Ghostscript, sobreimpressão simulada): como o RIP imprimiria.
+        manifest["proof"] = []
+        try:
+            for number, png in output_proof(source):
+                name = f"proof-{number}.png"
+                out.attachments[name] = pikepdf.AttachedFileSpec(out, png, mime_type="image/png")
+                manifest["proof"].append({"page": number, "file": name})
+        except Exception:  # noqa: BLE001 - sem prova, a inspeção segue
+            manifest["proof"] = []
         out.attachments["objects.json"] = pikepdf.AttachedFileSpec(
             out, json.dumps(manifest, ensure_ascii=False).encode(), mime_type="application/json"
         )

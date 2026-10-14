@@ -78,7 +78,28 @@ class PdfXRule(Rule):
     default_severity = "warning"
 
     def evaluate(self, context: DocumentContext) -> list[AnalysisIssue]:
-        if not context.profile.require_pdf_x or context.pdfx_version:
+        if not context.profile.require_pdf_x:
+            return []
+        report = context.facts.get("pdfx4") or {}
+        checks = report.get("checks", [])
+        failed = [c for c in checks if c["ok"] is False and c["severity"] == "error"]
+        if report.get("checks") and failed:
+            return [
+                self.issue(
+                    context,
+                    title="Não atende ao PDF/X-4",
+                    category="Arquivo",
+                    found_value=f"{len(failed)} exigência(s) não atendida(s)",
+                    expected_value="Arquivo conforme PDF/X-4",
+                    description="Falhou: "
+                    + "; ".join(f"{c['label']} ({c['detail']})" for c in failed),
+                    recommendation=(
+                        "Corrija os itens (alguns têm correção no sistema, como caixas e perfil) "
+                        "ou exporte de novo como PDF/X-4 no programa de origem."
+                    ),
+                )
+            ]
+        if context.pdfx_version:
             return []
         return [
             self.issue(

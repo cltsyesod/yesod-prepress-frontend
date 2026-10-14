@@ -70,3 +70,40 @@ def test_without_ghostscript_the_analysis_goes_on(tmp_path, monkeypatch):
     monkeypatch.setattr(shutil, "which", lambda name: None)
     result = measure_inks(sample(tmp_path))
     assert result["pages"] == [] and "Ghostscript" in result["error"]
+
+
+@needs_gs
+def test_output_proof_simulates_overprint(tmp_path):
+    import io
+
+    import numpy as np
+    from PIL import Image
+
+    from app.analyzer.ink_coverage import output_proof
+
+    def left_half(path):
+        [(page, png)] = output_proof(path)
+        assert page == 1
+        image = np.asarray(Image.open(io.BytesIO(png)).convert("RGB")).astype(int)
+        h, w, _ = image.shape
+        return image[h // 4 : 3 * h // 4, w // 8 : 3 * w // 8].mean(axis=(0, 1))
+
+    plain = left_half(sample(tmp_path))
+    (tmp_path / "op").mkdir()
+    overprint = left_half(sample(tmp_path / "op", overprint=True))
+    # Ciano sobre magenta em sobreimpressão escurece o verde (o magenta continua lá).
+    assert overprint[1] < plain[1] - 20, (plain, overprint)
+
+
+@needs_gs
+def test_inspection_carries_the_proof(tmp_path):
+    import json
+
+    from app.analyzer.inspection import build_inspection
+
+    out = tmp_path / "insp.pdf"
+    build_inspection(sample(tmp_path), out, ["CutContour"])
+    with pikepdf.open(out) as pdf:
+        manifest = json.loads(pdf.attachments["objects.json"].get_file().read_bytes())
+        assert manifest["proof"] == [{"page": 1, "file": "proof-1.png"}]
+        assert "proof-1.png" in pdf.attachments

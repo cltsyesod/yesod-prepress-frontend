@@ -14,6 +14,7 @@ from app.analyzer.font_inspector import inspect_fonts
 from app.analyzer.image_inspector import inspect_images
 from app.analyzer.layer_inspector import inspect_layers
 from app.analyzer.page_inspector import inspect_pages
+from app.analyzer.pdfx_check import check_pdfx4
 from app.contracts.production_profile import ProductionProfile
 from app.core.config import Settings
 from app.core.exceptions import InvalidPdfError
@@ -114,6 +115,11 @@ def inspect_document(path: Path, profile: ProductionProfile, settings: Settings)
             layers=inspect_layers(pdf),
         )
         context.facts["spot_names"] = sorted(context.colors.spot_names)
+        # Preflight PDF/X-4 (lê o arquivo aberto; falha nunca derruba a análise).
+        try:
+            context.facts["pdfx4"] = check_pdfx4(pdf, context)
+        except Exception as exc:  # noqa: BLE001
+            context.facts["pdfx4"] = {"error": str(exc), "checks": []}
         # Correções que o próprio sistema já aplicou neste arquivo (marcador nas páginas).
         context.facts["applied_fixes"] = sorted(
             {str(item) for page in pdf.pages for item in page.obj.get("/YesodFixes", [])}
