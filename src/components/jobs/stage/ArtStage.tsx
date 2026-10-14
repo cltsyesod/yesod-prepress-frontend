@@ -105,7 +105,6 @@ export function ArtStage({
   const [whiteView, setWhiteView] = useState<WhiteView>('garment')
   const [garment, setGarment] = useState('#1f2937')
   // Placa da base branca gerada pelo sistema (vem no arquivo de inspeção).
-  const whitePlate = insp.inspection?.white?.find((w) => w.page === current)
   const whiteLayer = insp.inspection?.white?.length ? true : false
   useEffect(() => {
     if (whiteRequest && whiteLayer) setMode('white')
@@ -136,6 +135,8 @@ export function ArtStage({
 
   const pageCount = prod.pdf?.doc.numPages ?? 0
   const current = Math.min(Math.max(page, 1), pageCount || 1)
+  // Placa da base branca desta página (depois de `current`: a busca roda na hora).
+  const whitePlate = insp.inspection?.white?.find((w) => w.page === current)
   const prodPage = prod.pdf?.pages[current - 1]
   const origPage = orig.pdf?.pages[current - 1]
 
