@@ -156,8 +156,18 @@ export const jobsService = {
       .limit(300)
     if (error) throw error
     const rows = (data ?? []) as Record<string, any>[]
-    const latest = await latestAnalyses(rows.map((row) => row.id))
-    return rows.map((row) => toJob(row, latest.get(row.id) ?? null))
+    const ids = rows.map((row) => row.id)
+    // A visão não traz o perfil nem a ficha: sem eles, os módulos (gráfica × DTF/DTG) e a
+    // folha DTF não reconhecem o trabalho.
+    const [latest, extra] = await Promise.all([
+      latestAnalyses(ids),
+      ids.length
+        ? supabase.from('projects').select('id, profile_id, job_ticket').in('id', ids)
+        : Promise.resolve({ data: [], error: null }),
+    ])
+    if (extra.error) throw extra.error
+    const byId = new Map((extra.data ?? []).map((p: Record<string, any>) => [String(p.id), p]))
+    return rows.map((row) => toJob({ ...row, ...byId.get(String(row.id)) }, latest.get(row.id) ?? null))
   },
 
   /** Prazo, prioridade e responsável (gestão; não mexem na análise). */
