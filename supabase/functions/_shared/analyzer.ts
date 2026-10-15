@@ -123,6 +123,11 @@ export function toAnalyzerProfile(id: string, profile: Json, ticket: Json): Json
     finalWidthMm: positive(ticket.finalWidthMm),
     finalHeightMm: positive(ticket.finalHeightMm),
     dimensionToleranceMm: nonNegative(ticket.dimensionToleranceMm),
+    // Conferências de vetor e texto (a ficha tem prioridade).
+    minTextPt: positive(ticket.minTextPt ?? profile.minTextPt),
+    smallTextPt: positive(ticket.smallTextPt ?? profile.smallTextPt),
+    minStrokeMm: positive(ticket.minStrokeMm ?? profile.minStrokeMm),
+    maxImagePpi: positive(ticket.maxImagePpi ?? profile.maxImagePpi),
     // DTF / DTG: a ficha (ticket.textile) tem prioridade sobre o perfil.
     technology: ['dtf', 'dtg'].includes(String(profile.technology)) ? profile.technology : 'grafica',
     textile: {

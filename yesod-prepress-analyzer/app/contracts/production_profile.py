@@ -224,6 +224,21 @@ class ProductionProfile(BaseModel):
         validation_alias=AliasChoices("dimensionToleranceMm", "dimension_tolerance_mm"),
     )
 
+    # Conferências de vetor e texto (todas opcionais; vazio = a conferência pede o valor).
+    min_text_pt: float | None = Field(
+        default=None, gt=0, le=200, validation_alias=AliasChoices("minTextPt", "min_text_pt")
+    )
+    """Texto menor que isto (no tamanho final) é apontado como pequeno demais."""
+    small_text_pt: float | None = Field(
+        default=None, gt=0, le=200, validation_alias=AliasChoices("smallTextPt", "small_text_pt")
+    )
+    """Até este tamanho, texto preto deve ser só preto (K), não preto de quatro cores."""
+    min_stroke_mm: float | None = Field(
+        default=None, gt=0, le=50, validation_alias=AliasChoices("minStrokeMm", "min_stroke_mm")
+    )
+    max_image_ppi: float | None = Field(
+        default=None, gt=0, le=10000, validation_alias=AliasChoices("maxImagePpi", "max_image_ppi")
+    )
     technology: Literal["grafica", "dtf", "dtg"] = Field(
         default="grafica",
         description="grafica: impressão gráfica; dtf: filme; dtg: direto na peça.",

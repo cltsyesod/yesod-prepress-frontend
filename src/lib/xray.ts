@@ -173,16 +173,16 @@ export type SectionId =
   | 'structure'
 
 export const SECTIONS: { id: SectionId; title: string; codes: string[] }[] = [
-  { id: 'format', title: 'Formato e tamanho', codes: ['PAGE_DIMENSION_MISMATCH', 'PAGE_SIZE_INCONSISTENT'] },
+  { id: 'format', title: 'Formato e tamanho', codes: ['PAGE_DIMENSION_MISMATCH', 'PAGE_SIZE_INCONSISTENT', 'TEXT_IN_SAFETY_MARGIN'] },
   { id: 'bleed', title: 'Sangria e caixas', codes: ['PAGE_BLEED_INSUFFICIENT', 'PAGE_TRIMBOX_MISSING'] },
-  { id: 'images', title: 'Imagens', codes: ['IMAGE_LOW_RESOLUTION', 'IMAGE_RGB', 'IMAGE_TRANSPARENCY', 'IMAGE_UPSCALED'] },
+  { id: 'images', title: 'Imagens', codes: ['IMAGE_LOW_RESOLUTION', 'IMAGE_RGB', 'IMAGE_TRANSPARENCY', 'IMAGE_UPSCALED', 'IMAGE_PROFILES_MIXED', 'IMAGE_EXCESSIVE_PPI', 'ART_FLATTENED'] },
   {
     id: 'colors',
     title: 'Cores',
-    codes: ['COLOR_RGB_CONTENT', 'COLOR_SPOT_DUPLICATE', 'COLOR_SPOT_INVENTORY', 'COLOR_OUTPUT_INTENT', 'COLOR_INK_COVERAGE', 'COLOR_OUT_OF_GAMUT', 'COLOR_OUTPUT_CONDITION_MISMATCH'],
+    codes: ['COLOR_RGB_CONTENT', 'COLOR_SPOT_DUPLICATE', 'COLOR_SPOT_INVENTORY', 'COLOR_OUTPUT_INTENT', 'COLOR_INK_COVERAGE', 'COLOR_OUT_OF_GAMUT', 'COLOR_OUTPUT_CONDITION_MISMATCH', 'OBJECT_WHITE_OVERPRINT', 'OBJECT_REGISTRATION_IN_ART', 'COLOR_MIXED_SPACES'],
   },
-  { id: 'fonts', title: 'Fontes e textos', codes: ['FONT_NOT_EMBEDDED', 'FONT_PROGRAM_INVALID'] },
-  { id: 'finishing', title: 'Faca e acabamento', codes: ['FINISHING_CUT_LAYER', 'FINISHING_MAGENTA_DIE_LINE'] },
+  { id: 'fonts', title: 'Fontes, textos e traços', codes: ['FONT_NOT_EMBEDDED', 'FONT_PROGRAM_INVALID', 'TEXT_TOO_SMALL', 'TEXT_RICH_BLACK', 'STROKE_TOO_THIN'] },
+  { id: 'finishing', title: 'Faca e acabamento', codes: ['FINISHING_CUT_LAYER', 'FINISHING_MAGENTA_DIE_LINE', 'CUT_IN_IMAGE'] },
   {
     id: 'textile',
     title: 'Estampa e base branca',
@@ -197,7 +197,7 @@ export const SECTIONS: { id: SectionId; title: string; codes: string[] }[] = [
   {
     id: 'structure',
     title: 'Estrutura do PDF',
-    codes: ['FILE_PDF_SYNTAX', 'FILE_PDFIUM_RENDER', 'FILE_PDF_VERSION', 'FILE_PDFX_REQUIRED'],
+    codes: ['FILE_PDF_SYNTAX', 'FILE_PDFIUM_RENDER', 'FILE_PDF_VERSION', 'FILE_PDFX_REQUIRED', 'LAYERS_HIDDEN', 'CHECK_LIMITS_MISSING'],
   },
 ]
 

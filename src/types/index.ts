@@ -149,6 +149,11 @@ export interface ProductionProfile {
   blackConfig: string
   inkCoverageLimit: number
   minBleed: number
+  /** Conferências de vetor e texto (opcionais; vazio = o sistema pede o valor). */
+  minTextPt?: number
+  smallTextPt?: number
+  minStrokeMm?: number
+  maxImagePpi?: number
   safetyMargin: number
   scale: string
   cropMarks: boolean

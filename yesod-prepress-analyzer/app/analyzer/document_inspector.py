@@ -9,9 +9,11 @@ import pypdfium2 as pdfium
 
 from app.analyzer.alpha_inspector import inspect_alpha
 from app.analyzer.color_inspector import inspect_colors
+from app.analyzer.content_scan import scan_document
 from app.analyzer.context import DocumentContext
 from app.analyzer.font_inspector import inspect_fonts
 from app.analyzer.image_inspector import inspect_images
+from app.analyzer.inspection import object_map
 from app.analyzer.layer_inspector import inspect_layers
 from app.analyzer.page_inspector import inspect_pages
 from app.analyzer.pdfx_check import check_pdfx4
@@ -120,6 +122,22 @@ def inspect_document(path: Path, profile: ProductionProfile, settings: Settings)
             context.facts["pdfx4"] = check_pdfx4(pdf, context)
         except Exception as exc:  # noqa: BLE001
             context.facts["pdfx4"] = {"error": str(exc), "checks": []}
+        # Objeto a objeto: cor, sobreimpressão, traço e texto (conferências de vetor e cor).
+        try:
+            context.facts["scan"] = scan_document(pdf, profile.file_scale)
+        except Exception as exc:  # noqa: BLE001
+            context.facts["scan_error"] = str(exc)
+        context.facts["hidden_layers"] = _hidden_layers(pdf)
+        # Caixas reais dos textos (PDFium), para a margem de segurança.
+        try:
+            context.facts["text_objects"] = [
+                {"page": p["number"], "box": o["box"], "text": o.get("text", "")}
+                for p in object_map(path, profile.cut_layer_names, [])
+                for o in p["objects"]
+                if o["kind"] == "text"
+            ]
+        except Exception:  # noqa: BLE001
+            context.facts["text_objects"] = []
         # Correções que o próprio sistema já aplicou neste arquivo (marcador nas páginas).
         context.facts["applied_fixes"] = sorted(
             {str(item) for page in pdf.pages for item in page.obj.get("/YesodFixes", [])}
@@ -140,3 +158,13 @@ def inspect_document(path: Path, profile: ProductionProfile, settings: Settings)
         return context
     finally:
         pdf.close()
+
+
+def _hidden_layers(pdf: pikepdf.Pdf) -> list[str]:
+    """Camadas desligadas na visualização: muitos RIPs imprimem todas as camadas mesmo assim."""
+
+    try:
+        off = pdf.Root.OCProperties.D.get("/OFF", [])
+        return sorted({str(layer.get("/Name", "")) for layer in off if layer is not None})
+    except (AttributeError, KeyError, TypeError):
+        return []

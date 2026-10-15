@@ -401,6 +401,40 @@ export function ProfileFormDialog({ open, onOpenChange, initialData, onSave, sco
             </AccordionContent>
           </AccordionItem>
           )}
+          <AccordionItem value="checks">
+            <AccordionTrigger className="text-sm font-semibold">Conferências de vetor e texto</AccordionTrigger>
+            <AccordionContent className="space-y-3 pt-1">
+              <p className="text-[11px] text-muted-foreground">
+                Limites no tamanho final. Campo vazio: a conferência não roda e a análise pede o valor (nada é suposto).
+                Branco com sobreimpressão, registro na arte, faca em imagem, arte achatada, RGB × CMYK misturados e
+                camadas ocultas são conferidos sempre.
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                {(
+                  [
+                    ['minTextPt', 'Texto mínimo (pt)', 'menor que isso é ilegível'],
+                    ['smallTextPt', 'Texto pequeno em preto (pt)', 'até isso, preto só em K (não 4 cores)'],
+                    ['minStrokeMm', 'Traço mínimo (mm)', 'linha mais fina que isso pode falhar'],
+                    ['maxImagePpi', 'Resolução máxima útil (ppi)', 'acima disso só pesa o arquivo'],
+                  ] as const
+                ).map(([key, label, hint]) => (
+                  <div key={key}>
+                    <Label className={lbl}>{label}</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      step="any"
+                      placeholder="definir"
+                      value={form[key] ?? ''}
+                      onChange={(e) => update(key, e.target.value === '' ? undefined : Number(e.target.value))}
+                      className={fieldCls}
+                    />
+                    <p className="mt-0.5 text-[10px] text-muted-foreground">{hint}</p>
+                  </div>
+                ))}
+              </div>
+            </AccordionContent>
+          </AccordionItem>
           <AccordionItem value="rules">
             <AccordionTrigger className="text-sm font-semibold">Regras Técnicas</AccordionTrigger>
             <AccordionContent className="pt-1">

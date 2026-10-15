@@ -35,6 +35,9 @@ const BLEED_FIX = (mm?: number): IssueFix => ({
 
 const SRGB_FIX: IssueFix = { id: 'assign_rgb_profile', target: 'pdf', label: 'Atribuir perfil sRGB' }
 
+const client = (title: string, text: string, request: string): Solution => ({ kind: 'client', title, text, request })
+const accept = (title: string, text: string, reason: string): Solution => ({ kind: 'accept', title, text, reason })
+
 function catalogue(issue: AnalysisIssue): Solution[] {
   const font = issue.found_value
   switch (issue.rule_code) {
@@ -248,6 +251,53 @@ function catalogue(issue: AnalysisIssue): Solution[] {
         },
       ]
 
+    case 'OBJECT_WHITE_OVERPRINT':
+      return [
+        client('Pedir o branco sem sobreimpressão', 'O objeto branco some na impressão.', 'Há elementos brancos marcados com sobreimpressão (overprint) no arquivo: na impressão eles somem. Pode desmarcar a sobreimpressão desses objetos e reenviar?'),
+      ]
+    case 'OBJECT_REGISTRATION_IN_ART':
+      return [
+        client('Pedir a troca da cor de registro', 'Registro imprime todas as tintas juntas e borra.', 'Alguns elementos da arte estão na cor de registro ("All"), que imprime com todas as tintas ao mesmo tempo e borra. Pode trocá-los por preto ou pela cor certa?'),
+      ]
+    case 'TEXT_RICH_BLACK':
+      return [
+        client('Pedir texto pequeno em 100% K', 'Preto de quatro cores borra nas letras pequenas.', 'Os textos pequenos estão em preto de quatro cores e podem sair borrados. Pode deixá-los em preto puro (100% K)?'),
+        accept('Seguir assim', 'O RIP preserva o preto puro ou o texto aguenta.', 'Texto pequeno em preto composto aceito'),
+      ]
+    case 'TEXT_TOO_SMALL':
+      return [
+        client('Pedir texto maior', 'Abaixo do mínimo fica ilegível.', `Há textos menores que o mínimo para esta impressão (${issue.expected_value}). Pode aumentá-los?`),
+        accept('Aceitar o risco', 'O cliente sabe que o texto pode ficar ilegível.', 'Texto abaixo do mínimo aceito pelo cliente'),
+      ]
+    case 'STROKE_TOO_THIN':
+      return [
+        client('Pedir linhas mais grossas', 'Linhas finas demais falham ou somem.', `Há linhas finas demais (ou sem espessura definida) na arte. Pode engrossá-las (${issue.expected_value})?`),
+        accept('Aceitar o risco', 'O cliente sabe que as linhas finas podem falhar.', 'Linhas finas aceitas pelo cliente'),
+      ]
+    case 'COLOR_MIXED_SPACES':
+      return [
+        accept('Seguir e conferir na prova', 'As cores que se repetem casam na prova.', 'RGB e CMYK misturados conferidos na prova'),
+        client('Pedir a arte toda em RGB', 'Uma só fonte de cor evita dois tons da mesma cor.', 'A arte mistura elementos em RGB e em CMYK, o que pode deixar a mesma cor em dois tons. Pode enviar tudo em RGB?'),
+      ]
+    case 'ART_FLATTENED':
+      return [
+        client('Pedir o arquivo com vetores', 'Texto e logo achatados em imagem saem serrilhados.', 'O arquivo veio com a arte inteira em imagem (textos e logos não estão em vetor). Pode enviar o PDF original, com os textos e logos em vetor?'),
+        accept('Seguir assim', 'A resolução da imagem é suficiente para o tamanho.', 'Arte em imagem aceita (resolução suficiente)'),
+      ]
+    case 'CUT_IN_IMAGE':
+      return [
+        client('Pedir a faca em vetor', 'Faca em imagem não é cortada.', 'A linha de corte veio como imagem e o plotter não consegue cortá-la. Pode enviar a faca em vetor?'),
+      ]
+    case 'TEXT_IN_SAFETY_MARGIN':
+      return [
+        client('Pedir os textos afastados do corte', 'Texto colado no corte pode ser cortado.', `Há textos muito perto do corte (${issue.expected_value}). Pode afastá-los um pouco?`),
+        accept('Aceitar o risco', 'O texto pode ficar rente ao corte.', 'Texto na margem de segurança aceito'),
+      ]
+    case 'LAYERS_HIDDEN':
+      return [
+        client('Pedir o arquivo sem camadas ocultas', 'Camadas ocultas podem ser impressas pelo RIP.', 'O arquivo tem camadas ocultas que podem sair na impressão. Pode enviar só com o que deve ser impresso?'),
+        accept('Seguir assim', 'As camadas ocultas podem sair; conferido.', 'Camadas ocultas conferidas'),
+      ]
     case 'COLOR_OUT_OF_GAMUT':
       return [
         {
