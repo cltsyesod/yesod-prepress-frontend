@@ -43,7 +43,7 @@ export function InkProportions({ profile, compact = false }: { profile: FileProf
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h4 className="text-sm font-semibold text-foreground">Proporção de tintas</h4>
+        <h4 className="text-sm font-semibold text-foreground">Proporção de tintas (simulação do RIP)</h4>
         {data.pages.length > 1 && (
           <div className="flex gap-1">
             {data.pages.map((p, i) => (
@@ -105,7 +105,7 @@ export function InkProportions({ profile, compact = false }: { profile: FileProf
 
       <p className="text-xs text-muted-foreground">
         Cobertura máxima de CMYK num ponto: <b className="text-foreground">{page.maxProcessTotal.toLocaleString('pt-BR')}%</b>.
-        {' '}Separação a {data.dpi?.toLocaleString('pt-BR')} ppi, com sobreimpressão como no RIP.
+        {' '}Simulação de como o RIP separa a arte nas tintas da impressora ({data.dpi?.toLocaleString('pt-BR')} ppi, com sobreimpressão); o arquivo não é convertido e segue como está.
         {hasRgb && ' O RGB foi convertido pelo perfil padrão do separador: a proporção vale, os valores exatos dependem do RIP.'}
       </p>
     </div>

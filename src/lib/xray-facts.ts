@@ -195,13 +195,18 @@ export function factsOf(id: SectionId, p: FileProfile, bad: Tone): Fact[] {
       if (!c) return []
       return [
         {
-          label: 'Vetores e textos',
+          label: 'Vetores e textos (como vieram no arquivo)',
           value: `CMYK ${c.cmykOperators} · RGB ${c.rgbOperators} · Cinza ${c.grayOperators}`,
-          hint: 'Quantas operações de pintura usam cada espaço de cor',
+          hint: 'Como o arquivo chegou: quantas operações de pintura usam cada espaço de cor. A análise não converte nada.',
           tone: c.rgbOperators > 0 ? (t.rgbPolicy === 'cmyk_only' ? bad : 'info') : 'ok',
         },
         { label: 'RGB', value: t.rgbPolicy === 'cmyk_only' ? 'não aceito (somente CMYK)' : 'aceito: o RIP converte' },
-        { label: 'Cores especiais', value: c.spots.length ? c.spots.join(', ') : 'nenhuma' },
+        {
+          label: 'Cores especiais',
+          value: c.spots.length
+            ? c.spots.map((s) => (s === 'All' ? 'All (registro das marcas de corte)' : s)).join(', ')
+            : 'nenhuma',
+        },
         {
           label: 'Perfil de saída',
           value: c.outputIntent || 'não declarado',
