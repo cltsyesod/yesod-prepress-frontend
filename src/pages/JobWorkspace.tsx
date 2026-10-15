@@ -567,6 +567,7 @@ export default function JobWorkspacePage() {
           analysing={running}
           issues={analysis.issues}
           whiteApplied={applied('add_white_underbase')}
+          whiteInFile={(deliveredProfile?.colors?.spots ?? []).some((s) => /^(white|branco)/i.test(s) || /^(w|w1|wht)$/i.test(s))}
           sentToRipAt={job.sentToRipAt}
           busy={running || fixing}
           onGenerateWhite={() => applyFixes([{ id: 'add_white_underbase' }])}
@@ -589,6 +590,7 @@ export default function JobWorkspacePage() {
               correcting={!!correction}
               inspectionUrl={inspectionUrl || null}
               whiteRequest={whiteRequest}
+              textile={!!textileProfile}
             />
           ) : (
             <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-border text-sm text-muted-foreground">

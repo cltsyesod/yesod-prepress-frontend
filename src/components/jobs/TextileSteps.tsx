@@ -36,6 +36,7 @@ export function TextileSteps({
   analysing,
   issues,
   whiteApplied,
+  whiteInFile = false,
   sentToRipAt,
   busy,
   onGenerateWhite,
@@ -49,6 +50,8 @@ export function TextileSteps({
   analysing: boolean
   issues: AnalysisIssue[]
   whiteApplied: boolean
+  /** A arte já traz a cor especial do branco (feita fora do sistema). */
+  whiteInFile?: boolean
   sentToRipAt: string | null
   busy: boolean
   onGenerateWhite: () => void
@@ -92,11 +95,11 @@ export function TextileSteps({
   let white: Step
   if (t.whiteMode === 'rip') white = { title: 'Base branca', state: 'done', text: 'feita pelo RIP' }
   else if (lightNoWhite) white = { title: 'Base branca', state: 'done', text: 'peça clara: sem branco (perfil)' }
-  else if (whiteApplied)
+  else if (whiteApplied || whiteInFile)
     white = {
       title: 'Base branca',
       state: 'done',
-      text: 'gerada',
+      text: whiteApplied ? 'gerada' : 'já vem no arquivo',
       action: (
         <button type="button" onClick={onShowWhite} className="text-xs font-medium text-primary hover:underline">
           Ver na peça

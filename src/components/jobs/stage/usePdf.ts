@@ -162,7 +162,7 @@ export interface InspectedObject {
 export interface InspectedPage {
   number: number
   objects: InspectedObject[]
-  counts: Record<'image' | 'text' | 'path' | 'shading' | 'cut', number>
+  counts: Record<'image' | 'text' | 'path' | 'shading' | 'cut', number> & { white?: number }
   truncated: boolean
   generatedBleed: boolean
 }
@@ -178,7 +178,7 @@ export interface Inspection {
   proof: { page: number; image: HTMLImageElement }[]
 }
 
-export type Plate = 'images' | 'text' | 'vectors' | 'cut'
+export type Plate = 'images' | 'text' | 'vectors' | 'cut' | 'color' | 'white'
 
 /** Abre o arquivo de inspeção e o mapa de objetos anexado a ele. Sem arquivo: null. */
 export function useInspection(url: string | null) {

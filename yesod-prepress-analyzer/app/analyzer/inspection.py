@@ -30,7 +30,7 @@ from app.fixes.white import white_plate_png
 
 logger = logging.getLogger(__name__)
 
-PLATES = ("images", "text", "vectors", "cut")
+PLATES = ("images", "text", "vectors", "cut", "color", "white")
 MAX_OBJECTS_PER_PAGE = 3000
 _PREVIEW_PIXELS = 1600 * 1600
 _PAINT = {"S", "s", "f", "F", "f*", "B", "B*", "b", "b*"}
@@ -81,6 +81,13 @@ def _transform_box(box, m: Matrix) -> list[float]:
         xs.append(a * x + c * y + e)
         ys.append(b * x + d * y + f)
     return [round(min(xs), 2), round(min(ys), 2), round(max(xs), 2), round(max(ys), 2)]
+
+
+def _is_white(name: str) -> bool:
+    """Cor especial da base branca (DTF/DTG): White, Branco, W1…"""
+
+    key = name.casefold()
+    return key in {"w", "w1", "wht"} or key.startswith(("white", "branco"))
 
 
 def _is_cut(name: str | None, cut_names: list[str]) -> bool:
@@ -255,6 +262,8 @@ class _Plates:
         self.pdf = pdf
         self.cut_names = cut_names
         self.forms: dict[tuple, pikepdf.Object] = {}
+        self.counts: dict[str, int] = {}
+        """Objetos de faca e de branco da página atual (contados na passagem de cada placa)."""
 
     def _layer_name(self, resources, operands) -> str | None:
         if len(operands) < 2 or operands[0] != pikepdf.Name.OC:
@@ -268,33 +277,71 @@ class _Plates:
         return None
 
     def content(self, instructions, resources, plate: str, in_cut: bool) -> bytes:
+        """O conteúdo da placa: o resto vira "n" (não pinta). Acompanha a camada e a cor
+        especial em uso, para separar faca (camada ou cor de corte) e base branca."""
+
         out: list = []
-        stack: list[bool] = []
+        layers: list[bool] = []
+        saved: list[tuple] = []
         cut = in_cut
+        fill_sep = stroke_sep = None
+        spaces = resources.get("/ColorSpace") or {}
+
+        def separation(operand):
+            space = spaces.get(operand) if isinstance(operand, pikepdf.Name) else None
+            if isinstance(space, pikepdf.Array) and len(space) >= 2 and space[0] == "/Separation":
+                return str(space[1]).lstrip("/")
+            return None
+
+        def keep_paint(sep) -> bool:
+            is_cut = cut or (sep is not None and _is_cut(sep, self.cut_names))
+            is_white = sep is not None and _is_white(sep)
+            if is_cut or is_white:
+                self.count(plate, "cut" if is_cut else "white")
+            return {
+                "vectors": not is_cut and not is_white,
+                "color": not is_cut and not is_white,
+                "cut": is_cut,
+                "white": is_white and not is_cut,
+            }.get(plate, False)
+
         for item in instructions:
             if isinstance(item, pikepdf.ContentStreamInlineImage):
-                if plate == "images":
+                if plate in ("images", "color"):
                     out.append(item)
                 continue
             operands, operator = item.operands, item.operator
             op = str(operator)
             if op in {"BDC", "BMC"}:
-                stack.append(cut)
+                layers.append(cut)
                 if op == "BDC" and _is_cut(self._layer_name(resources, operands), self.cut_names):
                     cut = True
             elif op == "EMC":
-                cut = stack.pop() if stack else in_cut
+                cut = layers.pop() if layers else in_cut
+            elif op == "q":
+                saved.append((fill_sep, stroke_sep))
+            elif op == "Q" and saved:
+                fill_sep, stroke_sep = saved.pop()
+            elif op == "cs" and operands:
+                fill_sep = separation(operands[0])
+            elif op == "CS" and operands:
+                stroke_sep = separation(operands[0])
+            elif op in {"g", "rg", "k"}:
+                fill_sep = None
+            elif op in {"G", "RG", "K"}:
+                stroke_sep = None
             if op in _PAINT:
-                keep = (plate == "vectors" and not cut) or (plate == "cut" and cut)
+                sep = stroke_sep if op in {"S", "s"} else fill_sep
+                keep = keep_paint(sep)
                 out.append(
                     item if keep else pikepdf.ContentStreamInstruction([], pikepdf.Operator("n"))
                 )
                 continue
             if op == "sh":
-                if plate == "vectors" and not cut:
+                if plate in ("vectors", "color") and not cut:
                     out.append(item)
                 continue
-            if op == "Tr" and plate != "text":
+            if op == "Tr" and plate not in ("text", "color"):
                 # Text stays in the content (it may clip) but is never painted.
                 mode = int(operands[0]) if operands else 0
                 out.append(pikepdf.ContentStreamInstruction([7 if mode >= 4 else 3], operator))
@@ -302,12 +349,31 @@ class _Plates:
             if op == "Do" and operands:
                 xobject = (resources.get("/XObject") or {}).get(operands[0])
                 if xobject is not None and xobject.get("/Subtype") == pikepdf.Name.Image:
-                    if plate == "images":
+                    white = str(operands[0]) == "/YesodWhiteIm" or (
+                        bool(xobject.get("/ImageMask", False))
+                        and fill_sep is not None
+                        and _is_white(fill_sep)
+                    )
+                    space = xobject.get("/ColorSpace")
+                    if (
+                        isinstance(space, pikepdf.Array)
+                        and len(space) >= 2
+                        and space[0] == "/Separation"
+                    ):
+                        white = white or _is_white(str(space[1]).lstrip("/"))
+                    if white:
+                        self.count(plate, "white")
+                    if (plate in ("images", "color") and not white) or (plate == "white" and white):
                         out.append(item)
                     continue
             out.append(item)
         data = pikepdf.unparse_content_stream(out)
-        return (b"3 Tr\n" + data) if plate != "text" else data
+        return (b"3 Tr\n" + data) if plate not in ("text", "color") else data
+
+    def count(self, plate: str, kind: str) -> None:
+        # Conta uma vez por objeto: só na passagem da placa daquele tipo.
+        if plate == kind:
+            self.counts[kind] = self.counts.get(kind, 0) + 1
 
     def resources(self, resources, plate: str, in_cut: bool) -> pikepdf.Dictionary:
         """Shallow copy whose forms are replaced by their filtered copies."""
@@ -387,6 +453,7 @@ def build_inspection(source: Path, destination: Path, cut_names: list[str]) -> d
         ]
         out = pikepdf.Pdf.new()
         plates = _Plates(out, cut_names)
+        plate_counts: list[dict[str, int]] = []
         for page in original.pages:
             # The page's own content and resources, read once; every plate starts from them.
             try:
@@ -404,8 +471,14 @@ def build_inspection(source: Path, destination: Path, cut_names: list[str]) -> d
                 target.Resources = plates.resources(snapshot.get("/Resources"), plate, False)
                 target.Contents = out.make_stream(data)
                 out.pages.append(pikepdf.Page(out.make_indirect(target)))
+            plate_counts.append(plates.counts)
+            plates.counts = {}
         _shrink_images(out)
         pages = object_map(source, cut_names, bled)
+        # Faca pela cor de corte e base branca (o mapa do PDFium só vê a camada).
+        for info, counts in zip(pages, plate_counts, strict=False):
+            info["counts"]["cut"] = max(info["counts"].get("cut", 0), counts.get("cut", 0))
+            info["counts"]["white"] = counts.get("white", 0)
         manifest = {"version": 1, "plates": list(PLATES), "pages": pages, "white": []}
         # Base branca gerada pelo sistema: a placa vai como imagem, para a tela mostrar
         # o branco separado (no arquivo ele é invisível fora do RIP: Multiplicar).

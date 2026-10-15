@@ -8,13 +8,21 @@ const PLATE_LABEL: Record<Plate, string> = {
   text: 'Textos',
   vectors: 'Vetores',
   cut: 'Faca',
+  color: 'Cor',
+  white: 'Branco',
 }
-const PLATE_COUNT: Record<Plate, ('image' | 'text' | 'path' | 'shading' | 'cut')[]> = {
+const PLATE_COUNT: Record<Plate, ('image' | 'text' | 'path' | 'shading' | 'cut' | 'white')[]> = {
   images: ['image'],
   text: ['text'],
   vectors: ['path', 'shading'],
   cut: ['cut'],
+  color: ['image', 'text', 'path', 'shading'],
+  white: ['white'],
 }
+// Gráfica: placas por tipo de objeto. DTF/DTG: as placas de produção, de baixo para cima
+// como ficam na peça (tecido → branco → cor), e a faca por cima.
+const PRINT_PLATES: Plate[] = ['images', 'text', 'vectors', 'cut']
+const TEXTILE_PLATES: Plate[] = ['white', 'color', 'cut']
 const VIEWS = [
   { label: 'Inclinada', x: 58, z: -32 },
   { label: 'De frente', x: 0, z: 0 },
@@ -30,10 +38,13 @@ export function Layers3D({
   production,
   inspection,
   page,
+  textile = false,
 }: {
   production: LoadedPdf
   inspection: Inspection
   page: number
+  /** DTF/DTG: placas Branco · Cor · Faca em vez dos tipos de objeto. */
+  textile?: boolean
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const [area, setArea] = useState({ width: 0, height: 0 })
@@ -53,7 +64,11 @@ export function Layers3D({
 
   const view = production.pages[page - 1]?.view
   const info = inspection.pages[page - 1]
-  const plates = inspection.plates.filter((plate) => PLATE_COUNT[plate].some((kind) => (info?.counts[kind] ?? 0) > 0))
+  const wanted = textile ? TEXTILE_PLATES : PRINT_PLATES
+  const plates = wanted.filter(
+    (plate) =>
+      inspection.plates.includes(plate) && PLATE_COUNT[plate].some((kind) => ((info?.counts as Record<string, number>)?.[kind] ?? 0) > 0),
+  )
   const width = view ? view[2] - view[0] : 1
   const height = view ? view[3] - view[1] : 1
   const scale = area.width ? Math.min((area.width * 0.55) / width, (area.height * 0.5) / height) : 0
@@ -141,7 +156,7 @@ export function Layers3D({
         <div className="space-y-1.5">
           <p className="font-semibold uppercase tracking-wide text-muted-foreground">Placas</p>
           {[...plates].reverse().map((plate) => {
-            const count = PLATE_COUNT[plate].reduce((n, kind) => n + (info.counts[kind] ?? 0), 0)
+            const count = PLATE_COUNT[plate].reduce((n, kind) => n + ((info.counts as Record<string, number>)[kind] ?? 0), 0)
             return (
               <div
                 key={plate}
@@ -166,7 +181,7 @@ export function Layers3D({
           })}
           <div className="flex items-center gap-2 px-2 py-1.5 text-muted-foreground">
             <span className="h-3.5 w-3.5 rounded-sm border border-border bg-white" />
-            <span className="flex-1">Papel</span>
+            <span className="flex-1">{textile ? 'Peça (tecido)' : 'Papel'}</span>
           </div>
         </div>
 

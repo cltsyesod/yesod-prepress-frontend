@@ -146,8 +146,12 @@ def test_die_line_in_the_art_gets_no_white(tmp_path):
     page.obj.Resources = pikepdf.Dictionary(
         ColorSpace=pikepdf.Dictionary(
             CS0=pikepdf.Array(
-                [pikepdf.Name.Separation, pikepdf.Name("/CutContour"), pikepdf.Name.DeviceCMYK,
-                 tint]
+                [
+                    pikepdf.Name.Separation,
+                    pikepdf.Name("/CutContour"),
+                    pikepdf.Name.DeviceCMYK,
+                    tint,
+                ]
             )
         )
     )
@@ -173,8 +177,6 @@ def dtg(**textile):
     return ProductionProfile(
         id="g", technology="dtg", minimumResolutionDpi=254, textile={**base, **textile}
     )
-
-
 
 
 def two_squares(tmp_path):
@@ -217,3 +219,56 @@ def test_strategy_must_be_chosen_for_the_garment(tmp_path):
     prof = dtg(garmentColor="#111111")
     issue = TextileWhiteBaseRule().evaluate(context(two_squares(tmp_path), prof))[0]
     assert issue.fix is None and "peça escura" in issue.found_value
+
+
+def test_inspection_separates_colour_white_and_cut_plates(tmp_path):
+    import json
+
+    import pypdfium2 as pdfium
+
+    from app.analyzer.inspection import PLATES, build_inspection
+
+    doc = pikepdf.Pdf.new()
+    doc.add_blank_page(page_size=(100 * MM_PT, 100 * MM_PT))
+    page = doc.pages[0]
+    tint = pikepdf.Dictionary(FunctionType=2, Domain=[0, 1], C0=[0, 0, 0, 0], C1=[0, 1, 0, 0], N=1)
+    page.obj.Resources = pikepdf.Dictionary(
+        ColorSpace=pikepdf.Dictionary(
+            C=pikepdf.Array(
+                [
+                    pikepdf.Name.Separation,
+                    pikepdf.Name("/CutContour"),
+                    pikepdf.Name.DeviceCMYK,
+                    tint,
+                ]
+            )
+        )
+    )
+    x, w = 15 * MM_PT, 70 * MM_PT
+    page.contents_add(
+        (rect(25, 25, 50, 30) + f"q /C CS 1 SCN 0.5 w {x} {x} {w} {w} re S Q\n").encode()
+    )
+    src = tmp_path / "a.pdf"
+    doc.save(src)
+    white = tmp_path / "w.pdf"
+    apply_fixes(src, white, [FixRequest(id="add_white_underbase")], profile())
+    insp = tmp_path / "i.pdf"
+    build_inspection(white, insp, ["CutContour"])
+    with pikepdf.open(insp) as pdf:
+        manifest = json.loads(pdf.attachments["objects.json"].get_file().read_bytes())
+    counts = manifest["pages"][0]["counts"]
+    assert counts["white"] >= 1 and counts["cut"] >= 1
+    rendered = pdfium.PdfDocument(str(insp))
+    painted = {}
+    for index, plate in enumerate(PLATES):
+        alpha = np.asarray(
+            rendered[index]
+            .render(scale=0.5, fill_color=(255, 255, 255, 0))
+            .to_pil()
+            .convert("RGBA")
+        )[:, :, 3]
+        painted[plate] = int((alpha > 8).sum())
+    rendered.close()
+    assert painted["white"] > 0 and painted["cut"] > 0 and painted["color"] > 0
+    assert painted["images"] == 0  # a base branca não aparece como "imagem"
+    assert painted["vectors"] > 0  # a arte, sem a faca nem o branco

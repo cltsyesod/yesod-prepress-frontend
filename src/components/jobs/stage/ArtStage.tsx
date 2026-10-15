@@ -75,6 +75,7 @@ export function ArtStage({
   correcting,
   inspectionUrl,
   whiteRequest = 0,
+  textile = false,
 }: {
   production: StageFile | null
   /** Arquivo do cliente em PDF, quando difere do de produção. */
@@ -89,6 +90,8 @@ export function ArtStage({
   inspectionUrl: string | null
   /** Muda para a vista da base branca quando ela existe (cada novo número é um pedido). */
   whiteRequest?: number
+  /** Trabalho DTF/DTG: camadas 3D de produção (branco, cor, faca). */
+  textile?: boolean
 }) {
   const stageRef = useRef<HTMLDivElement>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
@@ -394,7 +397,7 @@ export function ArtStage({
           {mode === 'structure' ? (
             <StructureView production={prod.pdf} inspection={insp.inspection} page={current} fileScale={fileScale} zoom={zoom} />
           ) : (
-            <Layers3D production={prod.pdf} inspection={insp.inspection} page={current} />
+            <Layers3D production={prod.pdf} inspection={insp.inspection} page={current} textile={textile} />
           )}
         </div>
       ) : (
@@ -493,7 +496,9 @@ export function ArtStage({
             Só inspeção: nada aqui altera o arquivo.{' '}
             {mode === 'structure'
               ? 'Clique num objeto, na arte ou na lista, para ver o tamanho real e o que importa nele.'
-              : 'Cada placa é um tipo de objeto; passe o mouse no nome para destacar.'}
+              : textile
+                ? 'Como fica na peça: tecido, branco por baixo e cor por cima (no filme a impressão é ao contrário: cor e depois branco). A faca fica à parte.'
+                : 'Cada placa é um tipo de objeto; passe o mouse no nome para destacar.'}
           </span>
         ) : mode === 'diff' ? (
           <span>
