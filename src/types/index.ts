@@ -1,3 +1,4 @@
+import type { GwgVariant } from '@/domain/standards/gwg2022'
 import type { DtgTemplate } from '@/domain/dtg/placement'
 import type { ComponentType } from 'react'
 
@@ -149,6 +150,8 @@ export interface ProductionProfile {
   blackConfig: string
   inkCoverageLimit: number
   minBleed: number
+  /** Padrão de preflight GWG 2022 (Ghent Workgroup) da categoria. */
+  gwgVariant?: GwgVariant
   /** Conferências de vetor e texto (opcionais; vazio = o sistema pede o valor). */
   minTextPt?: number
   smallTextPt?: number

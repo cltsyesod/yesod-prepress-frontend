@@ -224,6 +224,11 @@ class ProductionProfile(BaseModel):
         validation_alias=AliasChoices("dimensionToleranceMm", "dimension_tolerance_mm"),
     )
 
+    gwg_variant: Literal["wide_format", "digital", "sheet", "packaging_offset"] | None = Field(
+        default=None, validation_alias=AliasChoices("gwgVariant", "gwg_variant")
+    )
+    """Padrão de preflight GWG 2022 (Ghent Workgroup) escolhido no perfil."""
+
     # Conferências de vetor e texto (todas opcionais; vazio = a conferência pede o valor).
     min_text_pt: float | None = Field(
         default=None, gt=0, le=200, validation_alias=AliasChoices("minTextPt", "min_text_pt")

@@ -387,6 +387,18 @@ function catalogue(issue: AnalysisIssue): Solution[] {
         },
       ]
     default:
+      // Regras GWG 2022: pedir ao cliente o que a regra diz, ou aceitar com o motivo.
+      if (issue.rule_code.startsWith('GWG_')) {
+        const rule = issue.title.split(' · ')[0]
+        return [
+          client(
+            'Pedir a correção ao cliente',
+            issue.recommendation,
+            `O arquivo não atende à regra ${rule} do padrão de preflight GWG 2022: ${issue.title.split(' · ')[1] ?? issue.title} (${issue.found_value}). ${issue.recommendation}`,
+          ),
+          accept('Aceitar fora do padrão', 'Segue assim, registrado como exceção à GWG.', `Exceção à ${rule} aceita`),
+        ]
+      }
       return []
   }
 }

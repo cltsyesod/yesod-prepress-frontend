@@ -30,6 +30,7 @@ import { createDefaultRules, createTextileRules } from '@/services/profileServic
 import type { ProductionProfile, ProfileTechnology, TechnicalRule, Severity } from '@/types'
 import { TextileProfileFields } from '@/components/profiles/TextileProfileFields'
 import { ColorProfileFields } from '@/components/profiles/ColorProfileFields'
+import { GWG_2022, GWG_COMMON, type GwgVariant } from '@/domain/standards/gwg2022'
 
 type FormData = Omit<ProductionProfile, 'id' | 'createdAt' | 'updatedAt'>
 
@@ -402,8 +403,53 @@ export function ProfileFormDialog({ open, onOpenChange, initialData, onSave, sco
           </AccordionItem>
           )}
           <AccordionItem value="checks">
-            <AccordionTrigger className="text-sm font-semibold">Conferências de vetor e texto</AccordionTrigger>
+            <AccordionTrigger className="text-sm font-semibold">Padrão de preflight e conferências</AccordionTrigger>
             <AccordionContent className="space-y-3 pt-1">
+              {scope !== 'textile' && (
+                <div className="space-y-2 rounded-md border border-border p-3">
+                  <Label className={lbl}>Padrão de preflight (Ghent Workgroup GWG 2022)</Label>
+                  <Select
+                    value={form.gwgVariant ?? 'none'}
+                    onValueChange={(v) => update('gwgVariant', v === 'none' ? undefined : (v as GwgVariant))}
+                  >
+                    <SelectTrigger className={fieldCls}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none" className="text-xs">
+                        Nenhum (só os limites abaixo)
+                      </SelectItem>
+                      {GWG_2022.map((g) => (
+                        <SelectItem key={g.key} value={g.key} className="text-xs">
+                          {g.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {(() => {
+                    const g = GWG_2022.find((x) => x.key === form.gwgVariant)
+                    if (!g) return null
+                    return (
+                      <div className="space-y-1 text-[11px]">
+                        <p className="text-muted-foreground">Cor: {g.binding}</p>
+                        <table className="w-full">
+                          <tbody>
+                            {[...g.values, ...GWG_COMMON.map((c) => [c, 'sempre'] as [string, string])].map(([k, v]) => (
+                              <tr key={k} className="border-t border-border/60">
+                                <td className="py-0.5 text-muted-foreground">{k}</td>
+                                <td className="py-0.5 text-right text-foreground">{v}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        <p className="text-muted-foreground">
+                          Valores dos perfis oficiais GWG 2022 (gwg.org). Cada ocorrência indica a regra GWG.
+                        </p>
+                      </div>
+                    )
+                  })()}
+                </div>
+              )}
               <p className="text-[11px] text-muted-foreground">
                 Limites no tamanho final. Campo vazio: a conferência não roda e a análise pede o valor (nada é suposto).
                 Branco com sobreimpressão, registro na arte, faca em imagem, arte achatada, RGB × CMYK misturados e

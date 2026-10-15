@@ -22,6 +22,19 @@ from app.rules.image_rules import (
     UpscaledImagesRule,
 )
 from app.rules.page_rules import BleedRule, DimensionRule, PageBoxRule, PageSizeConsistencyRule
+from app.rules.gwg_rules import (
+    GwgBlackTextOverprintRule,
+    GwgCourierRule,
+    GwgCropBoxRule,
+    GwgEarlyBindingRule,
+    GwgImageResolutionRule,
+    GwgOptionalContentRule,
+    GwgRichBlackTextRule,
+    GwgSingleImagePageRule,
+    GwgSmallTextRule,
+    GwgThinLineRule,
+    GwgWhiteOverprintRule,
+)
 from app.rules.object_rules import (
     CutInImageRule,
     ExcessiveResolutionRule,
@@ -84,6 +97,17 @@ DEFAULT_RULES: tuple[Rule, ...] = (
     HiddenLayersRule(),
     ExcessiveResolutionRule(),
     MissingLimitsRule(),
+    GwgWhiteOverprintRule(),
+    GwgBlackTextOverprintRule(),
+    GwgCourierRule(),
+    GwgRichBlackTextRule(),
+    GwgSmallTextRule(),
+    GwgThinLineRule(),
+    GwgImageResolutionRule(),
+    GwgSingleImagePageRule(),
+    GwgOptionalContentRule(),
+    GwgEarlyBindingRule(),
+    GwgCropBoxRule(),
     TextileMeasureRule(),
     TextilePrintAreaRule(),
     TextileSemiTransparencyRule(),

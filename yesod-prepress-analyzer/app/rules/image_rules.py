@@ -22,6 +22,7 @@ class ImageResolutionRule(Rule):
     """
 
     code = "IMAGE_LOW_RESOLUTION"
+    superseded_by_gwg = True
     default_severity = "warning"
 
     def evaluate(self, context: DocumentContext) -> list[AnalysisIssue]:

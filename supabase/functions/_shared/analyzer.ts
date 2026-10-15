@@ -124,6 +124,7 @@ export function toAnalyzerProfile(id: string, profile: Json, ticket: Json): Json
     finalHeightMm: positive(ticket.finalHeightMm),
     dimensionToleranceMm: nonNegative(ticket.dimensionToleranceMm),
     // Conferências de vetor e texto (a ficha tem prioridade).
+    gwgVariant: ['wide_format', 'digital', 'sheet', 'packaging_offset'].includes(String(profile.gwgVariant)) ? profile.gwgVariant : undefined,
     minTextPt: positive(ticket.minTextPt ?? profile.minTextPt),
     smallTextPt: positive(ticket.smallTextPt ?? profile.smallTextPt),
     minStrokeMm: positive(ticket.minStrokeMm ?? profile.minStrokeMm),

@@ -99,8 +99,19 @@ function withCutLayer(profile: ProductionProfile): ProductionProfile {
   }
 }
 
+// Cada perfil inicial já vem com o padrão de preflight GWG 2022 da sua categoria. Embalagem
+// fica sem: a variante GWG de embalagem exige cores já convertidas (fora do fluxo RGB).
+const SEED_GWG: Record<string, ProductionProfile['gwgVariant']> = {
+  'wp-1': 'sheet',
+  'wp-2': 'digital',
+  'wp-3': 'wide_format',
+  'wp-4': 'wide_format',
+  'wp-5': 'wide_format',
+  'wp-6': 'wide_format',
+}
+
 function createSeedProfiles(): ProductionProfile[] {
-  return [
+  return withGwg([
     make('wp-1', 'Gráfica offset', 'Perfil para impressão offset padrão', 'Offset', {
       iccProfile: 'ISO Coated v2 (ECI)',
     }),
@@ -158,8 +169,11 @@ function createSeedProfiles(): ProductionProfile[] {
       'Perfil personalizável para casos especiais',
       'Personalizado',
     ),
-  ]
+  ])
 }
+
+const withGwg = (profiles: ProductionProfile[]) =>
+  profiles.map((p) => (SEED_GWG[p.id] ? { ...p, gwgVariant: SEED_GWG[p.id] } : p))
 
 function saveProfiles(profiles: ProductionProfile[]): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(profiles))

@@ -11,9 +11,13 @@ class Rule(ABC):
     default_severity: IssueSeverity
     technologies: tuple[str, ...] = ("grafica", "dtf", "dtg")
     """Tecnologias de produção em que a regra faz sentido."""
+    superseded_by_gwg: bool = False
+    """Com uma variante GWG 2022 escolhida, a regra equivalente da GWG toma o lugar desta."""
 
     def enabled(self, context: DocumentContext) -> bool:
         if context.profile.technology not in self.technologies:
+            return False
+        if self.superseded_by_gwg and context.profile.gwg_variant:
             return False
         override = context.profile.rule_override(self.code)
         return override.enabled if override else True

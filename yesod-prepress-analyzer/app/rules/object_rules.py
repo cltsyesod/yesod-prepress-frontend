@@ -67,6 +67,7 @@ class WhiteOverprintRule(Rule):
 
     code = "OBJECT_WHITE_OVERPRINT"
     default_severity = "critical"
+    superseded_by_gwg = True
 
     @staticmethod
     def disappears(event: Event) -> bool:
@@ -143,6 +144,7 @@ class RegistrationInArtRule(Rule):
 class RichBlackTextRule(Rule):
     code = "TEXT_RICH_BLACK"
     default_severity = "warning"
+    superseded_by_gwg = True
 
     def evaluate(self, context: DocumentContext) -> list[AnalysisIssue]:
         limit = context.profile.small_text_pt
@@ -252,7 +254,7 @@ class StrokeRule(Rule):
                     continue  # faca e marcas são linhas técnicas
                 if e.width_mm == 0:
                     zero[e.page] += 1
-                elif minimum and e.width_mm < minimum:
+                elif minimum and e.width_mm < minimum and not context.profile.gwg_variant:
                     thin[e.page] += 1
                     thinnest = e.width_mm if thinnest is None else min(thinnest, e.width_mm)
         issues = []
@@ -536,9 +538,9 @@ class MissingLimitsRule(Rule):
         missing = []
         if has_text and not context.profile.min_text_pt:
             missing.append("texto mínimo (pt)")
-        if has_text and not context.profile.small_text_pt:
+        if has_text and not context.profile.small_text_pt and not context.profile.gwg_variant:
             missing.append("texto pequeno em preto (pt)")
-        if has_stroke and not context.profile.min_stroke_mm:
+        if has_stroke and not context.profile.min_stroke_mm and not context.profile.gwg_variant:
             missing.append("traço mínimo (mm)")
         if not missing:
             return []
