@@ -64,7 +64,9 @@ export function Layers3D({
 
   const view = production.pages[page - 1]?.view
   const info = inspection.pages[page - 1]
-  const wanted = textile ? TEXTILE_PLATES : PRINT_PLATES
+  // Inspeção anterior às placas de produção: mostra os tipos de objeto até reanalisar.
+  const legacy = textile && !inspection.plates.includes('color')
+  const wanted = textile && !legacy ? TEXTILE_PLATES : PRINT_PLATES
   const plates = wanted.filter(
     (plate) =>
       inspection.plates.includes(plate) && PLATE_COUNT[plate].some((kind) => ((info?.counts as Record<string, number>)?.[kind] ?? 0) > 0),
@@ -81,10 +83,11 @@ export function Layers3D({
       const out: Partial<Record<Plate | 'paper', HTMLCanvasElement>> = {}
       for (const plate of plates) {
         const index = (page - 1) * inspection.plates.length + inspection.plates.indexOf(plate) + 1
-        out[plate] = await renderPage(inspection.pdf, index, px, undefined, view, true)
+        // Uma placa que não abre não derruba as outras.
+        out[plate] = await renderPage(inspection.pdf, index, px, undefined, view, true).catch(() => undefined)
       }
       if (!cancelled) setCanvases(out)
-    })().catch(() => null)
+    })().catch(() => !cancelled && setCanvases({}))
     return () => {
       cancelled = true
     }
@@ -106,7 +109,14 @@ export function Layers3D({
     })
   }
 
-  if (!view || !info) return <p className="p-6 text-sm text-muted-foreground">Sem camadas para esta página.</p>
+  if (!view || !info || !plates.length)
+    return (
+      <p className="p-6 text-sm text-muted-foreground">
+        {legacy
+          ? 'Esta análise é anterior às placas Branco · Cor · Faca. Reanalise o trabalho para vê-las.'
+          : 'Sem camadas para esta página.'}
+      </p>
+    )
   const w = width * scale
   const h = height * scale
 
@@ -120,7 +130,7 @@ export function Layers3D({
         onPointerMove={onPointerMove}
         onPointerUp={() => (drag.current = null)}
       >
-        {!scale || !Object.keys(canvases).length ? (
+        {!scale || !plates.some((plate) => plate in canvases) ? (
           <Loader2 className="absolute left-1/2 top-1/2 h-6 w-6 -translate-x-1/2 animate-spin text-muted-foreground" />
         ) : (
           <div
@@ -205,6 +215,12 @@ export function Layers3D({
           <span className="font-semibold uppercase tracking-wide text-muted-foreground">Afastamento</span>
           <input type="range" min={0} max={160} value={gap} onChange={(e) => setGap(Number(e.target.value))} className="w-full" />
         </label>
+
+        {legacy && (
+          <p className="rounded-md bg-muted px-2 py-1.5 text-muted-foreground">
+            Análise anterior às placas Branco · Cor · Faca: reanalise o trabalho para vê-las.
+          </p>
+        )}
 
         {info.generatedBleed && (
           <p className="rounded-md bg-muted px-2 py-1.5 text-muted-foreground">
